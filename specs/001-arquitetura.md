@@ -57,6 +57,34 @@ E-mail + senha; JWT de acesso (15 min) + refresh rotativo (7 dias) em cookies ht
 - Ponto de atenção: `Centavos` (e `Pseudonimo`, quando as rotas da F3 entrarem) é declarado nos dois contratos; uma mudança num deles vale para o outro.
 - Envelope de resposta: `{ "sucesso": true, "dados": ... }` ou `{ "sucesso": false, "erro": { "codigo": "SALDO_INSUFICIENTE", "mensagem": "...", "detalhes": {...} } }`; listas paginadas incluem `meta: { total, pagina, limite }`.
 - Códigos de erro estáveis em `SCREAMING_SNAKE_CASE`, catalogados no OpenAPI; o front traduz cada código para a mensagem pt-BR (specs/012).
+- Toda rota do `openapi.yaml` declara as respostas de erro próprias e `default` com o envelope `Erro`, que cobre os casos de §Erros que a rota não lista.
+
+## Erros
+Toda exceção vira o envelope de erro de §Contratos, por um filtro global (e, para os erros que o roteador do Fastify responde antes do Nest, pelo handler `frameworkErrors`). Decisões do humano na tarefa 018: erro não tratado responde 500 `INDISPONIVEL`; 403 do framework é `PAPEL_NAO_PERMITIDO` (ADR 0022).
+
+| Origem da exceção | Status | Código | Corpo | Log |
+|---|---|---|---|---|
+| `ErroApi` lançado por um módulo | o do erro | o do erro | mensagem e `detalhes` do erro | 4xx: sem linha própria (o status aparece na linha `request completed` do Fastify, em info); 5xx: error, com stack |
+| `HttpException` do Nest ou erro do Fastify (`code` começando por `FST_ERR_`), com status 4xx | o próprio | tabela abaixo | mensagem fixa do código, sem `detalhes` | warn, só com status, código, tipo do erro e `code` interno; sem mensagem nem stack |
+| `HttpException` com status 5xx | o próprio (ex.: 503) | `INDISPONIVEL` | mensagem fixa, sem `detalhes` | error, com stack |
+| qualquer outra (erro não tratado, erro de biblioteca, inclusive com `statusCode` 4xx) | 500 | `INDISPONIVEL` | mensagem fixa, sem `detalhes` | error, com stack e `requestId` |
+
+Status 4xx do framework → código do catálogo:
+
+| Status | Casos típicos | Código |
+|---|---|---|
+| 400, 409, 413, 414, 415, 422 e qualquer 4xx não listado aqui | JSON malformado, URL malformada ou validação do Fastify (400); corpo acima do limite (413); parâmetro de rota longo demais (414); content-type não suportado (415) | `DADOS_INVALIDOS` |
+| 401 | | `NAO_AUTENTICADO` |
+| 403 | | `PAPEL_NAO_PERMITIDO` |
+| 404, 405 | rota inexistente, método não aceito | `NAO_ENCONTRADO` |
+| 429 | rate limit | `MUITAS_TENTATIVAS`, sempre com o header `Retry-After` (specs/012 usa o valor na mensagem) |
+
+Regras:
+- Só `HttpException` e erros do próprio Fastify mantêm um status 4xx. Erro de biblioteca externa (cliente da Scryfall, driver do banco, cliente Redis) nunca chega ao cliente com o status dela: o módulo o converte em `ErroApi` (ex.: 503 `CATALOGO_INDISPONIVEL`, specs/005); sem conversão, vira 500 `INDISPONIVEL`.
+- Erros de domínio com código próprio (`CSRF_INVALIDO`, `EMAIL_EM_USO`, `LOTE_ENCERRADO` etc.) saem sempre por `ErroApi`, nunca por `HttpException`.
+- A mensagem dos casos do framework é fixa por código: não reflete a URL, o corpo nem a mensagem da exceção. Nenhuma resposta de erro leva stack, SQL, parâmetros de consulta ou mensagem interna.
+- 4xx nunca é logado em error.
+- Ainda fora do envelope: as respostas do Fastify no nível do socket (`clientErrorHandler`: 400, 408, 431) e o 503 durante o encerramento (`return503OnClosing`); a tarefa 020 avalia.
 
 ## Stack (ADR 0011, 0012)
 Node 24 LTS · pnpm 12 workspaces · TypeScript 6.0.x (provisório) · NestJS 12 + `@nestjs/platform-fastify` · Socket.IO 4.8 + `@socket.io/redis-adapter` · Drizzle ORM 0.45 + drizzle-kit · Zod 4 · argon2 · `@noble/ed25519` · Pino · React 19 · Vite 8 · React Router 8 · TanStack Query 5 · Tailwind 4 · Postgres 18.6 · Redis 8.8 · Vitest 5 · Playwright 1.64 · k6.
@@ -76,4 +104,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018
+- decisions/0003 a 0013, 0015 a 0018, 0022
