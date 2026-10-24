@@ -1,0 +1,33 @@
+/*
+ * Tokens de cor (specs/012 §Comportamento, Dark mode). O tema claro fica em :root e o escuro em
+ * [data-theme="dark"]; o atributo é aplicado por public/tema-inicial.js e src/tema/.
+ * Contraste AA verificado em test/estilos/contraste.test.ts: ao mudar uma cor, rode o teste.
+ * Só hex de 6 dígitos nas variáveis --cor-*, para o teste conseguir ler.
+ */
+:root {
+  color-scheme: light;
+  --cor-fundo: #ffffff;
+  --cor-superficie: #f4f4f5;
+  --cor-texto: #18181b;
+  --cor-texto-suave: #52525b;
+  --cor-borda: #d4d4d8;
+  --cor-borda-controle: #71717a;
+  --cor-primario: #1d4ed8;
+  --cor-texto-sobre-primario: #ffffff;
+  --cor-link: #1d4ed8;
+  --cor-foco: #1d4ed8;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --cor-fundo: #0f1115;
+  --cor-superficie: #1a1d24;
+  --cor-texto: #f4f4f5;
+  --cor-texto-suave: #a1a1aa;
+  --cor-borda: #3f3f46;
+  --cor-borda-controle: #8b8b94;
+  --cor-primario: #93c5fd;
+  --cor-texto-sobre-primario: #0f1115;
+  --cor-link: #93c5fd;
+  --cor-foco: #93c5fd;
+}
