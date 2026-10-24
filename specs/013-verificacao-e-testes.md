@@ -14,6 +14,11 @@ Depende de: 001, 002
 
 Cobertura mínima de 80% (linhas e branches) nos módulos de domínio da API (`lances`, `carteira`, `lotes`, `liquidacao`, `identidade`).
 
+## Contratos
+- `pnpm contracts:lint`: Redocly CLI no `openapi.yaml` e `@asyncapi/cli validate` no `asyncapi.yaml`; sai com código ≠ 0 se houver qualquer erro.
+- `pnpm contracts:check`: regera os tipos em memória e sai com código ≠ 0 se `packages/contracts/src/gerado/` diferir do resultado.
+- Os dois rodam no CI e no `verify:full`.
+
 ## Dois níveis de verificação (ADR 0016)
 ### `pnpm verify:quick` (padrão)
 - Considera só o que mudou desde `git merge-base HEAD main`: commits, alterações e arquivos novos.
