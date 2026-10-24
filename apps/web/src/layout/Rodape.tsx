@@ -12,8 +12,7 @@ export function Rodape() {
           da Wizards of the Coast. © Wizards of the Coast LLC.
         </p>
         <p>
-          Dados e imagens das cartas: <a href="https://scryfall.com">Scryfall</a>. Saldos e lances
-          são simulados.
+          Dados e imagens das cartas: <a href="https://scryfall.com">Scryfall</a>.
         </p>
       </div>
     </footer>
