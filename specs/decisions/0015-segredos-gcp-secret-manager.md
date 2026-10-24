@@ -1,6 +1,6 @@
 # 0015 — Segredos no GCP Secret Manager
 
-Status: Substituída por 0023
+Status: substituída por 0023 (entrega dos segredos em arquivo, formatos e origem das variáveis não secretas: ver 0023-segredos-em-arquivo-e-formatos.md)
 Data: 2026-10-24
 
 ## Contexto

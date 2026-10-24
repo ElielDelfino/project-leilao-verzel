@@ -45,7 +45,7 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 
 | Variável | Formato gerado | Usado por | Produção |
 |---|---|---|---|
-| `DB_PASSWORD` | 32 bytes aleatórios, base64url sem padding (43 caracteres); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager → `db_password` |
+| `DB_PASSWORD` | 32 bytes aleatórios, base64url canônico sem padding (43 caracteres; recodificar os bytes reproduz o texto); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager → `db_password` |
 | `REDIS_PASSWORD` | idem | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | Secret Manager → `redis_password` |
 | `JWT_SECRET` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | API: assinatura do access token (specs/003) | Secret Manager → `jwt_secret` |
 | `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
