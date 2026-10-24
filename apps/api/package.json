@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "nest start --watch --env-file ../../.env --env-file ../../.env.local",
     "build": "nest build",
     "start": "node dist/src/main.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
