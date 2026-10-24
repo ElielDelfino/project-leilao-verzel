@@ -94,7 +94,7 @@ Node 24 LTS · pnpm 12 workspaces · TypeScript 6.0.x (provisório) · NestJS 12
 - ESLint + boundaries, Prettier, tsc, Lefthook, commitlint (ADR 0001).
 - CI/CD no GitHub Actions com deploy automático na main e rollback (specs/014, ADR 0017).
 - Logs JSON, health checks, uptime externo, pg_dump diário (ADR 0018).
-- Segredos no GCP Secret Manager (ADR 0015).
+- Segredos no GCP Secret Manager, entregues à API em arquivo e lidos por `<VAR>_FILE` em produção (specs/014 §Segredos, ADR 0023, que substitui a 0015).
 
 ## Estrutura do repositório
 ```
@@ -104,4 +104,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018, 0022
+- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023

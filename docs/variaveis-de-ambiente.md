@@ -1,18 +1,19 @@
 # Variáveis de ambiente
 
-Fonte: specs/014 §Segredos e ADR 0015. Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
+Fonte: specs/014 §Segredos, specs/008 §Chaves e ADR 0023 (que substitui a 0015). Produção: [deploy.md](deploy.md). Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
 
 ## Onde cada grupo vive
 
 | Grupo | Dev | CI | Produção |
 |---|---|---|---|
 | Defaults não sensíveis (portas, imagens, limites) | `.env` (versionado) | `.env` | `.env` |
-| Segredos | `.env.local` (fora do Git), criado por `pnpm keys:generate` | GitHub Secrets | GCP Secret Manager → `/run/leilao/secrets.env` (tmpfs, 600) |
-| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | a definir (tarefa 006) | a definir (tarefa 007) |
+| Segredos | `.env.local` (fora do Git), criado por `pnpm keys:generate` | GitHub Secrets | GCP Secret Manager → um arquivo por segredo em `/run/leilao/secrets/` (tmpfs, 600, dono uid 1000), montado com Compose `secrets:`; a API lê `<VAR>_FILE` |
+| Não secretas com valor público (`SEED_DEMO_PASSWORD`) | `.env` | `.env` | `.env` |
+| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | a definir (tarefa 006) | `db_password` e `redis_password` no diretório `LEILAO_SECRETS_DIR` do `infra/docker-compose.prod.yml` (padrão `../.secrets`; na VM, `/run/leilao/secrets/`), montados com Compose `secrets:` em `/run/secrets/<nome>` (tarefa 007) |
 
 A infra local sobe com `pnpm infra:up` (= `docker compose --env-file .env --env-file .env.local up -d`).
 
-Os composes de dev não recebem senha por variável de ambiente: o Postgres e o Redis leem os arquivos de `.secrets/`, montados pelo Compose `secrets:` (bind mount somente leitura em `/run/secrets/<nome>`). Assim nenhuma senha aparece no `Config.Env`, no argv ou no healthcheck do `docker inspect`. Sem o arquivo, o `up` falha com `bind source path does not exist: .../.secrets/<nome>`; rode `pnpm keys:generate`. O `.env.local` continua com `DB_PASSWORD` e `REDIS_PASSWORD` porque a API, que roda no host em dev, lê as senhas de lá.
+Os composes de dev não recebem senha por variável de ambiente: o Postgres e o Redis leem os arquivos de `.secrets/`, montados pelo Compose `secrets:` (bind mount somente leitura em `/run/secrets/<nome>`). Assim nenhuma senha aparece no `Config.Env`, no argv ou no healthcheck do `docker inspect`. Sem o arquivo, o `up` avisa `secret file <projeto>_<nome> does not exist` e falha com `bind source path does not exist: .../.secrets/<nome>`; rode `pnpm keys:generate`. O `docker compose config --quiet` não detecta essa falta (sai 0). Sem o `.env.local`, o `pnpm infra:up` sai com `couldn't find env file: .../.env.local`. (Docker Compose 5.5.1, verificado em 2026-10-24.) O `.env.local` continua com `DB_PASSWORD` e `REDIS_PASSWORD` porque a API, que roda no host em dev, lê as senhas de lá.
 
 ## Configuração da API (não sensível)
 
@@ -33,10 +34,10 @@ A conexão é lida em partes; não existem `DATABASE_URL` nem `REDIS_URL`. Uma U
 | `POSTGRES_PORT` | inteiro de 1 a 65535 | `15432` (`.env`; é também a porta publicada pelo compose de dev) | `5432` (porta interna), no `environment:` do serviço da API |
 | `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test` | `leilao` |
 | `POSTGRES_USER` | nome do usuário | `leilao` (`.env`) | `leilao` |
-| `DB_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager |
+| `DB_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `DB_PASSWORD_FILE=/run/secrets/db_password` |
 | `REDIS_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `redis` (serviço do compose) |
 | `REDIS_PORT` | inteiro de 1 a 65535 | `16379` (`.env`; também a porta publicada) | `6379` (porta interna) |
-| `REDIS_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager |
+| `REDIS_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `REDIS_PASSWORD_FILE=/run/secrets/redis_password` |
 
 Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produção, ela está na rede do compose e usa o nome do serviço e a porta interna.
 
@@ -44,17 +45,24 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 
 | Variável | Formato gerado | Usado por | Produção |
 |---|---|---|---|
-| `DB_PASSWORD` | 32 bytes aleatórios, base64url (43 caracteres) | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager |
-| `REDIS_PASSWORD` | 32 bytes aleatórios, base64url | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | Secret Manager |
-| `JWT_SECRET` | 256 bits aleatórios, base64url | API: assinatura HS256 do access token (specs/003) | Secret Manager |
-| `PSEUDONYM_HMAC_KEY` | 256 bits aleatórios, base64url | API: pseudônimo HMAC-SHA256 do licitante (specs/008) | Secret Manager |
-| `ED25519_PRIVATE_KEY` | chave secreta Ed25519 de 32 bytes (seed RFC 8032, gerada com `@noble/ed25519`), base64url | API: assinatura dos lances e do selo (specs/008) | Secret Manager |
-| `ED25519_KEY_ID` | 16 caracteres hex: início do SHA-256 da chave pública | API: coluna `key_id` e `GET /api/auditoria/chaves` (specs/008) | a definir (não é segredo) |
-| `SEED_DEMO_PASSWORD` | 15 bytes aleatórios, base64url (20 caracteres; regra de 10 a 128 de specs/003) | seed das contas demo (specs/003 RF-03) | a definir (publicada no README) |
+| `DB_PASSWORD` | 32 bytes aleatórios, base64url canônico sem padding (43 caracteres; recodificar os bytes reproduz o texto); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager → `db_password` |
+| `REDIS_PASSWORD` | idem | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | Secret Manager → `redis_password` |
+| `JWT_SECRET` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | API: assinatura do access token (specs/003) | Secret Manager → `jwt_secret` |
+| `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
+| `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5, gerada com `@noble/ed25519`), base64url sem padding (43 caracteres) | API: assinatura dos lances e do selo (specs/008 §Chaves) | Secret Manager → `ed25519_private_key` |
+
+Variáveis que o `pnpm keys:generate` ainda gera e que saem dele pela ADR 0023 (pedido ao infra):
+
+- `ED25519_KEY_ID`: deixa de existir. A API deriva o `keyId` da chave pública: 16 primeiros caracteres hex minúsculos de SHA-256 dos 32 bytes dela (specs/008 §Chaves, com vetor de teste).
+- `SEED_DEMO_PASSWORD`: não é segredo. Vai para o `.env` versionado, com o mesmo valor em dev, CI e produção (valor `leilao-demo-2026`, decidido na ADR 0023; 10 a 128 caracteres `A–Z a–z 0–9 - _`, specs/003 RF-03), e é publicada no README. Um `.env.local` antigo que ainda tenha essas linhas sobrescreve o `.env` em dev: apague-as.
 
 Base64url (RFC 4648 §5) usa só `A–Z a–z 0–9 - _`, então nenhum valor precisa de aspas no `.env` nem de escape no compose ou numa URL de conexão. O entrypoint do Redis recusa uma senha fora desse conjunto (uma quebra de linha injetaria diretivas no `redis.conf`) e sai com erro, sem exibir o valor.
 
 A chave pública não é gravada: a API a deriva de `ED25519_PRIVATE_KEY`.
+
+## `<VAR>` ou `<VAR>_FILE` (specs/014 §Segredos)
+
+Para cada um dos 5 segredos, a API, o runner de migrations e o seed leem exatamente uma de `<VAR>` (o valor; dev e CI) ou `<VAR>_FILE` (caminho do arquivo com o valor; produção, `/run/secrets/<nome>`). Não sobem com as duas, sem nenhuma, com arquivo ausente ou ilegível, com valor fora do formato acima ou com quebra de linha no fim do arquivo; a mensagem cita só o nome da variável. Os arquivos de `.secrets/` e de `/run/leilao/secrets/` são gravados sem quebra de linha.
 
 ## `pnpm keys:generate`
 
