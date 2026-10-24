@@ -9,7 +9,7 @@ import tseslint from 'typescript-eslint';
 
 const ROOT = resolve(import.meta.dirname);
 
-// Módulos da API (specs/001 §Módulos da API, ADR 0003). Cada um em apps/api/src/modules/<nome>/,
+// Módulos da API (specs/001 §Módulos da API, ADR 0003): cada um em apps/api/src/modules/<nome>/,
 // com a interface pública em index.ts.
 const MODULOS_API = [
   'identidade',
@@ -21,7 +21,7 @@ const MODULOS_API = [
   'liquidacao',
 ];
 
-// Ordem de dependência permitida (specs/001). Módulos fora desta tabela não importam nenhum outro;
+// Ordem de dependência permitida (specs/001). Módulo ausente desta tabela não importa nenhum outro;
 // tempo-real só consome eventos de domínio. Ciclos são proibidos.
 const DEPENDENCIAS_PERMITIDAS = {
   lances: ['lotes', 'carteira', 'catalogo', 'identidade'],
@@ -30,17 +30,15 @@ const DEPENDENCIAS_PERMITIDAS = {
 
 const INTERFACE_PUBLICA = 'index.ts';
 
+const elementosDaApi = [
+  ...MODULOS_API.map((nome) => ({ type: nome, pattern: `apps/api/src/modules/${nome}` })),
+  // Pasta em modules/ que não está em specs/001: não importa nem é importada por nenhum módulo.
+  { type: 'modulo-nao-catalogado', pattern: 'apps/api/src/modules/*' },
+];
+
 const politicasDosModulos = Object.entries(DEPENDENCIAS_PERMITIDAS).map(([origem, destinos]) => ({
-  from: { element: { type: 'modulo-api', captured: { nome: origem } } },
-  allow: {
-    to: {
-      element: {
-        type: 'modulo-api',
-        captured: { nome: destinos.join('|') },
-        fileInternalPath: INTERFACE_PUBLICA,
-      },
-    },
-  },
+  from: { element: { type: origem } },
+  allow: { to: { element: { type: destinos, fileInternalPath: INTERFACE_PUBLICA } } },
 }));
 
 export default defineConfig([
@@ -71,25 +69,15 @@ export default defineConfig([
     plugins: { boundaries },
     settings: {
       'boundaries/root-path': ROOT,
-      'boundaries/elements': [
-        { type: 'modulo-api', pattern: 'apps/api/src/modules/*', capture: ['nome'] },
-      ],
+      'boundaries/elements': elementosDaApi,
       'import/resolver': {
         typescript: { alwaysTryTypes: true },
       },
     },
     rules: {
       // Entre módulos: só o que está em DEPENDENCIAS_PERMITIDAS e só pela interface pública.
-      // Imports dentro do mesmo módulo, de código fora dos módulos e de pacotes externos não são afetados.
-      'boundaries/dependencies': [
-        'error',
-        {
-          default: 'disallow',
-          policies: politicasDosModulos,
-        },
-      ],
+      // Imports dentro do mesmo módulo, de código fora de modules/ e de pacotes externos não são checados.
+      'boundaries/dependencies': ['error', { default: 'disallow', policies: politicasDosModulos }],
     },
   },
 ]);
-
-export { MODULOS_API };
