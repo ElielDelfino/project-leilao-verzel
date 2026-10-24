@@ -1,0 +1,15 @@
+# pnpm 12: só auth e registry são lidos do .npmrc; as demais configurações ficam aqui.
+packages:
+  - apps/*
+  - packages/*
+
+# Recusa dependências que declaram não suportar a versão do Node em uso.
+engineStrict: true
+
+# Scripts de build de dependências são bloqueados por padrão (strictDepBuilds).
+# lefthook: o postinstall instala os git hooks (pre-commit e commit-msg).
+# unrs-resolver: o binário nativo vem pela dependência opcional da plataforma; o postinstall
+# (download de fallback) não é necessário.
+allowBuilds:
+  lefthook: true
+  unrs-resolver: false

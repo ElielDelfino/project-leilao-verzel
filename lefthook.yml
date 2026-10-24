@@ -1,0 +1,16 @@
+# Git hooks (ADR 0001). Instalados pelo postinstall do pacote lefthook em `pnpm install`.
+pre-commit:
+  parallel: false
+  jobs:
+    - name: eslint
+      glob: '*.{js,mjs,cjs,ts,mts,cts,tsx}'
+      run: pnpm exec eslint --fix --no-warn-ignored {staged_files}
+      stage_fixed: true
+    - name: prettier
+      run: pnpm exec prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}

@@ -1,0 +1,22 @@
+# Gerados e dependências
+pnpm-lock.yaml
+**/dist/
+**/build/
+**/coverage/
+**/.vite/
+playwright-report/
+test-results/
+blob-report/
+
+# Fora do Git
+tasks/
+tmp/
+learning/
+.restauracao/
+
+# De outros papéis, com formatação própria: specs, contratos, agentes e markdown (spec-guardian)
+specs/
+.claude/
+eventbus/
+apps/api/openapi.yaml
+*.md

@@ -1,0 +1,38 @@
+{
+  "name": "leilao-verzel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Casa de Leilões online de cartas Magic: The Gathering (teste técnico Elite Dev Verzel)",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=12 <13"
+  },
+  "scripts": {
+    "dev": "pnpm --recursive --parallel --if-present run dev",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm --recursive --if-present run typecheck",
+    "verify:quick": "node -e \"console.error('verify:quick ainda não existe (tarefa 011)');process.exit(1)\"",
+    "verify:full": "node -e \"console.error('verify:full ainda não existe (tarefa 011)');process.exit(1)\"",
+    "db:migrate": "node -e \"console.error('db:migrate ainda não existe (tarefa 003)');process.exit(1)\"",
+    "db:seed": "node -e \"console.error('db:seed ainda não existe (tarefa 003)');process.exit(1)\"",
+    "keys:generate": "node -e \"console.error('keys:generate ainda não existe (tarefa 010)');process.exit(1)\""
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "eslint-import-resolver-typescript": "4.4.5",
+    "eslint-plugin-boundaries": "7.3.0",
+    "globals": "17.13.0",
+    "lefthook": "2.2.2",
+    "prettier": "3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "8.72.0"
+  }
+}

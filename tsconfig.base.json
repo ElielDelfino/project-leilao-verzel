@@ -1,0 +1,17 @@
+// Base estrita do monorepo (TypeScript ~6.0, ADR 0012).
+// Cada pacote estende este arquivo e define module, moduleResolution, target, lib e types.
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  }
+}
