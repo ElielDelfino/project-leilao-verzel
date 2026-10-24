@@ -1,0 +1,55 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* dark: do Tailwind segue o atributo data-theme, não a media query (a escolha manual vence). */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Utilitários a partir dos tokens: bg-fundo, text-texto, border-borda etc. */
+@theme inline {
+  --color-fundo: var(--cor-fundo);
+  --color-superficie: var(--cor-superficie);
+  --color-texto: var(--cor-texto);
+  --color-texto-suave: var(--cor-texto-suave);
+  --color-borda: var(--cor-borda);
+  --color-borda-controle: var(--cor-borda-controle);
+  --color-primario: var(--cor-primario);
+  --color-texto-sobre-primario: var(--cor-texto-sobre-primario);
+  --color-link: var(--cor-link);
+  --color-foco: var(--cor-foco);
+}
+
+@layer base {
+  body {
+    background-color: var(--cor-fundo);
+    color: var(--cor-texto);
+  }
+
+  a {
+    color: var(--cor-link);
+    text-decoration-line: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  /* Foco visível (WCAG 2.4.7) com contraste ≥ 3:1 nos dois temas (SC 1.4.11). */
+  :focus-visible {
+    outline: 3px solid var(--cor-foco);
+    outline-offset: 2px;
+  }
+
+  /* O <main> recebe foco programático ao trocar de rota; não precisa de anel. */
+  main:focus {
+    outline: none;
+  }
+
+  /* prefers-reduced-motion respeitado (specs/012). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
