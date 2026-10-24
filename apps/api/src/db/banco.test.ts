@@ -3,26 +3,20 @@
 import { randomBytes } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { type Banco, criarBanco } from './banco.js';
-import { lerConexaoDoBanco } from './conexao.js';
-import { ErroDoBanco } from './erros.js';
+import { serializarErro } from '../logger/logger.js';
+import { ambienteDeTeste } from './ambiente-de-teste.js';
+import { type Banco, converterErroDoBanco, criarBanco, ErroDoBanco } from './banco.js';
 
-const CONEXAO = lerConexaoDoBanco(process.env);
+// Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, estes testes são
+// pulados (ambiente-de-teste.ts).
+const AMBIENTE = ambienteDeTeste(process.env);
 const VALOR_SENSIVEL = 'ana@demo.local';
 
-const errosOciosos: unknown[] = [];
-let banco: Banco;
-
-beforeAll(() => {
-  banco = criarBanco({ conexao: CONEXAO, aoErroOcioso: (erro) => errosOciosos.push(erro) });
-});
-
-afterAll(async () => {
-  await banco.encerrar();
-  expect(errosOciosos).toEqual([]);
-});
+/** SQLSTATE admin_shutdown: conexão encerrada por pg_terminate_backend. */
+const SQLSTATE_CONEXAO_ENCERRADA = '57P01';
 
 async function falhaDe(promessa: Promise<unknown>): Promise<unknown> {
   try {
@@ -33,11 +27,56 @@ async function falhaDe(promessa: Promise<unknown>): Promise<unknown> {
   throw new Error('a operação deveria ter falhado');
 }
 
-describe('criarBanco', () => {
+async function encerrarConexao(pid: number): Promise<void> {
+  const cliente = new pg.Client(AMBIENTE.conexao());
+  await cliente.connect();
+  try {
+    await cliente.query('select pg_terminate_backend($1)', [pid]);
+  } finally {
+    await cliente.end();
+  }
+}
+
+async function esperarAte(condicao: () => boolean): Promise<void> {
+  await vi.waitFor(() => {
+    expect(condicao()).toBe(true);
+  });
+}
+
+class ErroDeDominio extends Error {
+  override readonly name = 'ErroDeDominio';
+}
+
+describe.skipIf(!AMBIENTE.disponivel)('criarBanco', () => {
+  const errosOciosos: unknown[] = [];
+  let banco: Banco;
+
+  beforeAll(() => {
+    banco = criarBanco({
+      conexao: AMBIENTE.conexao(),
+      aoErroOcioso: (erro) => errosOciosos.push(erro),
+    });
+  });
+
+  afterAll(async () => {
+    await banco.encerrar();
+    expect(errosOciosos).toEqual([]);
+  });
+
   it('consultar devolve o resultado da consulta', async () => {
     const resultado = await banco.consultar((db) => db.execute(sql`select 1 + 1 as soma`));
 
     expect(resultado.rows).toEqual([{ soma: 2 }]);
+  });
+
+  it('aplica os limites de sessão em cada conexão', async () => {
+    const { rows } = await banco.consultar((db) =>
+      db.execute(sql`select current_setting('statement_timeout') as statement_timeout,
+                            current_setting('lock_timeout') as lock_timeout,
+                            current_setting('idle_in_transaction_session_timeout') as ociosa`),
+    );
+
+    expect(rows).toEqual([{ statement_timeout: '10s', lock_timeout: '5s', ociosa: '15s' }]);
   });
 
   it('consultar converte o erro do driver sem o valor do parâmetro', async () => {
@@ -46,10 +85,10 @@ describe('criarBanco', () => {
     );
 
     expect(erro).toBeInstanceOf(ErroDoBanco);
-    expect((erro as ErroDoBanco).codigo).toBe('22P02');
+    expect(erro instanceof ErroDoBanco && erro.codigo).toBe('22P02');
     expect(JSON.stringify(erro)).not.toContain(VALOR_SENSIVEL);
-    expect((erro as ErroDoBanco).message).not.toContain(VALOR_SENSIVEL);
-    expect((erro as ErroDoBanco).stack).not.toContain(VALOR_SENSIVEL);
+    expect(erro instanceof Error && erro.message).not.toContain(VALOR_SENSIVEL);
+    expect(erro instanceof Error && erro.stack).not.toContain(VALOR_SENSIVEL);
   });
 
   it('transaction confirma e devolve o valor do callback', async () => {
@@ -74,7 +113,7 @@ describe('criarBanco', () => {
     );
 
     expect(erro).toBeInstanceOf(ErroDoBanco);
-    expect((erro as ErroDoBanco).message).not.toContain(VALOR_SENSIVEL);
+    expect(erro instanceof Error && erro.message).not.toContain(VALOR_SENSIVEL);
     const { rows } = await banco.consultar((db) =>
       db.execute(sql`select to_regnamespace(${esquema}) is null as desfeito`),
     );
@@ -91,5 +130,92 @@ describe('criarBanco', () => {
     );
 
     expect(erro).toBe(dominio);
+  });
+
+  it('erro de domínio com cause do driver sai com a cause convertida', async () => {
+    const erro = await falhaDe(
+      banco.transaction(async (tx) => {
+        try {
+          await tx.execute(sql`select ${VALOR_SENSIVEL}::uuid`);
+        } catch (causa: unknown) {
+          throw new ErroDeDominio('e-mail inválido', { cause: causa });
+        }
+      }),
+    );
+
+    expect(erro).toBeInstanceOf(ErroDeDominio);
+    expect(erro instanceof Error && erro.cause).toBeInstanceOf(ErroDoBanco);
+    const linhaDeLog = JSON.stringify(serializarErro(erro));
+    expect(linhaDeLog).not.toContain(VALOR_SENSIVEL);
+    expect(linhaDeLog).not.toContain('select');
+  });
+
+  it('converterErroDoBanco, exportado aqui, serve dentro do callback', async () => {
+    const codigo = await banco.transaction(async (tx) => {
+      try {
+        await tx.execute(sql`select ${VALOR_SENSIVEL}::uuid`);
+        return undefined;
+      } catch (erro: unknown) {
+        const convertido = converterErroDoBanco(erro);
+        return convertido instanceof ErroDoBanco ? convertido.codigo : 'não convertido';
+      }
+    });
+
+    // A transação ficou abortada pelo erro, mas o callback não lançou: o Drizzle tenta COMMIT,
+    // que vira ROLLBACK no Postgres. O código veio convertido.
+    expect(codigo).toBe('22P02');
+  });
+
+  it('encerrar é idempotente', async () => {
+    const outro = criarBanco({ conexao: AMBIENTE.conexao(), aoErroOcioso: () => undefined });
+    await outro.consultar((db) => db.execute(sql`select 1`));
+
+    await outro.encerrar();
+    await expect(outro.encerrar()).resolves.toBeUndefined();
+  });
+});
+
+describe.skipIf(!AMBIENTE.disponivel)('criarBanco: queda de conexão fora de consulta', () => {
+  it('conexão emprestada: avisa aoErroOcioso em vez de derrubar o processo', async () => {
+    const avisos: unknown[] = [];
+    const outro = criarBanco({ conexao: AMBIENTE.conexao(), aoErroOcioso: (e) => avisos.push(e) });
+    try {
+      await outro.consultar(async (db) => {
+        const { rows } = await db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+        await encerrarConexao(Number(rows[0]?.pid));
+        await esperarAte(() => avisos.length > 0);
+      });
+
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]).toBeInstanceOf(ErroDoBanco);
+      expect(avisos[0] instanceof ErroDoBanco && avisos[0].codigo).toBe(SQLSTATE_CONEXAO_ENCERRADA);
+    } finally {
+      await outro.encerrar();
+    }
+  });
+
+  it('conexão ociosa: avisa uma vez só, e um aoErroOcioso que lança não derruba nada', async () => {
+    let chamadas = 0;
+    const saida = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const outro = criarBanco({
+      conexao: AMBIENTE.conexao(),
+      aoErroOcioso: () => {
+        chamadas += 1;
+        throw new Error('listener quebrado');
+      },
+    });
+    try {
+      const { rows } = await outro.consultar((db) =>
+        db.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`),
+      );
+      await encerrarConexao(Number(rows[0]?.pid));
+      await esperarAte(() => chamadas > 0);
+
+      expect(chamadas).toBe(1);
+      expect(saida).toHaveBeenCalledWith(expect.stringContaining('aoErroOcioso lançou Error'));
+    } finally {
+      saida.mockRestore();
+      await outro.encerrar();
+    }
   });
 });

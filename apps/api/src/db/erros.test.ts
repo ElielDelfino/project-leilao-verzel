@@ -5,7 +5,7 @@ import { DatabaseError } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import { serializarErro } from '../logger/logger.js';
-import { converterErroDoBanco, ErroDoBanco } from './erros.js';
+import { converterErroDoBanco, ErroDoBanco, paraErroDoBanco } from './erros.js';
 
 const EMAIL = 'ana@demo.local';
 const CONSULTA = 'insert into "users" ("email") values ($1)';
@@ -95,5 +95,82 @@ describe('converterErroDoBanco', () => {
     expect(linhaDeLog).not.toContain(EMAIL);
     expect(linhaDeLog).not.toContain('insert into');
     expect(linhaDeLog).toContain('23505');
+  });
+});
+
+class ErroDeDominio extends Error {
+  override readonly name = 'ErroDeDominio';
+  readonly codigoDeDominio = 'EMAIL_EM_USO';
+}
+
+function semValoresDaConsulta(texto: string): void {
+  expect(texto).not.toContain(EMAIL);
+  expect(texto).not.toContain('insert into');
+  expect(texto).not.toContain('Failed query');
+}
+
+describe('converterErroDoBanco na cadeia de cause', () => {
+  it('troca o DrizzleQueryError na cause por ErroDoBanco, numa cópia do erro de domínio', () => {
+    const causa = new DrizzleQueryError(CONSULTA, [EMAIL], violacaoDeUnicidade());
+    const original = new ErroDeDominio('e-mail já cadastrado', { cause: causa });
+
+    const convertido = converterErroDoBanco(original) as ErroDeDominio;
+
+    expect(convertido).not.toBe(original);
+    expect(convertido).toBeInstanceOf(ErroDeDominio);
+    expect(convertido.name).toBe('ErroDeDominio');
+    expect(convertido.message).toBe('e-mail já cadastrado');
+    expect(convertido.codigoDeDominio).toBe('EMAIL_EM_USO');
+    expect(convertido.stack).toBe(original.stack);
+    expect(convertido.cause).toBeInstanceOf(ErroDoBanco);
+    expect((convertido.cause as ErroDoBanco).restricao).toBe('users_email_key');
+    // O original não muda.
+    expect(original.cause).toBe(causa);
+    semValoresDaConsulta(convertido.message);
+    semValoresDaConsulta(convertido.stack ?? '');
+    semValoresDaConsulta(JSON.stringify(convertido));
+    semValoresDaConsulta(JSON.stringify(serializarErro(convertido)));
+  });
+
+  it('percorre causas aninhadas e o DatabaseError cru', () => {
+    const meio = new Error('falha ao cadastrar', { cause: violacaoDeUnicidade() });
+    const topo = new ErroDeDominio('cadastro recusado', { cause: meio });
+
+    const convertido = converterErroDoBanco(topo) as ErroDeDominio;
+
+    const convertidoMeio = convertido.cause as Error;
+    expect(convertidoMeio).not.toBe(meio);
+    expect(convertidoMeio.message).toBe('falha ao cadastrar');
+    expect(convertidoMeio.cause).toBeInstanceOf(ErroDoBanco);
+    semValoresDaConsulta(JSON.stringify(serializarErro(convertido)));
+    expect(JSON.stringify(serializarErro(convertido))).not.toContain('already exists');
+  });
+
+  it('devolve o mesmo erro quando a cadeia não tem erro do banco', () => {
+    const original = new ErroDeDominio('saldo', { cause: new Error('interno') });
+
+    expect(converterErroDoBanco(original)).toBe(original);
+  });
+
+  it('paraErroDoBanco transforma falha de conexão crua em ErroDoBanco só com o código', () => {
+    const falha = Object.assign(new Error('Connection terminated unexpectedly'), {
+      code: 'ECONNRESET',
+      client: { senha: EMAIL },
+    });
+
+    const convertido = paraErroDoBanco(falha);
+
+    expect(convertido).toBeInstanceOf(ErroDoBanco);
+    expect(convertido.codigo).toBe('ECONNRESET');
+    expect(JSON.stringify(serializarErro(convertido))).not.toContain(EMAIL);
+    expect(paraErroDoBanco(violacaoDeUnicidade()).codigo).toBe('23505');
+  });
+
+  it('não entra em laço com cause circular', () => {
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    Object.defineProperty(a, 'cause', { value: b, enumerable: false, configurable: true });
+
+    expect(converterErroDoBanco(b)).toBe(b);
   });
 });

@@ -3,18 +3,23 @@
 import { randomBytes } from 'node:crypto';
 
 import { sql } from 'drizzle-orm';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { ErroDeConfiguracao } from '../config/env.js';
-import { lerConexaoDoBanco } from './conexao.js';
+import { serializarErro } from '../logger/logger.js';
+import { ambienteDeTeste } from './ambiente-de-teste.js';
+import { ErroDeConfiguracaoDoBanco } from './conexao.js';
+import { ErroDoBanco } from './erros.js';
 import { descreverFalha, ErroNaEtapa, ETAPAS, type EtapaDoSeed, semear } from './seed.js';
 
-const CONEXAO = lerConexaoDoBanco(process.env);
+// Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
+// são pulados (ambiente-de-teste.ts).
+const AMBIENTE = ambienteDeTeste(process.env);
 const VALOR_SENSIVEL = 'ana@demo.local';
 
 async function esquemaExiste(nome: string): Promise<boolean> {
-  const cliente = new pg.Client(CONEXAO);
+  const cliente = new pg.Client(AMBIENTE.conexao());
   await cliente.connect();
   try {
     const { rows } = await cliente.query<{ existe: boolean }>(
@@ -27,10 +32,36 @@ async function esquemaExiste(nome: string): Promise<boolean> {
   }
 }
 
-describe('semear', () => {
+describe('ErroNaEtapa e descreverFalha (sem banco)', () => {
+  it('a cause do ErroNaEtapa já vem convertida, sem SQL nem valores', () => {
+    const cru = new DrizzleQueryError('insert into users values ($1)', [VALOR_SENSIVEL]);
+
+    const erro = new ErroNaEtapa('contas demo', cru);
+
+    expect(erro.cause).toBeInstanceOf(ErroDoBanco);
+    const linhaDeLog = JSON.stringify(serializarErro(erro));
+    expect(linhaDeLog).not.toContain(VALOR_SENSIVEL);
+    expect(linhaDeLog).not.toContain('insert into');
+    expect(descreverFalha(erro)).toBe('etapa "contas demo" falhou: SQLSTATE ?');
+  });
+
+  it('descreve a falha de configuração só com os nomes das variáveis', () => {
+    const erro = new ErroDeConfiguracaoDoBanco(['DB_PASSWORD']);
+
+    expect(descreverFalha(erro)).toBe(
+      'Conexão com o Postgres: variáveis ausentes ou inválidas: DB_PASSWORD',
+    );
+  });
+
+  it('erro fora de etapa: só o nome, nunca a mensagem', () => {
+    expect(descreverFalha(new Error(`falhou com ${VALOR_SENSIVEL}`))).toBe('Error');
+  });
+});
+
+describe.skipIf(!AMBIENTE.disponivel)('semear (com Postgres)', () => {
   it('sem etapas registradas, não faz nada', async () => {
     expect(ETAPAS).toEqual([]);
-    expect(await semear(CONEXAO, ETAPAS, {})).toEqual([]);
+    expect(await semear(AMBIENTE.conexao(), ETAPAS, {})).toEqual([]);
   });
 
   it('roda as etapas em ordem e repassa o env', async () => {
@@ -43,7 +74,9 @@ describe('semear', () => {
       },
     });
 
-    const executadas = await semear(CONEXAO, [etapa('a'), etapa('b')], { SEED_DEMO_PASSWORD: 'x' });
+    const executadas = await semear(AMBIENTE.conexao(), [etapa('a'), etapa('b')], {
+      SEED_DEMO_PASSWORD: 'x',
+    });
 
     expect(executadas).toEqual(['a', 'b']);
     expect(vistos).toEqual(['x', 'x']);
@@ -64,21 +97,14 @@ describe('semear', () => {
       },
     };
 
-    const erro = await semear(CONEXAO, [cria, falha], {}).catch((e: unknown) => e);
+    const erro = await semear(AMBIENTE.conexao(), [cria, falha], {}).catch((e: unknown) => e);
 
     expect(erro).toBeInstanceOf(ErroNaEtapa);
-    expect((erro as ErroNaEtapa).etapa).toBe('falha');
+    expect(erro instanceof ErroNaEtapa && erro.etapa).toBe('falha');
+    expect(erro instanceof ErroNaEtapa && erro.cause).toBeInstanceOf(ErroDoBanco);
     expect(await esquemaExiste(esquema)).toBe(false);
     const descricao = descreverFalha(erro);
     expect(descricao).toBe('etapa "falha" falhou: SQLSTATE 22P02');
-    expect(descricao).not.toContain(VALOR_SENSIVEL);
-  });
-
-  it('descreve a falha de configuração só com os nomes das variáveis', () => {
-    const erro = new ErroDeConfiguracao(
-      'Conexão com o Postgres: variáveis ausentes ou inválidas: DB_PASSWORD',
-    );
-
-    expect(descreverFalha(erro)).toBe(erro.message);
+    expect(JSON.stringify(serializarErro(erro))).not.toContain(VALOR_SENSIVEL);
   });
 });

@@ -11,13 +11,16 @@ CREATE TYPE "public"."papel_usuario" AS ENUM('leiloeiro', 'licitante');--> state
 CREATE TYPE "public"."status_lote" AS ENUM('agendado', 'ao_vivo', 'encerrado', 'cancelado');--> statement-breakpoint
 CREATE TYPE "public"."tipo_lancamento" AS ENUM('deposito', 'compromisso', 'liberacao', 'estorno', 'debito_arremate', 'credito_arremate');--> statement-breakpoint
 -- impedir_alteracao(): função genérica dos triggers append-only (bids, lot_seals: specs/008
--- §Técnica; ledger_entries: specs/004 §Dados). Cada tabela a liga com
+-- §Técnica; ledger_entries: specs/004 §Dados). Cada uma dessas tabelas a liga com os dois:
 --   BEFORE UPDATE OR DELETE ... FOR EACH ROW EXECUTE FUNCTION public.impedir_alteracao()
--- e, se quiser barrar também o TRUNCATE, BEFORE TRUNCATE ... FOR EACH STATEMENT.
+--   BEFORE TRUNCATE ... FOR EACH STATEMENT EXECUTE FUNCTION public.impedir_alteracao()
 -- Erro: SQLSTATE 23001 (restrict_violation) com a tabela em TABLE/SCHEMA. A mensagem cita só a
 -- tabela e a operação, nunca valores da linha (OLD/NEW).
+-- search_path vazio: a função não resolve nenhum nome pelo caminho de busca de quem a dispara.
+-- Sem EXECUTE para PUBLIC: ninguém a chama fora de trigger (disparar trigger não exige EXECUTE).
 CREATE FUNCTION public.impedir_alteracao() RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   RAISE EXCEPTION 'a tabela % é append-only: % não é permitido', TG_TABLE_NAME, TG_OP
@@ -26,4 +29,5 @@ BEGIN
           SCHEMA = TG_TABLE_SCHEMA;
 END;
 $$;--> statement-breakpoint
+REVOKE EXECUTE ON FUNCTION public.impedir_alteracao() FROM PUBLIC;--> statement-breakpoint
 COMMENT ON FUNCTION public.impedir_alteracao() IS 'Trigger append-only: recusa UPDATE, DELETE e TRUNCATE com SQLSTATE 23001 (tarefa 003).';

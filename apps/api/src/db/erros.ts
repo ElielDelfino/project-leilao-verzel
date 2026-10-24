@@ -62,24 +62,78 @@ function codigoDeSistema(erro: unknown): string | undefined {
 
 const SEM_DETALHES = { restricao: undefined, tabela: undefined, coluna: undefined } as const;
 
-/**
- * Converte um erro do Drizzle ou do pg em ErroDoBanco; qualquer outro erro (de domínio,
- * TransactionRollbackError, ...) volta como está.
- */
-export function converterErroDoBanco(erro: unknown): unknown {
-  if (erro instanceof ErroDoBanco) {
-    return erro;
-  }
+/** Erro que o driver ou o Drizzle produziu e que precisa virar ErroDoBanco. */
+function ehErroDoDriver(erro: unknown): erro is DatabaseError | DrizzleQueryError {
+  return erro instanceof DatabaseError || erro instanceof DrizzleQueryError;
+}
+
+function converterErroDoDriver(erro: DatabaseError | DrizzleQueryError): ErroDoBanco {
   if (erro instanceof DatabaseError) {
     return new ErroDoBanco(dadosDoDatabaseError(erro));
   }
-  if (erro instanceof DrizzleQueryError) {
-    const causa = erro.cause;
-    return new ErroDoBanco(
-      causa instanceof DatabaseError
-        ? dadosDoDatabaseError(causa)
-        : { codigo: codigoDeSistema(causa), ...SEM_DETALHES },
-    );
+  const causa = erro.cause;
+  return new ErroDoBanco(
+    causa instanceof DatabaseError
+      ? dadosDoDatabaseError(causa)
+      : { codigo: codigoDeSistema(causa), ...SEM_DETALHES },
+  );
+}
+
+/** Cópia do erro (mesmo protótipo e propriedades próprias) com outra `cause`. */
+function copiaComCausa(erro: Error, causa: unknown): Error {
+  const copia = Object.create(Object.getPrototypeOf(erro) as object) as Error;
+  Object.defineProperties(copia, Object.getOwnPropertyDescriptors(erro));
+  // O V8 pode guardar o stack como acessor ligado ao objeto original: copia o valor.
+  if (Object.hasOwn(erro, 'stack')) {
+    Object.defineProperty(copia, 'stack', {
+      value: erro.stack,
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
   }
-  return erro;
+  Object.defineProperty(copia, 'cause', {
+    value: causa,
+    enumerable: Object.getOwnPropertyDescriptor(erro, 'cause')?.enumerable ?? false,
+    writable: true,
+    configurable: true,
+  });
+  return copia;
+}
+
+function converterCadeia(erro: unknown, vistos: WeakSet<object>): unknown {
+  if (ehErroDoDriver(erro)) {
+    return converterErroDoDriver(erro);
+  }
+  if (!(erro instanceof Error) || erro instanceof ErroDoBanco || vistos.has(erro)) {
+    return erro;
+  }
+  vistos.add(erro);
+  if (!('cause' in erro)) {
+    return erro;
+  }
+  const causa = converterCadeia(erro.cause, vistos);
+  return causa === erro.cause ? erro : copiaComCausa(erro, causa);
+}
+
+/**
+ * Converte erros do Drizzle (DrizzleQueryError, com SQL e parâmetros na mensagem) e do pg
+ * (DatabaseError, com valores na mensagem e no `detail`) em ErroDoBanco, também na cadeia de
+ * `cause`: um erro de domínio que embrulha um erro do driver volta como uma cópia (mesma classe,
+ * mensagem, stack e campos) com a causa convertida. O original nunca é alterado. Um erro sem
+ * nada a converter (de domínio, TransactionRollbackError, ...) volta como está, o mesmo objeto.
+ */
+export function converterErroDoBanco(erro: unknown): unknown {
+  return converterCadeia(erro, new WeakSet());
+}
+
+/**
+ * Para falhas de conexão (eventos 'error' do pg): sempre um ErroDoBanco, só com o código. O
+ * erro cru do pg-pool leva o próprio Client em `err.client`, que não deve chegar ao log.
+ */
+export function paraErroDoBanco(erro: unknown): ErroDoBanco {
+  const convertido = converterErroDoBanco(erro);
+  return convertido instanceof ErroDoBanco
+    ? convertido
+    : new ErroDoBanco({ codigo: codigoDeSistema(erro), ...SEM_DETALHES });
 }
