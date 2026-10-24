@@ -1,5 +1,5 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { responderErroDoRoteador } from '../../../src/common/erros/erros-do-roteador.js';
 
@@ -68,17 +68,26 @@ describe('responderErroDoRoteador', () => {
     expect(erros).toHaveLength(1);
   });
 
-  it('se até o log de error lançar, ainda responde 500 INDISPONIVEL', () => {
+  it('se até o log de error lançar, responde 500 e escreve uma linha fixa no stderr', () => {
     const { resposta, enviado } = respostaEmMemoria();
     const quebrar = (): never => {
       throw new Error('logger quebrado');
     };
     const requisicao = { log: { warn: quebrar, error: quebrar } };
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
 
-    expect(() =>
-      responderErroDoRoteador(erroBadUrl(), requisicao as unknown as FastifyRequest, resposta),
-    ).not.toThrow();
+    try {
+      expect(() =>
+        responderErroDoRoteador(erroBadUrl(), requisicao as unknown as FastifyRequest, resposta),
+      ).not.toThrow();
 
-    expect(enviado.status).toBe(500);
+      expect(enviado.status).toBe(500);
+      expect(stderr).toHaveBeenCalledTimes(1);
+      const linha = JSON.parse(String(stderr.mock.calls[0]?.[0])) as Record<string, unknown>;
+      expect(linha).toMatchObject({ level: 50, msg: 'falha ao registrar erro do roteador' });
+      expect(JSON.stringify(linha)).not.toContain('%E0');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

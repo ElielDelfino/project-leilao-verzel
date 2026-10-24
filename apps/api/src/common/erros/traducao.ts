@@ -52,6 +52,12 @@ function corpoPadrao(codigo: CodigoDeErro): CorpoDoErro {
   return { codigo, mensagem: MENSAGENS[codigo] ?? 'Erro.' };
 }
 
+/** 500 INDISPONIVEL com mensagem fixa: o que o cliente recebe de qualquer erro inesperado. */
+export const FALHA_INTERNA: Traducao = Object.freeze({
+  status: HttpStatus.INTERNAL_SERVER_ERROR,
+  corpo: Object.freeze(corpoPadrao('INDISPONIVEL')),
+});
+
 function eh4xx(status: number): boolean {
   return status >= STATUS_PRIMEIRO_4XX && status < STATUS_PRIMEIRO_5XX;
 }
@@ -61,19 +67,20 @@ function eh5xx(status: number): boolean {
 }
 
 /**
- * Erro do próprio Fastify: um Error com `code` FST_ERR_* ou com o array `validation` (validação
- * de schema). Outras bibliotecas também usam `statusCode` (um cliente HTTP com o 404 ou 429 do
- * upstream, por exemplo), e esse status não pode chegar ao cliente: elas não entram aqui.
+ * Erro do próprio Fastify: um Error com `code` FST_ERR_*. A validação de schema do Fastify 5
+ * também entra por aqui: ela sempre recebe `code` (FST_ERR_VALIDATION, se o validador não deu
+ * outro) além do array `validation`, que sozinho não basta. Outras bibliotecas também usam
+ * `statusCode` (um cliente HTTP com o 404 ou 429 do upstream, por exemplo), e esse status não
+ * pode chegar ao cliente: elas não entram aqui.
  */
 function statusDoErroDoFastify(excecao: unknown): number | undefined {
   if (!(excecao instanceof Error) || !('statusCode' in excecao)) {
     return undefined;
   }
   const doFastify =
-    ('code' in excecao &&
-      typeof excecao.code === 'string' &&
-      excecao.code.startsWith(PREFIXO_DOS_ERROS_DO_FASTIFY)) ||
-    ('validation' in excecao && Array.isArray(excecao.validation));
+    'code' in excecao &&
+    typeof excecao.code === 'string' &&
+    excecao.code.startsWith(PREFIXO_DOS_ERROS_DO_FASTIFY);
   const { statusCode } = excecao;
   return doFastify && typeof statusCode === 'number' && Number.isInteger(statusCode)
     ? statusCode
@@ -90,7 +97,8 @@ function identificar(excecao: unknown): { tipo: string; codigoInterno?: string }
 
 function traduzirErroApi(excecao: ErroApi, log: LogDaRequisicao): Traducao {
   if (excecao.status >= STATUS_PRIMEIRO_5XX) {
-    log.error({ codigo: excecao.codigo, status: excecao.status }, excecao.message);
+    // `err` leva stack e cause ao log; o serializador `err` tira a PII de drivers.
+    log.error({ codigo: excecao.codigo, status: excecao.status, err: excecao }, excecao.message);
   }
   const corpo: CorpoDoErro = excecao.detalhes
     ? { codigo: excecao.codigo, mensagem: excecao.message, detalhes: excecao.detalhes }
@@ -136,5 +144,5 @@ export function traduzirExcecao(excecao: unknown, log: LogDaRequisicao): Traduca
   }
 
   log.error({ err: excecao }, 'erro não tratado');
-  return { status: HttpStatus.INTERNAL_SERVER_ERROR, corpo: corpoPadrao('INDISPONIVEL') };
+  return FALHA_INTERNA;
 }

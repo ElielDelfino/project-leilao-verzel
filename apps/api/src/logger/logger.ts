@@ -32,26 +32,61 @@ export function serializarRequisicao(requisicao: RequisicaoLogavel): RequisicaoS
  */
 const CAMPOS_COM_PII: ReadonlySet<string> = new Set(['detail', 'parameters', 'params']);
 
+/** Níveis de objeto copiados abaixo do erro; daí em diante, "[Truncated]" (sem RangeError). */
+const PROFUNDIDADE_MAXIMA = 10;
+
+/** Valores que o JSON serializa pelo próprio formato, sem chaves de PII: passam como estão. */
+function ehValorBinarioOuData(valor: object): boolean {
+  return valor instanceof Date || Buffer.isBuffer(valor) || ArrayBuffer.isView(valor);
+}
+
+/** Resultado do toJSON de um objeto, como o JSON.stringify faria; se ele lançar, um marcador. */
+function resultadoDoToJson(valor: { toJSON: () => unknown }): unknown {
+  try {
+    return valor.toJSON();
+  } catch {
+    // O log não pode cair por um toJSON quebrado; o marcador registra que havia algo ali.
+    return '[toJSON falhou]';
+  }
+}
+
+function temToJson(valor: object): valor is { toJSON: () => unknown } {
+  return 'toJSON' in valor && typeof valor.toJSON === 'function';
+}
+
 /**
- * Copia o valor sem os campos de PII, em qualquer profundidade. `ancestrais` guarda só o caminho
- * atual: um ciclo vira "[Circular]", e o mesmo objeto em dois ramos é copiado nos dois.
+ * Copia o valor sem os campos de PII, até PROFUNDIDADE_MAXIMA. `ancestrais` guarda só o caminho
+ * atual: um ciclo vira "[Circular]", e o mesmo objeto em dois ramos é copiado nos dois. Um toJSON
+ * próprio é chamado e o resultado também passa pelo filtro, para não contorná-lo.
  */
-function semCamposDePii(valor: unknown, ancestrais: WeakSet<object>): unknown {
-  // Date, Buffer e afins se serializam pelo próprio toJSON; copiar as chaves os esvaziaria.
-  if (typeof valor !== 'object' || valor === null || 'toJSON' in valor) {
+function semCamposDePii(
+  valor: unknown,
+  ancestrais: WeakSet<object>,
+  profundidade: number,
+): unknown {
+  if (typeof valor !== 'object' || valor === null || ehValorBinarioOuData(valor)) {
     return valor;
   }
   if (ancestrais.has(valor)) {
     return '[Circular]';
   }
+  if (profundidade > PROFUNDIDADE_MAXIMA) {
+    return '[Truncated]';
+  }
+  const filho = (item: unknown): unknown => semCamposDePii(item, ancestrais, profundidade + 1);
   ancestrais.add(valor);
-  const copia = Array.isArray(valor)
-    ? valor.map((item: unknown) => semCamposDePii(item, ancestrais))
-    : Object.fromEntries(
-        Object.entries(valor)
-          .filter(([chave]) => !CAMPOS_COM_PII.has(chave))
-          .map(([chave, item]) => [chave, semCamposDePii(item, ancestrais)]),
-      );
+  let copia: unknown;
+  if (temToJson(valor)) {
+    copia = filho(resultadoDoToJson(valor));
+  } else if (Array.isArray(valor)) {
+    copia = valor.map(filho);
+  } else {
+    copia = Object.fromEntries(
+      Object.entries(valor)
+        .filter(([chave]) => !CAMPOS_COM_PII.has(chave))
+        .map(([chave, item]) => [chave, filho(item)]),
+    );
+  }
   ancestrais.delete(valor);
   return copia;
 }
@@ -62,7 +97,7 @@ function semCamposDePii(valor: unknown, ancestrais: WeakSet<object>): unknown {
  */
 export function serializarErro(erro: unknown): unknown {
   const serializado = erro instanceof Error ? pino.stdSerializers.err(erro) : erro;
-  return semCamposDePii(serializado, new WeakSet());
+  return semCamposDePii(serializado, new WeakSet(), 0);
 }
 
 export function criarLogger(nivel: NivelDeLog, destino?: DestinationStream): Logger {
