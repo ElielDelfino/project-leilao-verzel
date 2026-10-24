@@ -175,6 +175,9 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@7.2.0))
+      '@noble/ed25519':
+        specifier: 3.2.0
+        version: 3.2.0
       eslint:
         specifier: 10.13.0
         version: 10.13.0(jiti@2.7.0)(supports-color@7.2.0)
@@ -394,6 +397,9 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
+
+  '@noble/ed25519@3.2.0':
+    resolution: {integrity: sha512-criDgRlnUA09hchYrTy/JUWPIEap5rZxQe6wDWzRx51oWWpDRcUpuNzlgPxDJaOK6AsW9c0wKcj3rKRv6t+bPQ==}
 
   '@simple-libs/child-process-utils@2.0.0':
     resolution: {integrity: sha512-dvNoRKLijXnD0XoJAz94pbNuB5GQgDr55UhpSPhffDkTT0Cmcqh9jSCOtwfT2d4H6MI9E7c4SgtMuJXZ6F3c6A==}
@@ -1494,6 +1500,8 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.4
     optional: true
+
+  '@noble/ed25519@3.2.0': {}
 
   '@simple-libs/child-process-utils@2.0.0':
     dependencies:

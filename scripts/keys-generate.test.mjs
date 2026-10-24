@@ -1,0 +1,211 @@
+// Testes de `pnpm keys:generate` (task 010, specs/014 §Segredos, ADR 0015). Rodar: pnpm test:scripts
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { after, before, describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import * as ed from '@noble/ed25519';
+
+import { VARIAVEIS, gerarEnvLocal } from './keys-generate.mjs';
+
+const SCRIPT = resolve(import.meta.dirname, 'keys-generate.mjs');
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+const BYTES_256_BITS = 32;
+
+function lerEnv(caminho) {
+  const pares = readFileSync(caminho, 'utf8')
+    .split('\n')
+    .filter((linha) => linha && !linha.startsWith('#'))
+    .map((linha) => {
+      const igual = linha.indexOf('=');
+      return [linha.slice(0, igual), linha.slice(igual + 1)];
+    });
+  return Object.fromEntries(pares);
+}
+
+function bytes(valorBase64url) {
+  return Buffer.from(valorBase64url, 'base64url');
+}
+
+function rodarCli(args) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
+}
+
+describe('keys:generate', () => {
+  let dir;
+  const novoCaminho = (nome) => join(dir, nome);
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'keys-generate-'));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('cria o arquivo com as 7 variáveis da tarefa, sem valor vazio', async () => {
+    const caminho = novoCaminho('cria.env');
+
+    const resultado = await gerarEnvLocal({ caminho });
+
+    assert.equal(resultado.status, 'criado');
+    const env = lerEnv(caminho);
+    assert.deepEqual(Object.keys(env).sort(), [...VARIAVEIS].sort());
+    assert.deepEqual([...VARIAVEIS].sort(), [
+      'DB_PASSWORD',
+      'ED25519_KEY_ID',
+      'ED25519_PRIVATE_KEY',
+      'JWT_SECRET',
+      'PSEUDONYM_HMAC_KEY',
+      'REDIS_PASSWORD',
+      'SEED_DEMO_PASSWORD',
+    ]);
+    for (const nome of VARIAVEIS) assert.ok(env[nome].length > 0, `${nome} vazio`);
+  });
+
+  it('grava o arquivo com permissão 600', async () => {
+    const caminho = novoCaminho('permissao.env');
+
+    await gerarEnvLocal({ caminho });
+
+    assert.equal(statSync(caminho).mode & 0o777, 0o600);
+  });
+
+  it('gera JWT_SECRET, PSEUDONYM_HMAC_KEY e as senhas de banco com 256 bits em base64url', async () => {
+    const caminho = novoCaminho('tamanhos.env');
+
+    await gerarEnvLocal({ caminho });
+
+    const env = lerEnv(caminho);
+    for (const nome of ['JWT_SECRET', 'PSEUDONYM_HMAC_KEY', 'DB_PASSWORD', 'REDIS_PASSWORD']) {
+      assert.match(env[nome], BASE64URL, `${nome} fora de base64url`);
+      assert.equal(bytes(env[nome]).length, BYTES_256_BITS, `${nome} sem 256 bits`);
+    }
+  });
+
+  it('gera SEED_DEMO_PASSWORD dentro da regra de senha do cadastro (10 a 128 caracteres)', async () => {
+    const caminho = novoCaminho('seed.env');
+
+    await gerarEnvLocal({ caminho });
+
+    const senha = lerEnv(caminho).SEED_DEMO_PASSWORD;
+    assert.match(senha, BASE64URL);
+    assert.ok(senha.length >= 10 && senha.length <= 128, `tamanho ${senha.length}`);
+  });
+
+  it('gera uma chave Ed25519 válida e um ED25519_KEY_ID derivado da chave pública', async () => {
+    const caminho = novoCaminho('ed25519.env');
+
+    await gerarEnvLocal({ caminho });
+
+    const env = lerEnv(caminho);
+    const chavePrivada = bytes(env.ED25519_PRIVATE_KEY);
+    assert.match(env.ED25519_PRIVATE_KEY, BASE64URL);
+    assert.equal(chavePrivada.length, BYTES_256_BITS);
+    const chavePublica = await ed.getPublicKeyAsync(chavePrivada);
+    const mensagem = new TextEncoder().encode('leilao-verzel:teste');
+    const assinatura = await ed.signAsync(mensagem, chavePrivada);
+    assert.equal(await ed.verifyAsync(assinatura, mensagem, chavePublica), true);
+    const esperado = createHash('sha256').update(chavePublica).digest('hex').slice(0, 16);
+    assert.equal(env.ED25519_KEY_ID, esperado);
+  });
+
+  it('gera valores diferentes a cada arquivo novo', async () => {
+    const a = novoCaminho('aleatorio-a.env');
+    const b = novoCaminho('aleatorio-b.env');
+
+    await gerarEnvLocal({ caminho: a });
+    await gerarEnvLocal({ caminho: b });
+
+    const envA = lerEnv(a);
+    const envB = lerEnv(b);
+    for (const nome of VARIAVEIS) assert.notEqual(envA[nome], envB[nome], `${nome} repetido`);
+  });
+
+  it('rodar duas vezes sem --force não altera o arquivo', async () => {
+    const caminho = novoCaminho('duas-vezes.env');
+    await gerarEnvLocal({ caminho });
+    const antes = readFileSync(caminho);
+
+    const resultado = await gerarEnvLocal({ caminho });
+
+    assert.equal(resultado.status, 'mantido');
+    assert.deepEqual(readFileSync(caminho), antes);
+  });
+
+  it('com --force regera todos os valores e mantém a permissão 600', async () => {
+    const caminho = novoCaminho('force.env');
+    await gerarEnvLocal({ caminho });
+    const antes = lerEnv(caminho);
+
+    const resultado = await gerarEnvLocal({ caminho, forcar: true });
+
+    assert.equal(resultado.status, 'sobrescrito');
+    const depois = lerEnv(caminho);
+    for (const nome of VARIAVEIS) assert.notEqual(depois[nome], antes[nome], `${nome} igual`);
+    assert.equal(statSync(caminho).mode & 0o777, 0o600);
+  });
+
+  it('não deixa arquivo temporário no diretório', async () => {
+    const sub = mkdtempSync(join(dir, 'limpo-'));
+    const caminho = join(sub, '.env.local');
+
+    await gerarEnvLocal({ caminho });
+    await gerarEnvLocal({ caminho, forcar: true });
+
+    assert.deepEqual(readdirSync(sub), ['.env.local']);
+  });
+
+  describe('CLI', () => {
+    it('não imprime nenhum valor ao criar, ao manter e ao sobrescrever', () => {
+      const caminho = novoCaminho('cli.env');
+      const saidas = [];
+
+      saidas.push(rodarCli(['--out', caminho]));
+      const primeiro = lerEnv(caminho);
+      saidas.push(rodarCli(['--out', caminho]));
+      saidas.push(rodarCli(['--out', caminho, '--force']));
+      const segundo = lerEnv(caminho);
+
+      for (const saida of saidas) assert.equal(saida.status, 0, saida.stderr);
+      const terminal = saidas.map((s) => s.stdout + s.stderr).join('\n');
+      for (const env of [primeiro, segundo]) {
+        for (const nome of VARIAVEIS) {
+          assert.ok(!terminal.includes(env[nome]), `valor de ${nome} apareceu no terminal`);
+        }
+      }
+    });
+
+    it('sem --force, a segunda execução sai com 0 e não altera o arquivo', () => {
+      const caminho = novoCaminho('cli-duas-vezes.env');
+      rodarCli(['--out', caminho]);
+      const antes = readFileSync(caminho);
+
+      const saida = rodarCli(['--out', caminho]);
+
+      assert.equal(saida.status, 0);
+      assert.match(saida.stdout, /--force/);
+      assert.deepEqual(readFileSync(caminho), antes);
+    });
+
+    it('recusa argumento desconhecido sem criar o arquivo', () => {
+      const caminho = novoCaminho('cli-invalido.env');
+
+      const saida = rodarCli(['--out', caminho, '--forca']);
+
+      assert.notEqual(saida.status, 0);
+      assert.match(saida.stderr, /--forca/);
+      assert.equal(existsSync(caminho), false);
+    });
+
+    it('recusa --out sem caminho', () => {
+      const saida = rodarCli(['--out']);
+
+      assert.notEqual(saida.status, 0);
+      assert.match(saida.stderr, /--out/);
+    });
+  });
+});
