@@ -18,6 +18,21 @@ describe('ErroApi', () => {
     expect(erro.detalhes).toEqual({ campo: 'lanceMinimoCentavos' });
   });
 
+  it('detalhes são uma cópia congelada: mudar o objeto original não altera o erro', () => {
+    const detalhes: Record<string, number> = { faltamCentavos: 1500 };
+    const erro = new ErroApi({
+      codigo: 'SALDO_INSUFICIENTE',
+      status: 422,
+      mensagem: 'x',
+      detalhes,
+    });
+
+    detalhes.faltamCentavos = 1;
+
+    expect(erro.detalhes).toEqual({ faltamCentavos: 1500 });
+    expect(Object.isFrozen(erro.detalhes)).toBe(true);
+  });
+
   it('detalhes ficam indefinidos quando não informados', () => {
     const erro = new ErroApi({ codigo: 'NAO_ENCONTRADO', status: 404, mensagem: 'x' });
 

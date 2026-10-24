@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  // API NestJS 12 (ESM, ADR 0011/0012). Typecheck cobre src/ e test/; o build emite em dist/src/.
+  // API NestJS 12 (ESM, ADR 0011/0012). Typecheck (--noEmit) cobre src/ e test/; o build usa o
+  // tsconfig.build.json, que emite só src/ em dist/ (dist/main.js).
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "module": "nodenext",

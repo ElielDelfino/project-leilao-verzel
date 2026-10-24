@@ -53,6 +53,7 @@ export class ErroApi extends Error {
     }
     this.codigo = dados.codigo;
     this.status = dados.status;
-    this.detalhes = dados.detalhes;
+    // Cópia congelada: quem lançou o erro não consegue mudar o que vai ao cliente depois.
+    this.detalhes = dados.detalhes ? Object.freeze({ ...dados.detalhes }) : undefined;
   }
 }
