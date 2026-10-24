@@ -26,6 +26,8 @@
 
 # Segredos e ambientes, mesmo dentro das pastas permitidas (specs/014 §Segredos, ADR 0015):
 # senhas do Compose (.secrets/), .env.local, backups .env.bak-*.local, chaves e certificados.
+# Atenção: um arquivo de código com nome id_* ou *credentials* também fica de fora (o build falha
+# com "module not found"); renomeie o arquivo em vez de afrouxar o padrão.
 **/.secrets
 **/.env
 **/.env.*
@@ -34,3 +36,8 @@
 **/*.key
 **/*.p12
 **/*.pfx
+**/*.p8
+**/*.crt
+**/*.jks
+**/id_*
+**/*credentials*

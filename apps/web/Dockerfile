@@ -42,7 +42,8 @@ USER        caddy
 EXPOSE      80/tcp
 EXPOSE      443/tcp
 STOPSIGNAL  SIGTERM
-# Site interno http://127.0.0.1:2020/saude do Caddyfile; wget é o do busybox da base.
+# Único lugar do healthcheck do Caddy (o compose não o redefine): site interno
+# http://127.0.0.1:2020/saude do Caddyfile; wget é o do busybox da base.
 HEALTHCHECK \
             --start-interval=1s \
             --start-period=20s \

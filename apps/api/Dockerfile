@@ -45,18 +45,20 @@ ENV         NODE_ENV=production \
             API_PORT=13000 \
             LOG_LEVEL=info \
             TMPDIR=/tmp
-USER        node
+# Usuário node da imagem base, por uid:gid numérico (não depende do /etc/passwd).
+USER        1000:1000
 EXPOSE      13000/tcp
 STOPSIGNAL  SIGTERM
-# /api/health/live: o processo responde. O /api/health/ready (Postgres + Redis) responde 503 até a
-# tarefa 017; trocar quando ela entrar. wget é o do busybox da base (sem pacote extra).
+# Único lugar do healthcheck da API (o compose não o redefine). Provisório: /api/health/live até a
+# tarefa 017; o /api/health/ready (Postgres + Redis) responde 503 até lá, trocar quando ela entrar.
+# Forma shell para expandir API_PORT (ENV acima ou o environment do compose); wget é o do busybox.
 HEALTHCHECK \
             --start-interval=1s \
             --start-period=20s \
             --interval=10s \
             --timeout=3s \
             --retries=3 \
-            CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13000/api/health/live"]
+            CMD wget -q -O /dev/null "http://127.0.0.1:${API_PORT}/api/health/live" || exit 1
 CMD         ["node", "dist/main.js"]
 
 LABEL       org.opencontainers.image.title="leilao-api" \

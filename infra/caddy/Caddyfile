@@ -13,6 +13,15 @@
 	servers {
 		# Sem HTTP/3: o firewall da VM libera só 80 e 443 TCP (specs/014), e o compose não publica 443/udp.
 		protocols h1 h2
+		# Cabeçalhos em até 10 s (slowloris) e conexão keep-alive ociosa por até 2 min.
+		# Sem read_body: ele vira o ReadTimeout do Go, cujo prazo continua valendo na conexão
+		# sequestrada pelo upgrade ("The returned net.Conn may have read or write deadlines already
+		# set", doc de http.Hijacker) e derrubaria o WebSocket do Socket.IO. O tamanho do corpo
+		# é limitado pelo request_body abaixo.
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
 	}
 }
 
@@ -29,26 +38,45 @@
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		# A SPA não usa câmera, microfone, localização, pagamento nem USB.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
 		-Server
 	}
 
 	# REST e Socket.IO vão para a API; o reverse_proxy do Caddy repassa o upgrade de WebSocket.
+	# Corpo de até 1 MB: a API só recebe JSON pequeno (sem upload); acima disso, 413 do Caddy.
 	handle /api/* {
+		request_body {
+			max_size 1MB
+		}
 		reverse_proxy api:{$API_PORT:13000}
 	}
 
 	handle /socket.io/* {
+		request_body {
+			max_size 1MB
+		}
 		reverse_proxy api:{$API_PORT:13000}
 	}
 
-	# SPA: arquivo existente ou fallback para index.html (rotas do React Router).
+	# Assets do Vite (nome com hash): cache longo e sem fallback. Um asset ausente responde 404,
+	# e o cache imutável só vai nas respostas 200.
+	handle /assets/* {
+		root * /srv
+		header {
+			Cache-Control "public, max-age=31536000, immutable"
+			match status 200
+		}
+		file_server
+	}
+
+	# SPA: arquivo existente ou fallback para index.html (rotas do React Router). Revalida a cada
+	# acesso, para um deploy novo não deixar o navegador com um index.html que aponta para assets
+	# apagados.
 	handle {
 		root * /srv
-		# Assets do Vite têm hash no nome: cache longo. O resto (index.html e o fallback) revalida
-		# a cada acesso, para um deploy novo não deixar o navegador com um index.html que aponta
-		# para assets apagados.
-		@assets path /assets/*
-		header @assets Cache-Control "public, max-age=31536000, immutable"
 		header ?Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
