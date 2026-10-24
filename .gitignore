@@ -13,6 +13,8 @@
 .env.*.local
 .env.prod
 secrets.env
+# Senhas em arquivo para o Compose `secrets:`, criadas por `pnpm keys:generate` (task 002)
+.secrets/
 *.pem
 *.key
 
@@ -37,7 +39,6 @@ logs/
 *.dump
 *.sql.gz
 pgdata/
-redisdata/
 
 # Editores e SO
 .DS_Store

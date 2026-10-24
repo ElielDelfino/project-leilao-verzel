@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// `pnpm keys:generate`: cria o .env.local com os segredos de desenvolvimento (task 010).
+// `pnpm keys:generate`: cria o .env.local com os segredos de desenvolvimento (task 010) e os
+// arquivos de senha que o Compose monta como `secrets:` (task 002).
 // Fonte: specs/014 §Segredos e ADR 0015 (dev usa .env.local; prod usa o GCP Secret Manager).
 // Nunca imprime valores: a saída lista só nomes de variáveis e caminhos de arquivos.
 import { spawnSync } from 'node:child_process';
@@ -8,6 +9,7 @@ import {
   chmodSync,
   linkSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -30,6 +32,8 @@ const HEX_DO_KEY_ID = 16;
 // Sufixo aleatório do backup: dois --force no mesmo milissegundo não colidem.
 const BYTES_SUFIXO_BACKUP = 3;
 const PERMISSAO_SO_DONO = 0o600;
+const PERMISSAO_DIRETORIO_SO_DONO = 0o700;
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 export const VARIAVEIS = Object.freeze([
   'DB_PASSWORD',
@@ -40,6 +44,15 @@ export const VARIAVEIS = Object.freeze([
   'ED25519_KEY_ID',
   'SEED_DEMO_PASSWORD',
 ]);
+
+// Diretório, ao lado do .env.local, com uma senha por arquivo (sem quebra de linha) para o Compose
+// `secrets:`: o Postgres lê via POSTGRES_PASSWORD_FILE e o Redis no entrypoint. Assim as senhas não
+// aparecem no `Config.Env` do `docker inspect`. O .env.local continua com os valores para a API.
+export const DIRETORIO_DE_SEGREDOS = '.secrets';
+export const SEGREDOS_EM_ARQUIVO = Object.freeze({
+  DB_PASSWORD: 'db_password',
+  REDIS_PASSWORD: 'redis_password',
+});
 
 const aleatorioBase64url = (bytes) => randomBytes(bytes).toString('base64url');
 
@@ -70,10 +83,16 @@ export function nomeTemporario(caminho) {
   return join(dirname(caminho), `.env.tmp-${process.pid}-${basename(caminho)}.local`);
 }
 
+const carimbo = (agora) => agora.toISOString().replace(/[:.]/g, '-');
+const sufixoAleatorio = () => randomBytes(BYTES_SUFIXO_BACKUP).toString('hex');
+
 export function nomeBackup(caminho, agora = new Date()) {
-  const carimbo = agora.toISOString().replace(/[:.]/g, '-');
-  const sufixo = randomBytes(BYTES_SUFIXO_BACKUP).toString('hex');
-  return join(dirname(caminho), `.env.bak-${carimbo}-${sufixo}.local`);
+  return join(dirname(caminho), `.env.bak-${carimbo(agora)}-${sufixoAleatorio()}.local`);
+}
+
+// Backup de um arquivo de .secrets/: o nome diz de qual senha é; o diretório inteiro é ignorado.
+export function nomeBackupDeSegredo(caminho, agora = new Date()) {
+  return `${caminho}.bak-${carimbo(agora)}-${sufixoAleatorio()}`;
 }
 
 function falhar(mensagem) {
@@ -96,25 +115,25 @@ function rodarGit(diretorio, args) {
 }
 
 // Versionável = dentro de uma working tree git e não ignorado (arquivo já rastreado conta como
-// versionável). Na dúvida, falha fechada.
-function versionavel(caminho) {
-  const diretorio = dirname(caminho);
-  const nome = basename(caminho);
-  const arvore = rodarGit(diretorio, ['rev-parse', '--is-inside-work-tree']);
+// versionável). O git roda a partir de `base` (diretório que existe) com o caminho relativo, então
+// funciona antes de .secrets/ existir. Na dúvida, falha fechada.
+function versionavel(base, caminho) {
+  const relativo = relative(base, caminho);
+  const arvore = rodarGit(base, ['rev-parse', '--is-inside-work-tree']);
   if (arvore.status !== 0) {
     if (/not a git repository/.test(arvore.stderr)) return false;
-    falhar(`não foi possível checar o git em ${diretorio}: ${arvore.stderr.trim()}`);
+    falhar(`não foi possível checar o git em ${base}: ${arvore.stderr.trim()}`);
   }
   if (arvore.stdout.trim() !== 'true') return false;
-  const ignorado = rodarGit(diretorio, ['check-ignore', '-q', '--', nome]);
+  const ignorado = rodarGit(base, ['check-ignore', '-q', '--', relativo]);
   if (ignorado.status === 0) return false;
   if (ignorado.status === 1) return true;
   falhar(`git check-ignore falhou para ${caminho}: ${ignorado.stderr.trim()}`);
 }
 
-function garantirNaoVersionaveis(caminhos) {
+function garantirNaoVersionaveis(base, caminhos) {
   for (const caminho of caminhos) {
-    if (versionavel(caminho)) {
+    if (versionavel(base, caminho)) {
       falhar(
         `${caminho} pode ser versionado pelo git (não é ignorado). Use um caminho fora do` +
           ' repositório ou coberto pelo .gitignore; nada foi gravado.',
@@ -134,20 +153,35 @@ function resolverDestino(caminho) {
 }
 
 // lstat, não exists: um link simbólico (mesmo pendente) conta como existente e é recusado.
-function estadoDoAlvo(caminho) {
-  let info;
+function lstatOuAusente(caminho) {
   try {
-    info = lstatSync(caminho);
+    return lstatSync(caminho);
   } catch (erro) {
-    if (erro.code === 'ENOENT') return 'ausente';
+    if (erro.code === 'ENOENT') return undefined;
     throw erro;
   }
+}
+
+function estadoDoAlvo(caminho) {
+  const info = lstatOuAusente(caminho);
+  if (!info) return 'ausente';
   if (!info.isFile()) {
     falhar(
       `${caminho} existe e não é um arquivo comum (link simbólico ou diretório); remova-o antes.`,
     );
   }
   return 'arquivo';
+}
+
+function estadoDoDiretorio(caminho) {
+  const info = lstatOuAusente(caminho);
+  if (!info) return 'ausente';
+  if (!info.isDirectory()) {
+    falhar(
+      `${caminho} existe e não é um diretório comum (link simbólico ou arquivo); remova-o antes.`,
+    );
+  }
+  return 'diretorio';
 }
 
 function gravarSoDono(caminho, conteudo) {
@@ -170,34 +204,123 @@ function gravarAtomico(caminho, temporario, conteudo, sobrescrever) {
   }
 }
 
+// Lê do .env.local existente só as senhas que viram arquivo. A mensagem de erro nunca cita valores.
+function lerSenhasDoEnv(caminho) {
+  const pares = new Map(
+    readFileSync(caminho, 'utf8')
+      .split('\n')
+      .filter((linha) => linha.includes('=') && !linha.startsWith('#'))
+      .map((linha) => [linha.slice(0, linha.indexOf('=')), linha.slice(linha.indexOf('=') + 1)]),
+  );
+  return Object.fromEntries(
+    Object.keys(SEGREDOS_EM_ARQUIVO).map((variavel) => {
+      const valor = pares.get(variavel) ?? '';
+      if (!BASE64URL.test(valor)) {
+        falhar(
+          `${caminho}: ${variavel} ausente ou fora de base64url (A-Z a-z 0-9 - _). Corrija o` +
+            ' arquivo ou regere todos os segredos com pnpm keys:generate --force.',
+        );
+      }
+      return [variavel, valor];
+    }),
+  );
+}
+
+// Decide, sem gravar, o que fazer com cada arquivo de .secrets/: criar, manter (igual ao valor) ou
+// sobrescrever (diferente; guarda o anterior em backup).
+function planejarSegredos(diretorio, valores) {
+  const diretorioExiste = estadoDoDiretorio(diretorio) === 'diretorio';
+  return Object.entries(SEGREDOS_EM_ARQUIVO).map(([variavel, arquivo]) => {
+    const caminho = join(diretorio, arquivo);
+    const conteudo = valores[variavel];
+    const existe = diretorioExiste && estadoDoAlvo(caminho) === 'arquivo';
+    if (!existe) return { variavel, caminho, conteudo, acao: 'criado' };
+    if (readFileSync(caminho, 'utf8') === conteudo) {
+      return { variavel, caminho, conteudo, acao: 'mantido' };
+    }
+    return {
+      variavel,
+      caminho,
+      conteudo,
+      acao: 'sobrescrito',
+      backup: nomeBackupDeSegredo(caminho),
+    };
+  });
+}
+
+const caminhosQueSeraoGravados = (plano) =>
+  plano
+    .filter((item) => item.acao !== 'mantido')
+    .flatMap((item) => [item.caminho, nomeTemporario(item.caminho), item.backup].filter(Boolean));
+
+function criarDiretorioDeSegredos(diretorio) {
+  if (estadoDoDiretorio(diretorio) === 'diretorio') return;
+  mkdirSync(diretorio, { mode: PERMISSAO_DIRETORIO_SO_DONO });
+  chmodSync(diretorio, PERMISSAO_DIRETORIO_SO_DONO);
+}
+
+function gravarSegredos(plano) {
+  return plano.map(({ variavel, caminho, conteudo, acao, backup }) => {
+    if (acao === 'mantido') return { variavel, caminho, status: acao };
+    if (backup) gravarSoDono(backup, readFileSync(caminho));
+    gravarAtomico(caminho, nomeTemporario(caminho), conteudo, acao === 'sobrescrito');
+    return { variavel, caminho, status: acao, ...(backup ? { backup } : {}) };
+  });
+}
+
+// Publica o .env.local. Corrida (outro processo criou o arquivo entre a checagem e o link()):
+// vale o arquivo dele, e os arquivos de .secrets/ seguem os valores dele.
+function publicarEnv(destino, conteudo, existia) {
+  try {
+    gravarAtomico(destino, nomeTemporario(destino), conteudo, existia);
+    return true;
+  } catch (erro) {
+    if (erro.code === 'EEXIST' && !existia) return false;
+    throw erro;
+  }
+}
+
 /**
- * Cria o arquivo de segredos. Sem `forcar`, um arquivo existente nunca é alterado; com `forcar`,
- * o anterior é guardado em `backup` (600) antes de ser trocado. Recusa destino versionável pelo git.
- * @returns {Promise<{status: 'criado' | 'mantido' | 'sobrescrito', caminho: string, backup?: string}>}
+ * Cria o arquivo de segredos e os arquivos de senha em `.secrets/` (ao lado dele). Sem `forcar`, um
+ * .env.local existente nunca é alterado, e os arquivos de `.secrets/` são criados ou sincronizados a
+ * partir dele; com `forcar`, tudo é regerado e os anteriores vão para backup (600). Recusa destino
+ * versionável pelo git e links simbólicos.
+ * @returns {Promise<{status: 'criado' | 'mantido' | 'sobrescrito', caminho: string, backup?: string,
+ *   segredos: Array<{variavel: string, caminho: string, status: string, backup?: string}>}>}
  */
 export async function gerarEnvLocal({ caminho = CAMINHO_PADRAO, forcar = false } = {}) {
   const destino = resolverDestino(caminho);
+  const base = dirname(destino);
+  const diretorioDeSegredos = join(base, DIRETORIO_DE_SEGREDOS);
   const existia = estadoDoAlvo(destino) === 'arquivo';
-  if (existia && !forcar) return { status: 'mantido', caminho: destino };
-  const temporario = nomeTemporario(destino);
-  const backup = existia ? nomeBackup(destino) : undefined;
-  garantirNaoVersionaveis([destino, temporario, ...(backup ? [backup] : [])]);
-  const conteudo = montarConteudo(await gerarSegredos());
-  if (backup) gravarSoDono(backup, readFileSync(destino));
-  try {
-    gravarAtomico(destino, temporario, conteudo, existia);
-  } catch (erro) {
-    // Corrida: outro processo criou o arquivo entre a checagem e o link().
-    if (erro.code === 'EEXIST' && !existia) return { status: 'mantido', caminho: destino };
-    throw erro;
+  const manterEnv = existia && !forcar;
+  const novos = manterEnv ? undefined : await gerarSegredos();
+  const plano = planejarSegredos(diretorioDeSegredos, manterEnv ? lerSenhasDoEnv(destino) : novos);
+  const backupDoEnv = existia && !manterEnv ? nomeBackup(destino) : undefined;
+  const doEnv = manterEnv ? [] : [destino, nomeTemporario(destino), backupDoEnv].filter(Boolean);
+  const aGravar = [...doEnv, ...caminhosQueSeraoGravados(plano)];
+  if (aGravar.length > 0) garantirNaoVersionaveis(base, aGravar);
+
+  let status = manterEnv ? 'mantido' : existia ? 'sobrescrito' : 'criado';
+  let planoFinal = plano;
+  if (!manterEnv) {
+    if (backupDoEnv) gravarSoDono(backupDoEnv, readFileSync(destino));
+    if (!publicarEnv(destino, montarConteudo(novos), existia)) {
+      status = 'mantido';
+      planoFinal = planejarSegredos(diretorioDeSegredos, lerSenhasDoEnv(destino));
+      garantirNaoVersionaveis(base, caminhosQueSeraoGravados(planoFinal));
+    }
   }
-  if (!existia) return { status: 'criado', caminho: destino };
-  return { status: 'sobrescrito', caminho: destino, backup };
+  criarDiretorioDeSegredos(diretorioDeSegredos);
+  const segredos = gravarSegredos(planoFinal);
+  const backup = status === 'sobrescrito' ? backupDoEnv : undefined;
+  return { status, caminho: destino, ...(backup ? { backup } : {}), segredos };
 }
 
 const OPCOES_CLI = Object.freeze({
   force: { type: 'boolean', default: false },
   // Destino alternativo, usado pelos testes; precisa estar fora do repositório ou ignorado pelo git.
+  // Os arquivos de senha vão para `.secrets/` no mesmo diretório.
   out: { type: 'string' },
 });
 
@@ -211,10 +334,27 @@ function exibir(caminho) {
   return relativo.startsWith('..') ? caminho : relativo;
 }
 
-function mensagem({ status, caminho, backup }) {
+function mensagemDosSegredos(segredos) {
+  const linhas = segredos.map(({ caminho, status, backup }) => {
+    const anterior = backup ? `; anterior em ${exibir(backup)}` : '';
+    return `  - ${exibir(caminho)} (${status}, permissão 600${anterior})`;
+  });
+  // Um bind mount de arquivo segue o inode antigo até o container reiniciar; `up -d` não recria
+  // o container por mudança no conteúdo do segredo.
+  const regravou = segredos.some(({ status }) => status === 'sobrescrito');
+  const aviso = regravou
+    ? [
+        'Um Redis em execução só lê o arquivo novo ao reiniciar: docker compose restart redis' +
+          ' (pnpm infra:up não recria o container). O Postgres só lê a senha ao criar o volume.',
+      ]
+    : [];
+  return [`Arquivos de senha para o Compose (secrets:):`, ...linhas, ...aviso].join('\n');
+}
+
+function mensagemDoEnv({ status, caminho, backup }) {
   const nome = exibir(caminho);
   if (status === 'mantido') {
-    return `${nome} já existe; nada foi alterado. Para regerar todos os segredos: pnpm keys:generate --force`;
+    return `${nome} já existe e não foi alterado. Para regerar todos os segredos: pnpm keys:generate --force`;
   }
   const lista = VARIAVEIS.map((variavel) => `  - ${variavel}`).join('\n');
   const criado = `${nome} ${status} (permissão 600) com:\n${lista}`;
@@ -227,6 +367,9 @@ function mensagem({ status, caminho, backup }) {
     'recrie-o (docker compose down -v) ou troque a senha no banco antes de subir de novo.',
   ].join('\n');
 }
+
+const mensagem = (resultado) =>
+  [mensagemDoEnv(resultado), mensagemDosSegredos(resultado.segredos)].join('\n');
 
 async function main() {
   let argumentos;
