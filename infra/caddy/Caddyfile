@@ -11,7 +11,7 @@
 	# Com localhost o Caddy emite pela CA local; não tenta instalar a raiz no trust store.
 	skip_install_trust
 	servers {
-		# Sem HTTP/3: o firewall da VM libera só 80 e 443 TCP (specs/014), e o compose não publica 443/udp.
+		# Sem HTTP/3 (ADR 0024): o firewall da VM libera só 80 e 443 TCP, e o compose não publica 443/udp.
 		protocols h1 h2
 		# Cabeçalhos em até 10 s (slowloris) e conexão keep-alive ociosa por até 2 min.
 		# Sem read_body: ele vira o ReadTimeout do Go, cujo prazo continua valendo na conexão
@@ -26,12 +26,13 @@
 }
 
 {$CADDY_SITE_ADDRESS:localhost} {
-	# gzip e não zstd: o encoder zstd gasta mais memória, e o limite do contêiner é 64 MB.
+	# gzip e não zstd: o encoder zstd gasta mais memória, e o limite do contêiner é 64 MB (ADR 0024).
 	encode gzip
 
 	# Headers de segurança em todas as respostas (SPA e proxy). A SPA não tem script nem estilo
 	# inline (/tema-inicial.js é externo), então script-src 'self' basta, sem nonce.
-	# connect-src 'self' cobre o fetch de /api e o WebSocket do Socket.IO na mesma origem.
+	# connect-src 'self' cobre o fetch de /api e o WebSocket do Socket.IO na mesma origem;
+	# img-src 'self' data: (ADR 0024): imagens das cartas vêm da própria API.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"

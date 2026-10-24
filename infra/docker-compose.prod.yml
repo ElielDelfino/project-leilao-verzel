@@ -1,4 +1,5 @@
-# Compose de produção (specs/014 §Produção, ADR 0013): Postgres, Redis, API e Caddy numa e2-micro.
+# Compose de produção (specs/014 §Produção, ADR 0013, 0023 e 0024): Postgres, Redis, API e Caddy
+# numa e2-micro.
 #   docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml up -d
 # Os valores vêm do .env da raiz (defaults não sensíveis); cada interpolação repete o default para o
 # compose também funcionar sem --env-file (o projeto fica em infra/, então o .env da raiz só é lido
@@ -6,10 +7,10 @@
 # tem precedência sobre o `name:` abaixo e poria estes contêineres no projeto de dev (os volumes
 # têm nome fixo, leilao-prod_*, e não se misturam com os de dev).
 # Nenhuma senha passa por `environment:` ou `command:`: as senhas são arquivos montados pelo
-# Compose `secrets:` em /run/secrets/<nome>.
+# Compose `secrets:` em /run/secrets/<nome> (ADR 0023).
 #   LEILAO_SECRETS_DIR  diretório com db_password e redis_password (padrão ../.secrets, criado por
-#                       `pnpm keys:generate`). Na VM, o diretório gerado a partir do Secret Manager
-#                       (tarefas 008 e 015).
+#                       `pnpm keys:generate`). Na VM, /run/leilao/secrets, gravado pelo
+#                       infra/deploy/fetch-secrets.sh a partir do Secret Manager (tarefa 008).
 #   API_IMAGE, WEB_IMAGE  imagens a usar (prod: ghcr.io/<owner>/leilao-api:<sha> e leilao-web:<sha>,
 #                       com `pull` e `up --no-build`); sem elas, o compose constrói as imagens locais.
 # Só o Caddy publica portas (80 e 443). Postgres e Redis ficam numa rede sem saída para a internet.
@@ -62,8 +63,8 @@ services:
           cpus: '${POSTGRES_CPUS:-1}'
           memory: ${POSTGRES_MEM:-300m}
           pids: ${POSTGRES_PIDS:-200}
-    # RAM + swap. A ADR 0013 usa o swap de 2 GB da VM contra OOM: o banco pode usar swap até 2× o
-    # limite em vez de ser morto pelo OOM do cgroup.
+    # RAM + swap (ADR 0013 e 0024): o banco pode usar swap até 2× o limite em vez de ser morto pelo
+    # OOM do cgroup.
     memswap_limit: ${POSTGRES_MEMSWAP:-600m}
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
@@ -146,7 +147,8 @@ services:
           cpus: '${REDIS_CPUS:-0.5}'
           memory: ${REDIS_MEM:-64m}
           pids: ${REDIS_PIDS:-64}
-    # Sem swap: o maxmemory limita o Redis abaixo do limite do contêiner, e sem persistência não há fork.
+    # Sem swap (ADR 0024): o maxmemory limita o Redis abaixo do limite do contêiner, e sem
+    # persistência não há fork.
     memswap_limit: ${REDIS_MEMSWAP:-64m}
     healthcheck:
       test:
@@ -185,15 +187,15 @@ services:
       # Caminhos (não os valores) das senhas: a API lê <VAR> ou <VAR>_FILE (ADR 0023).
       DB_PASSWORD_FILE: /run/secrets/db_password
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
-      # JWT_SECRET, PSEUDONYM_HMAC_KEY e ED25519_PRIVATE_KEY entram só neste serviço, como
+      # JWT_SECRET (F1), PSEUDONYM_HMAC_KEY e ED25519_PRIVATE_KEY (F3) entram só neste serviço, como
       # JWT_SECRET_FILE etc. + secrets jwt_secret, pseudonym_hmac_key e ed25519_private_key, quando a
-      # API passar a lê-los (F1). Nunca em environment:. Montá-los antes faria o `up` falhar, porque
-      # os arquivos ainda não existem em .secrets/.
+      # API passar a lê-los (ADR 0023). Nunca em environment:. Montá-los antes faria o `up` falhar,
+      # porque os arquivos ainda não existem em .secrets/.
     # Os arquivos montados por `secrets:` (bind) mantêm dono e modo do host; uid/gid/mode do
     # Compose valem só no Swarm. A API roda como uid 1000 sem capabilities, então os arquivos que ela
-    # lê precisam ser do uid 1000 e legíveis por ele: `chown 1000:1000` e modo 0400, diretório 0700,
-    # nunca 0644 (keys:generate: tarefa 023; fetch-secrets na VM: tarefa 008). O Postgres e o Redis
-    # leem como root no entrypoint (DAC_OVERRIDE e DAC_READ_SEARCH), então o mesmo dono serve.
+    # lê precisam ser do uid 1000 e só dele: `chown 1000:1000` e modo 600 (specs/014 §Segredos) ou
+    # 0400, diretório 700, nunca 644 (keys:generate: tarefa 023; fetch-secrets na VM: tarefa 008).
+    # O Postgres e o Redis leem como root no entrypoint (DAC_OVERRIDE e DAC_READ_SEARCH).
     secrets:
       - db_password
       - redis_password
@@ -271,8 +273,7 @@ services:
       nofile:
         soft: ${CADDY_NOFILE:-8192}
         hard: ${CADDY_NOFILE:-8192}
-    # 64 MB, decisão do humano em 2026-10-24 (task 007), para TLS + WebSocket; a spec 014 ainda
-    # diz 32 MB e muda por ADR (spec-guardian). Sem swap: memswap igual ao limite.
+    # 64 MB para TLS + WebSocket, sem swap (memswap igual ao limite): ADR 0024.
     deploy:
       resources:
         limits:
