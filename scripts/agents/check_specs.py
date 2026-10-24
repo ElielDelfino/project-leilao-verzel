@@ -29,7 +29,7 @@ for f in sorted(adrs ^ historico):
     falha(f"HISTORY e specs/decisions/ divergem em {f}")
 
 markdowns = [p for p in glob.glob("**/*.md", recursive=True) + glob.glob(".claude/agents/*.md")
-             if not p.startswith(("learning/", "node_modules/", "tmp/"))]
+             if not p.startswith(("learning/", "tmp/")) and "node_modules" not in p.split(os.sep)]
 for p in markdowns:
     texto, base = ler(p), os.path.dirname(p)
     for link in re.findall(r"\]\(([^)#\s]+)\)", texto):
