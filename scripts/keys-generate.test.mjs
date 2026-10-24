@@ -12,18 +12,34 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as ed from '@noble/ed25519';
 
-import { VARIAVEIS, gerarEnvLocal, nomeBackup, nomeTemporario } from './keys-generate.mjs';
+import {
+  DIRETORIO_DE_SEGREDOS,
+  SEGREDOS_EM_ARQUIVO,
+  VARIAVEIS,
+  gerarEnvLocal,
+  nomeBackup,
+  nomeBackupDeSegredo,
+  nomeTemporario,
+} from './keys-generate.mjs';
 
 const SCRIPT = resolve(import.meta.dirname, 'keys-generate.mjs');
 const RAIZ = resolve(import.meta.dirname, '..');
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const BYTES_256_BITS = 32;
+const ARQUIVOS_DE_SEGREDO = Object.values(SEGREDOS_EM_ARQUIVO).sort();
+
+// Caminho do arquivo de segredo (Compose `secrets:`) ao lado do .env informado.
+const caminhoDoSegredo = (caminhoDoEnv, variavel) =>
+  join(dirname(caminhoDoEnv), DIRETORIO_DE_SEGREDOS, SEGREDOS_EM_ARQUIVO[variavel]);
+
+const lerSegredo = (caminhoDoEnv, variavel) =>
+  readFileSync(caminhoDoSegredo(caminhoDoEnv, variavel), 'utf8');
 
 function lerEnv(caminho) {
   const pares = readFileSync(caminho, 'utf8')
@@ -180,9 +196,17 @@ describe('keys:generate', () => {
     const caminho = join(sub, '.env.local');
 
     await gerarEnvLocal({ caminho });
-    const { backup } = await gerarEnvLocal({ caminho, forcar: true });
+    const { backup, segredos } = await gerarEnvLocal({ caminho, forcar: true });
 
-    assert.deepEqual(readdirSync(sub).sort(), ['.env.local', basename(backup)].sort());
+    assert.deepEqual(
+      readdirSync(sub).sort(),
+      ['.env.local', DIRETORIO_DE_SEGREDOS, basename(backup)].sort(),
+    );
+    const backupsDeSegredo = segredos.map((segredo) => basename(segredo.backup));
+    assert.deepEqual(
+      readdirSync(join(sub, DIRETORIO_DE_SEGREDOS)).sort(),
+      [...ARQUIVOS_DE_SEGREDO, ...backupsDeSegredo].sort(),
+    );
   });
 
   describe('backup no --force', () => {
@@ -217,7 +241,132 @@ describe('keys:generate', () => {
 
       assert.equal(resultado.status, 'criado');
       assert.equal(resultado.backup, undefined);
+      assert.deepEqual(readdirSync(sub).sort(), ['.env.local', DIRETORIO_DE_SEGREDOS].sort());
+      assert.deepEqual(readdirSync(join(sub, DIRETORIO_DE_SEGREDOS)).sort(), ARQUIVOS_DE_SEGREDO);
+      for (const segredo of resultado.segredos) assert.equal(segredo.backup, undefined);
+    });
+  });
+
+  describe('arquivos de segredo do Compose (.secrets/)', () => {
+    it('grava DB_PASSWORD e REDIS_PASSWORD em arquivos 600, num diretório 700, sem quebra de linha', async () => {
+      const sub = mkdtempSync(join(dir, 'segredos-'));
+      const caminho = join(sub, '.env.local');
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      const env = lerEnv(caminho);
+      assert.deepEqual(Object.keys(SEGREDOS_EM_ARQUIVO).sort(), ['DB_PASSWORD', 'REDIS_PASSWORD']);
+      for (const variavel of Object.keys(SEGREDOS_EM_ARQUIVO)) {
+        assert.equal(lerSegredo(caminho, variavel), env[variavel], `${variavel} diverge`);
+        assert.equal(statSync(caminhoDoSegredo(caminho, variavel)).mode & 0o777, 0o600);
+      }
+      assert.equal(statSync(join(sub, DIRETORIO_DE_SEGREDOS)).mode & 0o777, 0o700);
+      assert.deepEqual(
+        resultado.segredos.map((segredo) => segredo.status),
+        ['criado', 'criado'],
+      );
+    });
+
+    it('sem --force, recria um arquivo de segredo ausente com o valor do .env.local existente', async () => {
+      const sub = mkdtempSync(join(dir, 'segredo-ausente-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      const envAntes = readFileSync(caminho);
+      rmSync(caminhoDoSegredo(caminho, 'REDIS_PASSWORD'));
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.status, 'mantido');
+      assert.deepEqual(readFileSync(caminho), envAntes);
+      assert.equal(lerSegredo(caminho, 'REDIS_PASSWORD'), lerEnv(caminho).REDIS_PASSWORD);
+      const porVariavel = Object.fromEntries(resultado.segredos.map((s) => [s.variavel, s.status]));
+      assert.deepEqual(porVariavel, { DB_PASSWORD: 'mantido', REDIS_PASSWORD: 'criado' });
+    });
+
+    it('sem --force, mantém intactos os arquivos de segredo iguais ao .env.local', async () => {
+      const sub = mkdtempSync(join(dir, 'segredo-igual-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      const inode = statSync(caminhoDoSegredo(caminho, 'DB_PASSWORD')).ino;
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.deepEqual(
+        resultado.segredos.map((segredo) => segredo.status),
+        ['mantido', 'mantido'],
+      );
+      assert.equal(statSync(caminhoDoSegredo(caminho, 'DB_PASSWORD')).ino, inode);
+    });
+
+    it('sincroniza com o .env.local um arquivo de segredo divergente e guarda o anterior (600)', async () => {
+      const sub = mkdtempSync(join(dir, 'segredo-divergente-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      writeFileSync(caminhoDoSegredo(caminho, 'DB_PASSWORD'), 'valorAntigo', { mode: 0o600 });
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      const db = resultado.segredos.find((segredo) => segredo.variavel === 'DB_PASSWORD');
+      assert.equal(db.status, 'sobrescrito');
+      assert.equal(lerSegredo(caminho, 'DB_PASSWORD'), lerEnv(caminho).DB_PASSWORD);
+      assert.equal(readFileSync(db.backup, 'utf8'), 'valorAntigo');
+      assert.equal(statSync(db.backup).mode & 0o777, 0o600);
+    });
+
+    it('com --force, regrava os arquivos de segredo com os valores novos e guarda os anteriores', async () => {
+      const sub = mkdtempSync(join(dir, 'segredo-force-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      const anteriores = Object.keys(SEGREDOS_EM_ARQUIVO).map((v) => lerSegredo(caminho, v));
+
+      const resultado = await gerarEnvLocal({ caminho, forcar: true });
+
+      const env = lerEnv(caminho);
+      for (const [indice, segredo] of resultado.segredos.entries()) {
+        assert.equal(segredo.status, 'sobrescrito');
+        assert.equal(lerSegredo(caminho, segredo.variavel), env[segredo.variavel]);
+        assert.equal(readFileSync(segredo.backup, 'utf8'), anteriores[indice]);
+        assert.equal(statSync(segredo.backup).mode & 0o777, 0o600);
+      }
+    });
+
+    it('recusa .env.local existente sem DB_PASSWORD em base64url, sem citar o valor', async () => {
+      const sub = mkdtempSync(join(dir, 'env-invalido-'));
+      const caminho = join(sub, '.env.local');
+      writeFileSync(caminho, 'DB_PASSWORD=com espaço\nREDIS_PASSWORD=ok\n', { mode: 0o600 });
+
+      await assert.rejects(gerarEnvLocal({ caminho }), (erro) => {
+        assert.match(erro.message, /DB_PASSWORD/);
+        assert.ok(!erro.message.includes('com espaço'), 'valor citado no erro');
+        return true;
+      });
+
       assert.deepEqual(readdirSync(sub), ['.env.local']);
+    });
+
+    it('recusa .secrets que é link simbólico sem gravar nada', async () => {
+      const sub = mkdtempSync(join(dir, 'segredos-link-'));
+      const alvoDoLink = mkdtempSync(join(dir, 'alvo-do-link-'));
+      symlinkSync(alvoDoLink, join(sub, DIRETORIO_DE_SEGREDOS));
+
+      await assert.rejects(gerarEnvLocal({ caminho: join(sub, '.env.local') }), /diretório comum/);
+
+      assert.deepEqual(readdirSync(sub), [DIRETORIO_DE_SEGREDOS]);
+      assert.deepEqual(readdirSync(alvoDoLink), []);
+    });
+
+    it('recusa arquivo de segredo que é link simbólico sem alterar o destino do link', async () => {
+      const sub = mkdtempSync(join(dir, 'segredo-link-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      const real = join(sub, 'real.txt');
+      writeFileSync(real, 'X');
+      rmSync(caminhoDoSegredo(caminho, 'DB_PASSWORD'));
+      symlinkSync(real, caminhoDoSegredo(caminho, 'DB_PASSWORD'));
+
+      await assert.rejects(gerarEnvLocal({ caminho, forcar: true }), /arquivo comum/);
+
+      assert.equal(readFileSync(real, 'utf8'), 'X');
     });
   });
 
@@ -227,6 +376,18 @@ describe('keys:generate', () => {
       const nomes = [alvo, nomeTemporario(alvo), nomeBackup(alvo)].map((c) => basename(c));
 
       for (const nome of nomes) assert.ok(ignoradoNoRepo(nome), `${nome} versionável`);
+    });
+
+    it('ignora os arquivos de segredo, seus temporários e backups em .secrets/', () => {
+      const relativos = ARQUIVOS_DE_SEGREDO.flatMap((arquivo) => {
+        const alvo = join(RAIZ, DIRETORIO_DE_SEGREDOS, arquivo);
+        return [alvo, nomeTemporario(alvo), nomeBackupDeSegredo(alvo)].map(
+          (c) => `${DIRETORIO_DE_SEGREDOS}/${basename(c)}`,
+        );
+      });
+
+      for (const relativo of relativos)
+        assert.ok(ignoradoNoRepo(relativo), `${relativo} versionável`);
     });
   });
 
@@ -258,14 +419,23 @@ describe('keys:generate', () => {
       assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
     });
 
-    it('aceita um caminho ignorado pelo git, com temporário e backup também ignorados', async () => {
-      const repo = repoTemporario(dir, '.env.local\n.env.*.local\n');
+    it('aceita um caminho ignorado pelo git, com temporário, backup e .secrets/ também ignorados', async () => {
+      const repo = repoTemporario(dir, '.env.local\n.env.*.local\n.secrets/\n');
       const caminho = join(repo, '.env.local');
 
       await gerarEnvLocal({ caminho });
       const { backup } = await gerarEnvLocal({ caminho, forcar: true });
 
       assert.ok(existsSync(caminho) && existsSync(backup));
+      assert.ok(existsSync(caminhoDoSegredo(caminho, 'DB_PASSWORD')));
+    });
+
+    it('recusa quando o .env.local é ignorado mas .secrets/ não é, sem gravar nada', async () => {
+      const repo = repoTemporario(dir, '.env.local\n.env.*.local\n');
+
+      await assert.rejects(gerarEnvLocal({ caminho: join(repo, '.env.local') }), /versionad/);
+
+      assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
     });
 
     it('recusa um arquivo já versionado, mesmo que o padrão o ignore', async () => {
@@ -376,6 +546,26 @@ describe('keys:generate', () => {
       assert.notEqual(saida.status, 0);
       assert.match(saida.stderr, /versionad/);
       assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
+    });
+
+    it('cita os arquivos de segredo e o backup deles pelo caminho, sem os valores', () => {
+      const sub = mkdtempSync(join(dir, 'cli-segredos-'));
+      const caminho = join(sub, '.env.local');
+      rodarCli(['--out', caminho]);
+      const anterior = lerEnv(caminho);
+
+      const saida = rodarCli(['--out', caminho, '--force']);
+
+      assert.equal(saida.status, 0, saida.stderr);
+      for (const arquivo of ARQUIVOS_DE_SEGREDO) {
+        assert.match(saida.stdout, new RegExp(`${DIRETORIO_DE_SEGREDOS}/${arquivo}`));
+        assert.match(saida.stdout, new RegExp(`${DIRETORIO_DE_SEGREDOS}/${arquivo}\\.bak-`));
+      }
+      const atual = lerEnv(caminho);
+      for (const variavel of Object.keys(SEGREDOS_EM_ARQUIVO)) {
+        assert.ok(!saida.stdout.includes(anterior[variavel]), `${variavel} antigo no terminal`);
+        assert.ok(!saida.stdout.includes(atual[variavel]), `${variavel} novo no terminal`);
+      }
     });
 
     it('recusa --out sem caminho', () => {

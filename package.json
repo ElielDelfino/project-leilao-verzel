@@ -20,6 +20,7 @@
     "verify:full": "node -e \"console.error('verify:full ainda não existe (tarefa 011)');process.exit(1)\"",
     "db:migrate": "node -e \"console.error('db:migrate ainda não existe (tarefa 003)');process.exit(1)\"",
     "db:seed": "node -e \"console.error('db:seed ainda não existe (tarefa 003)');process.exit(1)\"",
+    "infra:up": "docker compose --env-file .env --env-file .env.local up -d",
     "keys:generate": "node scripts/keys-generate.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\""
   },
