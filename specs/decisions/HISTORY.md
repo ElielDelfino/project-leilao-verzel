@@ -26,3 +26,4 @@
 | [0020](0020-host-publico-e-uptime.md) | Host público e uptime | provisória | sslip.io + UptimeRobot; revisar na tarefa 008 |
 | [0021](0021-orquestracao-e-agentes-executores.md) | Orquestrador e agentes executores | aceita | hub-and-spoke, três camadas (frontmatter, gates, hook), opus, revisão pelos globais |
 | [0022](0022-complementos-auth-e-idempotencia.md) | Complementos de auth e idempotência | aceita | complementa a 0006: refresh_token em Path=/api/auth, GET /api/auth/csrf, PAPEL_NAO_PERMITIDO, rate limit do cadastro, Idempotency-Key com corpo diferente → 422 |
+| [0023](0023-segredos-em-arquivo-e-formatos.md) | Segredos em arquivo e formatos | proposta | substitui a 0015 quando aceita: segredos em arquivo (`*_FILE`) em produção, formatos base64url de 32 bytes, `keyId` derivado da chave pública, `SEED_DEMO_PASSWORD` fixa no `.env` |

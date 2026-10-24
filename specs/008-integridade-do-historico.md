@@ -12,10 +12,19 @@ Qualquer alteração, remoção ou inserção posterior no histórico, mesmo dir
 - Forma canônica do lance: JSON canonicalizado (RFC 8785/JCS) de
   `{loteId, seq, pseudonimo, valorCentavos, criadoEm (ISO 8601 UTC, ms), hashAnterior (hex)}`.
 - `hash = SHA-256(canônico)`. Gênese: `hashAnterior = SHA-256("leilao-verzel:genesis:" + loteId)`.
-- `assinatura = Ed25519(chavePrivada, hash)`. A chave privada **existe só no ambiente da API** (Secret Manager), nunca no banco; `key_id` identifica a chave para permitir rotação.
+- `assinatura = Ed25519(chavePrivada, hash)`. A chave privada **existe só no ambiente da API** (Secret Manager, entregue em arquivo em produção: specs/014 §Segredos), nunca no banco; `key_id` identifica a chave para permitir rotação (§Chaves).
 - Selo (`lot_seals`) gerado quando o lote é encerrado ou cancelado: canônico de `{loteId, status, totalLances, hashFinal, vencedorPseudonimo, valorArremateCentavos, seladoEm}` assinado. O selo vai no comprovante.
 - Pseudônimo: `"Licitante #" + hex(HMAC-SHA256(PSEUDONYM_HMAC_KEY, loteId + ":" + userId))[0..6]`. É estável dentro do lote e diferente entre lotes, então não dá para ligar um licitante entre lotes.
 - Defesa adicional: triggers impedem UPDATE/DELETE em `bids` e `lot_seals` (um superusuário pode removê-los, e a detecção continua valendo).
+
+## Chaves (proposta, ADR 0023)
+Formatos que a API, o seed e a verificação no navegador leem. Origem de cada variável em specs/014 §Segredos.
+
+- `ED25519_PRIVATE_KEY`: seed Ed25519 de 32 bytes (RFC 8032 §5.1.5) em base64url sem padding (43 caracteres). A API decodifica, recusa no boot o que não tiver 32 bytes e deriva a chave pública (32 bytes, RFC 8032 §5.1.5). A chave pública não é configurada.
+- `keyId` (coluna `key_id` de `bids` e `lot_seals`): os 16 primeiros caracteres hex minúsculos de SHA-256(chave pública de 32 bytes). É derivado pela API no boot; não existe variável `ED25519_KEY_ID`.
+- `chavePublica` em `GET /api/auditoria/chaves`: os 32 bytes da chave pública em base64url sem padding (43 caracteres).
+- `PSEUDONYM_HMAC_KEY`: 32 bytes aleatórios em base64url sem padding (43 caracteres); a chave do HMAC-SHA256 do pseudônimo são os 32 bytes decodificados, não o texto. A API recusa no boot o que não decodificar para 32 bytes.
+- Vetor de teste (RFC 8032 §7.1, TEST 1): seed `9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60` (base64url `nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A`) → chave pública `11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo` → `keyId` `21fe31dfa154a261`.
 
 ## Verificação
 A auditoria recalcula e reporta cada problema com o `seq`:
@@ -44,6 +53,8 @@ Veredito: `integro` se tudo passar; senão `adulterado` + lista de problemas. A 
 ## Critérios de aceite
 - [ ] Testes para cada adulteração: alterar valor, apagar o lance do meio, inserir lance, recalcular a cadeia sem a chave, truncar o fim de um lote selado. Todas detectadas.
 - [ ] Verificação no navegador e no servidor dão o mesmo veredito.
+- [ ] Com o vetor de teste de §Chaves, a API deriva a chave pública e o `keyId` indicados (teste de unidade).
+- [ ] A API não sobe com `ED25519_PRIVATE_KEY` ou `PSEUDONYM_HMAC_KEY` que não decodifique para 32 bytes; a mensagem cita só o nome (teste de unidade do env).
 
 ## Decisões relacionadas
-- decisions/0005-integridade-hash-chain-ed25519.md
+- decisions/0005-integridade-hash-chain-ed25519.md, 0023-segredos-em-arquivo-e-formatos.md (proposta)
