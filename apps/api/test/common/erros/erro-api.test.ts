@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ErroApi } from '../../../src/common/erros/erro-api.js';
+import { type DetalhesDoErro, ErroApi } from '../../../src/common/erros/erro-api.js';
 
 describe('ErroApi', () => {
   it('guarda código, status, mensagem e detalhes', () => {
@@ -55,11 +55,13 @@ describe('ErroApi', () => {
         detalhes,
       });
 
+    const aninhado = { usuario: { email: 'a@b.c' } };
+    const lista = { itens: [1, 2] };
     // @ts-expect-error -- objeto aninhado não é primitivo
-    const tipoAninhado: ConstructorParameters<typeof ErroApi>[0]['detalhes'] = {
-      usuario: { email: 'a@b.c' },
-    };
-    expect(tipoAninhado).toBeDefined();
+    const comObjeto: DetalhesDoErro = aninhado;
+    // @ts-expect-error -- lista não é primitiva
+    const comLista: DetalhesDoErro = lista;
+    expect([comObjeto, comLista]).toHaveLength(2);
 
     expect(construir({ usuario: { email: 'a@b.c' } })).toThrow(TypeError);
     expect(construir({ itens: [1, 2] })).toThrow(TypeError);

@@ -5,22 +5,50 @@ import { type DestinationStream, type Logger, pino } from 'pino';
 
 import type { NivelDeLog } from '../config/env.js';
 
-// Defesa em profundidade: os serializadores padrão do Fastify não logam cabeçalhos, mas se algum
-// log incluir a requisição inteira, credenciais e cookies saem mascarados.
-const CAMINHOS_REDIGIDOS = [
-  'req.headers.authorization',
-  'req.headers.cookie',
-  'req.headers["x-csrf-token"]',
-  'res.headers["set-cookie"]',
-];
+/** O que o serializador usa da requisição do Fastify. */
+interface RequisicaoLogavel {
+  readonly method?: string;
+  readonly url?: string;
+}
+
+export interface RequisicaoSerializada {
+  readonly method: string | undefined;
+  readonly url: string | undefined;
+}
+
+/**
+ * Serializador `req`: só método e caminho. A query string fica de fora (pode levar token ou
+ * e-mail), assim como cabeçalhos, IP e porta (specs/014: logs sem PII). O Fastify dá
+ * precedência aos serializadores do logger recebido em `loggerInstance`.
+ */
+export function serializarRequisicao(requisicao: RequisicaoLogavel): RequisicaoSerializada {
+  const url = requisicao.url;
+  return { method: requisicao.method, url: url === undefined ? undefined : url.split('?', 1)[0] };
+}
 
 export function criarLogger(nivel: NivelDeLog, destino?: DestinationStream): Logger {
   const opcoes = {
     level: nivel,
     timestamp: pino.stdTimeFunctions.isoTime,
-    redact: { paths: CAMINHOS_REDIGIDOS, censor: '[redigido]' },
+    serializers: { req: serializarRequisicao },
   };
   return destino ? pino(opcoes, destino) : pino(opcoes);
+}
+
+/** Converte a mensagem do Nest em texto sem lançar (BigInt e referência circular quebram o JSON). */
+function paraTexto(valor: unknown): string {
+  if (typeof valor === 'string') {
+    return valor;
+  }
+  if (typeof valor === 'bigint') {
+    return valor.toString();
+  }
+  try {
+    return JSON.stringify(valor) ?? String(valor);
+  } catch {
+    // Valor não serializável: registra o tipo em vez de derrubar quem estava logando.
+    return Object.prototype.toString.call(valor);
+  }
 }
 
 type NivelDoPino = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
@@ -69,6 +97,6 @@ export class LoggerNestPino implements LoggerService {
       this.pino[nivel]({ ...campos, err: mensagem }, mensagem.message);
       return;
     }
-    this.pino[nivel](campos, typeof mensagem === 'string' ? mensagem : JSON.stringify(mensagem));
+    this.pino[nivel](campos, paraTexto(mensagem));
   }
 }

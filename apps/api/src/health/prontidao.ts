@@ -4,8 +4,11 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 /** Uma dependência que precisa responder para a API estar pronta (ex.: postgres, redis). */
 export interface VerificacaoDeProntidao {
   readonly nome: string;
-  /** Resolve se a dependência respondeu; rejeita caso contrário. */
-  verificar(): Promise<void>;
+  /**
+   * Resolve se a dependência respondeu; rejeita caso contrário. O `sinal` é abortado quando o
+   * tempo limite estoura: repasse-o ao cliente (ping, query) para cancelar a operação.
+   */
+  verificar(sinal: AbortSignal): Promise<void>;
 }
 
 /** Token das verificações registradas (lista de VerificacaoDeProntidao). */
@@ -28,16 +31,36 @@ function descreverMotivo(motivo: unknown): string {
   return motivo instanceof Error ? `${motivo.name}: ${motivo.message}` : 'motivo desconhecido';
 }
 
-async function comTempoLimite(promessa: Promise<void>, limiteMs: number): Promise<void> {
+/** Chama a verificação já com o sinal; um `throw` síncrono vira promessa rejeitada. */
+function iniciar(verificacao: VerificacaoDeProntidao, sinal: AbortSignal): Promise<void> {
+  try {
+    return verificacao.verificar(sinal);
+  } catch (erro: unknown) {
+    return Promise.reject(erro);
+  }
+}
+
+/**
+ * Roda a verificação com tempo limite. Ao estourar, aborta o sinal entregue à verificação e
+ * rejeita com TempoEsgotado. Usa setTimeout + AbortController (equivalente a
+ * `AbortSignal.timeout`) para limpar o temporizador quando a verificação termina antes.
+ * Uma verificação que lança de forma síncrona também vira rejeição.
+ */
+async function comTempoLimite(
+  verificacao: VerificacaoDeProntidao,
+  limiteMs: number,
+): Promise<void> {
+  const controlador = new AbortController();
   let temporizador: NodeJS.Timeout | undefined;
   const limite = new Promise<never>((_, rejeitar) => {
-    temporizador = setTimeout(
-      () => rejeitar(new TempoEsgotado(`sem resposta em ${limiteMs} ms`)),
-      limiteMs,
-    );
+    temporizador = setTimeout(() => {
+      const motivo = new TempoEsgotado(`sem resposta em ${limiteMs} ms`);
+      controlador.abort(motivo);
+      rejeitar(motivo);
+    }, limiteMs);
   });
   try {
-    await Promise.race([promessa, limite]);
+    await Promise.race([iniciar(verificacao, controlador.signal), limite]);
   } finally {
     clearTimeout(temporizador);
   }
@@ -61,7 +84,7 @@ export class ServicoDeProntidao {
 
     const resultados = await Promise.allSettled(
       this.verificacoes.map((verificacao) =>
-        comTempoLimite(verificacao.verificar(), TEMPO_LIMITE_DA_VERIFICACAO_MS),
+        comTempoLimite(verificacao, TEMPO_LIMITE_DA_VERIFICACAO_MS),
       ),
     );
 
