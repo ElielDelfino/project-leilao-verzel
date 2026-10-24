@@ -8,8 +8,9 @@ O PDF define: disponível = total − comprometido; o valor do líder fica compr
 
 ## Requisitos
 - RF-01 O licitante vê total, comprometido e disponível, e faz depósitos simulados.
-- RF-02 O leiloeiro vê o total recebido (créditos de arremate); ele não deposita.
-- RF-03 Depósito entre R$ 1,00 e R$ 100.000,00 por operação, com `Idempotency-Key`.
+- RF-02 O leiloeiro vê o total recebido (créditos de arremate); ele não deposita (403 `PAPEL_NAO_PERMITIDO`, specs/003). Saldo e extrato ficam abertos aos dois papéis.
+- RF-03 Depósito entre R$ 1,00 e R$ 100.000,00 por operação, com `Idempotency-Key` (UUID).
+- RF-04 Extrato paginado com 20 lançamentos por página, do mais recente para o mais antigo.
 - RNF-01 Valores em centavos (`bigint`). Nenhuma operação deixa o comprometido > total, nem negativo (CHECK no banco).
 - RNF-02 A projeção `wallet_balances` é sempre igual à soma do ledger (teste de reconciliação no CI).
 
@@ -28,11 +29,13 @@ Tipos de lançamento e efeito na projeção:
 - Toda alteração acontece na transação de quem a causa (lance, liquidação, cancelamento), pela interface pública `carteira.*(tx, ...)`, que trava a linha de `wallet_balances` com `FOR UPDATE`.
 - Ordem de locks para evitar deadlock: lote primeiro, depois carteiras em ordem crescente de `user_id`.
 - Saldo insuficiente → erro de domínio `SALDO_INSUFICIENTE` com `disponivelCentavos`.
+- Idempotência do depósito, por `(user_id, idempotency_key)`: repetir a chave com o mesmo corpo responde 200 com o mesmo lançamento e o saldo atual; repetir a chave com corpo diferente responde 422 `DADOS_INVALIDOS`. Nos dois casos, nenhum lançamento novo é gravado.
+- Corpo com campo desconhecido → 422 `DADOS_INVALIDOS`.
 
 ## Interfaces e contratos
-- `GET /api/carteira` → `{totalCentavos, comprometidoCentavos, disponivelCentavos}`
-- `POST /api/carteira/depositos` `{valorCentavos}` + `Idempotency-Key` → 201 (papel licitante)
-- `GET /api/carteira/extrato?pagina=` → lançamentos paginados
+- `GET /api/carteira` → 200 `{totalCentavos, comprometidoCentavos, disponivelCentavos}` · 401
+- `POST /api/carteira/depositos` `{valorCentavos}` + `Idempotency-Key` → 201 `{lancamento, saldo}` · 200 (repetição) · 401 · 403 `CSRF_INVALIDO` ou `PAPEL_NAO_PERMITIDO` · 422 `DADOS_INVALIDOS`
+- `GET /api/carteira/extrato?pagina=` → 200 `[{id, tipo, valorCentavos, loteId, criadoEm}]` + `meta {total, pagina, limite: 20}` · 401 · 422
 - Evento Socket.IO pessoal `saldo_atualizado` (specs/009).
 
 ## Dados
@@ -42,6 +45,8 @@ Tipos de lançamento e efeito na projeção:
 
 ## Critérios de aceite
 - [ ] Ser superado devolve o valor ao disponível na mesma transação do novo lance.
+- [ ] Depósito repetido com a mesma `Idempotency-Key` e o mesmo corpo → 200 com o mesmo lançamento; com corpo diferente → 422; em ambos, um único lançamento no ledger.
+- [ ] Leiloeiro em `POST /api/carteira/depositos` → 403 `PAPEL_NAO_PERMITIDO`.
 - [ ] 50 lances concorrentes do mesmo licitante em lotes diferentes nunca deixam o comprometido acima do total.
 - [ ] Teste de reconciliação: projeção == Σ ledger para todos os usuários após a suíte e2e.
 

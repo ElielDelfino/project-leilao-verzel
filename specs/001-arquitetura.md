@@ -53,7 +53,8 @@ E-mail + senha; JWT de acesso (15 min) + refresh rotativo (7 dias) em cookies ht
 ## Contratos
 - REST: `apps/api/openapi.yaml` (OpenAPI 3.1). Fonte da verdade da API; o CI falha se as respostas divergirem (specs/013).
 - Tempo real: `eventbus/socketio/asyncapi.yaml` (AsyncAPI 3). O `name` de cada mensagem é o nome do evento Socket.IO.
-- Tipos: `pnpm contracts:gen` gera `packages/contracts/src/gerado/` dos dois contratos (openapi-typescript); `apps/api` e `apps/web` importam os tipos de `@leilao/contracts`, sem cópias escritas à mão. Verificação em specs/013 §Contratos.
+- Tipos (gerador e scripts chegam com a tarefa 021): `pnpm contracts:gen` gera `packages/contracts/src/gerado/` com o openapi-typescript. Ele lê só OpenAPI, então os tipos do `openapi.yaml` saem direto; para os eventos, o gerador embrulha os payloads das mensagens do `asyncapi.yaml` como `components.schemas` de um OpenAPI 3.1 mínimo (os `$ref` locais continuam válidos) e acrescenta o mapa evento → payload. `apps/api` e `apps/web` importam os tipos de `@leilao/contracts`, sem cópias escritas à mão. Verificação em specs/013 §Contratos.
+- Ponto de atenção: `Centavos` (e `Pseudonimo`, quando as rotas da F3 entrarem) é declarado nos dois contratos; uma mudança num deles vale para o outro.
 - Envelope de resposta: `{ "sucesso": true, "dados": ... }` ou `{ "sucesso": false, "erro": { "codigo": "SALDO_INSUFICIENTE", "mensagem": "...", "detalhes": {...} } }`; listas paginadas incluem `meta: { total, pagina, limite }`.
 - Códigos de erro estáveis em `SCREAMING_SNAKE_CASE`, catalogados no OpenAPI; o front traduz cada código para a mensagem pt-BR (specs/012).
 

@@ -1,6 +1,8 @@
 # Contrato de tempo real (AsyncAPI 3). Fonte: specs/009. Dono: spec-guardian.
 # Tarefa 009: `name` de cada mensagem = nome do evento Socket.IO; payloads usados na geração de tipos
-# (packages/contracts). Cliente → servidor (entrar_lote/sair_lote e o ack `estado`) entra na F3.
+# (packages/contracts, tarefa 021). Cliente → servidor (entrar_lote/sair_lote e o ack `estado`) entra na F3.
+# Ponto de atenção: Centavos (e Pseudonimo, quando as rotas da F3 entrarem) é duplicado em
+# apps/api/openapi.yaml; mude os dois juntos.
 asyncapi: 3.0.0
 info:
   title: Casa de Leilões — tempo real
