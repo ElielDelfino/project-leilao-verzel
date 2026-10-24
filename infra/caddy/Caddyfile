@@ -26,7 +26,7 @@
 }
 
 {$CADDY_SITE_ADDRESS:localhost} {
-	# gzip e não zstd: o limite do contêiner é 32 MB (specs/014).
+	# gzip e não zstd: o encoder zstd gasta mais memória, e o limite do contêiner é 64 MB.
 	encode gzip
 
 	# Headers de segurança em todas as respostas (SPA e proxy). A SPA não tem script nem estilo

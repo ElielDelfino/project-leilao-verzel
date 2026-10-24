@@ -238,8 +238,8 @@ services:
     environment:
       CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-localhost}
       API_PORT: ${API_PORT:-13000}
-      # Teto de heap do runtime Go abaixo do limite do contêiner (o GC aperta antes do OOM).
-      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-24MiB}
+      # Teto de heap do runtime Go em ~75% do limite do contêiner (o GC aperta antes do OOM).
+      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-48MiB}
     networks:
       - borda
     depends_on:
@@ -271,13 +271,15 @@ services:
       nofile:
         soft: ${CADDY_NOFILE:-8192}
         hard: ${CADDY_NOFILE:-8192}
+    # 64 MB, decisão do humano em 2026-10-24 (task 007), para TLS + WebSocket; a spec 014 ainda
+    # diz 32 MB e muda por ADR (spec-guardian). Sem swap: memswap igual ao limite.
     deploy:
       resources:
         limits:
           cpus: '${CADDY_CPUS:-0.5}'
-          memory: ${CADDY_MEM:-32m}
+          memory: ${CADDY_MEM:-64m}
           pids: ${CADDY_PIDS:-64}
-    memswap_limit: ${CADDY_MEMSWAP:-32m}
+    memswap_limit: ${CADDY_MEMSWAP:-64m}
     # Healthcheck: o HEALTHCHECK de apps/web/Dockerfile (http://127.0.0.1:2020/saude).
     logging: *logging
     restart: always
