@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { criarLogger, LoggerNestPino } from '../../src/logger/logger.js';
+import { criarLogger, LoggerNestPino, serializarErro } from '../../src/logger/logger.js';
 import { criarAppDeTeste } from '../helpers/app-de-teste.js';
 import { capturarLogs, UUID } from '../helpers/captura-de-logs.js';
 import { MENSAGEM_INTERNA, ModuloDeErros } from '../helpers/modulo-de-erros.js';
@@ -135,6 +135,51 @@ describe('LoggerNestPino', () => {
     expect(linhas[2]?.msg).toBe('10');
   });
 
+  it('error(mensagem, stack) sem contexto grava o stack em stack, não em contexto', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+    const stack = new Error('quebrou').stack ?? '';
+
+    logger.error('falhou', stack);
+
+    expect(linhas).toHaveLength(1);
+    expect(linhas[0]).toMatchObject({ level: 50, msg: 'falhou', stack });
+    expect(linhas[0]).not.toHaveProperty('contexto');
+  });
+
+  it('error(mensagem, contexto) sem stack grava só o contexto', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+
+    logger.error('falhou', 'Contexto');
+
+    expect(linhas).toHaveLength(1);
+    expect(linhas[0]).toMatchObject({ level: 50, msg: 'falhou', contexto: 'Contexto' });
+    expect(linhas[0]).not.toHaveProperty('stack');
+  });
+
+  it('Logger do Nest com contexto: error(mensagem, stack) grava stack e contexto', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+    const stack = new Error('quebrou').stack ?? '';
+
+    // O Logger do Nest acrescenta o contexto ao fim: error(mensagem, stack, contexto).
+    logger.error('falhou', stack, 'ModuloQualquer');
+
+    expect(linhas[0]).toMatchObject({ msg: 'falhou', stack, contexto: 'ModuloQualquer' });
+  });
+
+  it('fatal(mensagem, stack) sem contexto também grava o stack em stack', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+    const stack = new Error('quebrou').stack ?? '';
+
+    logger.fatal('caiu', stack);
+
+    expect(linhas[0]).toMatchObject({ level: 60, msg: 'caiu', stack });
+    expect(linhas[0]).not.toHaveProperty('contexto');
+  });
+
   it('loga Error com a causa serializada', () => {
     const { destino, linhas } = capturarLogs();
     const logger = new LoggerNestPino(criarLogger('info', destino));
@@ -145,5 +190,76 @@ describe('LoggerNestPino', () => {
       expect.objectContaining({ level: 50, msg: 'quebrou', contexto: 'Contexto' }),
     ]);
     expect(linhas[0]?.err).toMatchObject({ message: 'quebrou' });
+  });
+});
+
+describe('serializador err (sem PII de drivers)', () => {
+  const PII = 'fulano@exemplo.com';
+
+  function erroDeDriver(mensagem = 'duplicate key value violates unique constraint'): Error {
+    return Object.assign(new Error(mensagem), {
+      code: '23505',
+      constraint: 'users_email_key',
+      detail: `Key (email)=(${PII}) already exists.`,
+      parameters: [PII],
+      params: [PII],
+    });
+  }
+
+  it('mantém tipo, mensagem, stack e código, e descarta detail, parameters e params', () => {
+    const { destino, linhas } = capturarLogs();
+
+    criarLogger('info', destino).error({ err: erroDeDriver() }, 'falha no banco');
+
+    expect(linhas[0]?.err).toMatchObject({
+      type: 'Error',
+      message: 'duplicate key value violates unique constraint',
+      stack: expect.stringContaining('duplicate key'),
+      code: '23505',
+      constraint: 'users_email_key',
+    });
+    expect(linhas[0]?.err).not.toHaveProperty('detail');
+    expect(linhas[0]?.err).not.toHaveProperty('parameters');
+    expect(linhas[0]?.err).not.toHaveProperty('params');
+    expect(JSON.stringify(linhas)).not.toContain(PII);
+  });
+
+  it('descarta os campos também em erros aninhados e agregados', () => {
+    const { destino, linhas } = capturarLogs();
+    const embrulho = Object.assign(new Error('falha na consulta'), { original: erroDeDriver() });
+    const agregado = new AggregateError([erroDeDriver()], 'várias falhas');
+
+    const logger = criarLogger('info', destino);
+    logger.error({ err: embrulho }, 'aninhado');
+    logger.error({ err: agregado }, 'agregado');
+
+    expect(linhas).toHaveLength(2);
+    expect(JSON.stringify(linhas)).not.toContain(PII);
+    expect(linhas[0]?.err).toMatchObject({ original: { code: '23505' } });
+    expect(linhas[1]?.err).toMatchObject({ aggregateErrors: [{ code: '23505' }] });
+  });
+
+  it('não lança com referência circular em um campo do erro', () => {
+    const { destino, linhas } = capturarLogs();
+    const ciclo: Record<string, unknown> = { detail: PII };
+    ciclo.eu = ciclo;
+    const erro = Object.assign(new Error('ciclo'), { contexto: ciclo });
+
+    expect(() => criarLogger('info', destino).error({ err: erro }, 'ciclo')).not.toThrow();
+    expect(JSON.stringify(linhas)).not.toContain(PII);
+  });
+
+  it('campo com toJSON (ex.: Date) continua serializado pelo próprio toJSON', () => {
+    const { destino, linhas } = capturarLogs();
+    const quando = new Date('2026-10-24T20:00:00.000Z');
+
+    criarLogger('info', destino).error({ err: Object.assign(new Error('x'), { quando }) }, 'x');
+
+    expect(linhas[0]?.err).toMatchObject({ quando: '2026-10-24T20:00:00.000Z' });
+  });
+
+  it('valor que não é Error passa sem os campos de PII', () => {
+    expect(serializarErro({ detail: PII, code: 'X' })).toEqual({ code: 'X' });
+    expect(serializarErro('texto')).toBe('texto');
   });
 });

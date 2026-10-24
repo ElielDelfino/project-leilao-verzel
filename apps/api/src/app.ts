@@ -5,6 +5,8 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { LogController } from 'fastify';
 import type { Logger } from 'pino';
 
+import { responderErroDoRoteador } from './common/erros/erros-do-roteador.js';
+
 /** Prefixo de todas as rotas REST (specs/001: REST em /api). */
 export const PREFIXO_DA_API = 'api';
 
@@ -15,6 +17,11 @@ export const ROTULO_DO_REQUEST_ID = 'requestId';
  * Adaptador Fastify com o logger Pino: cada requisição recebe um UUID novo, logado como
  * `requestId`. O cabeçalho `request-id` do cliente é ignorado (`requestIdHeader: false`) para que
  * ninguém forje a correlação dos logs.
+ *
+ * `frameworkErrors` responde no envelope os erros que o roteador do Fastify trata antes do Nest
+ * (URL malformada, parâmetro longo demais). Ele substitui o handler padrão do adaptador do Nest,
+ * cuja única outra tarefa é rodar o hook de `app.useSecurityHeaders()`/`enableCsrfProtection()`,
+ * que esta API não usa.
  */
 export function criarAdaptadorFastify(logger: Logger): FastifyAdapter {
   return new FastifyAdapter({
@@ -22,6 +29,7 @@ export function criarAdaptadorFastify(logger: Logger): FastifyAdapter {
     logController: new LogController({ requestIdLogLabel: ROTULO_DO_REQUEST_ID }),
     requestIdHeader: false,
     genReqId: () => randomUUID(),
+    frameworkErrors: responderErroDoRoteador,
   });
 }
 
