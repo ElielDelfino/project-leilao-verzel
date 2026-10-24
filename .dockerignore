@@ -1,0 +1,36 @@
+# Contexto de build das imagens (apps/api/Dockerfile e apps/web/Dockerfile, contexto = raiz).
+# Lista de permissão: tudo fica de fora, exceto o que os builds usam. Um arquivo novo na raiz
+# (inclusive um segredo) nunca entra no contexto por descuido.
+*
+
+# Workspace pnpm: manifesto, lockfile e config da raiz
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+
+# Pacotes do workspace e a config do Caddy embutida na imagem da web
+!apps/api/
+!apps/web/
+!packages/
+!infra/caddy/Caddyfile
+
+# Gerados e dependências: sempre refeitos dentro do build
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.vite
+**/*.tsbuildinfo
+**/*.log
+
+# Segredos e ambientes, mesmo dentro das pastas permitidas (specs/014 §Segredos, ADR 0015):
+# senhas do Compose (.secrets/), .env.local, backups .env.bak-*.local, chaves e certificados.
+**/.secrets
+**/.env
+**/.env.*
+**/secrets.env
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
