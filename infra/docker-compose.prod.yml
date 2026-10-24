@@ -1,8 +1,11 @@
 # Compose de produção (specs/014 §Produção, ADR 0013): Postgres, Redis, API e Caddy numa e2-micro.
-#   docker compose --env-file .env -f infra/docker-compose.prod.yml up -d
+#   docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml up -d
 # Os valores vêm do .env da raiz (defaults não sensíveis); cada interpolação repete o default para o
-# compose também funcionar sem --env-file. Nenhuma senha passa por `environment:` ou `command:`: as
-# senhas são arquivos montados pelo Compose `secrets:` em /run/secrets/<nome>.
+# compose também funcionar sem --env-file (o projeto fica em infra/, então o .env da raiz só é lido
+# com --env-file). O -p é obrigatório junto com o --env-file: o COMPOSE_PROJECT_NAME=leilao do .env
+# tem precedência sobre o `name:` abaixo e juntaria este projeto ao de dev (mesmos volumes).
+# Nenhuma senha passa por `environment:` ou `command:`: as senhas são arquivos montados pelo
+# Compose `secrets:` em /run/secrets/<nome>.
 #   LEILAO_SECRETS_DIR  diretório com db_password e redis_password (padrão ../.secrets, criado por
 #                       `pnpm keys:generate`). Na VM, o diretório gerado a partir do Secret Manager
 #                       (tarefas 008 e 015).
@@ -11,7 +14,8 @@
 # Só o Caddy publica portas (80 e 443). Postgres e Redis ficam numa rede sem saída para a internet.
 name: leilao-prod
 
-x-logging: &logging # specs/014 §Observabilidade: json-file, 10 MB por arquivo, 5 arquivos.
+# Logs do Docker (specs/014 §Observabilidade): json-file, 10 MB por arquivo, 5 arquivos.
+x-logging: &logging
   driver: json-file
   options:
     max-size: 10m
