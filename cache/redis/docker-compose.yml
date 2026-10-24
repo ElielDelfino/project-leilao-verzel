@@ -1,20 +1,34 @@
 # Redis 8.8 sem persistência (ADR 0010): sem RDB (`save ""`), sem AOF e sem volume de dados.
+# A senha vem de .secrets/redis_password (Compose `secrets:`, criado por `pnpm keys:generate`):
+# não aparece no Config.Env nem no argv (`docker inspect`, `ps` do host).
 services:
   redis:
     image: ${REDIS_IMAGE:-redis:8.8.3-alpine}
-    # A senha vai para um redis.conf no tmpfs /run (600, dono redis), nunca para o argv: argumentos
-    # aparecem em `docker inspect` e no `ps` do host. Depois segue o entrypoint oficial, que rebaixa
-    # o processo para o usuário redis. O valor é base64url (pnpm keys:generate), sem espaço nem aspas.
+    # Valida o charset base64url (uma quebra de linha injetaria diretivas no redis.conf), grava
+    # `requirepass` num redis.conf no tmpfs /run (600, dono redis) e segue o entrypoint oficial, que
+    # rebaixa o processo para o usuário redis. Nenhuma mensagem cita o valor.
     entrypoint:
       - /bin/sh
       - -c
       - |
         set -eu
         umask 077
+        arquivo=/run/secrets/redis_password
+        if [ ! -r "$$arquivo" ]; then
+          echo "redis: $$arquivo ausente ou ilegível; rode pnpm keys:generate" >&2
+          exit 1
+        fi
+        senha=$$(cat "$$arquivo")
+        case "$$senha" in
+          '' | *[!A-Za-z0-9_-]*)
+            echo "redis: $$arquivo vazio ou fora de base64url (A-Z a-z 0-9 - _); rode pnpm keys:generate" >&2
+            exit 1
+            ;;
+        esac
         mkdir -p /run/redis
-        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /run/redis/redis.conf
+        printf 'requirepass %s\n' "$$senha" > /run/redis/redis.conf
+        unset senha
         chown -R redis:redis /run/redis
-        unset REDIS_PASSWORD
         exec docker-entrypoint.sh "$$@"
       - redis-entrypoint
     command:
@@ -28,12 +42,26 @@ services:
       - ''
       - --appendonly
       - 'no'
+    secrets:
+      - redis_password
+    # Só no loopback do host: o Redis de dev não fica acessível pela rede local.
     ports:
-      - '${REDIS_PORT:-16379}:6379'
+      - '127.0.0.1:${REDIS_PORT:-16379}:6379'
     read_only: true
     tmpfs:
-      - /run
-      - /tmp
+      - /run:size=8m
+      - /tmp:size=8m
+    # Root no entrypoint: ler o segredo (dono no host, 600: DAC_READ_SEARCH), dar o redis.conf ao
+    # usuário redis (CHOWN) e trocar de usuário (SETUID, SETGID). O redis-server roda sem capabilities.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: ${REDIS_NOFILE:-4096}
@@ -43,12 +71,22 @@ services:
         limits:
           cpus: '${REDIS_CPUS:-0.5}'
           memory: ${REDIS_MEM:-64m}
+          # Equivale a pids_limit (o Compose recusa os dois juntos); conta processos e threads.
+          pids: ${REDIS_PIDS:-64}
     # REDISCLI_AUTH em vez de `redis-cli -a`: a senha não entra no argv do healthcheck.
     healthcheck:
-      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      test:
+        [
+          'CMD-SHELL',
+          'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping | grep -q PONG',
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?defina REDIS_PASSWORD em .env.local}
+      start_period: 10s
+      start_interval: 1s
     restart: unless-stopped
+
+secrets:
+  redis_password:
+    file: ../../.secrets/redis_password

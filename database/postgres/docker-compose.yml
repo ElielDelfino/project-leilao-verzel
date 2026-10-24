@@ -1,20 +1,38 @@
+# Postgres 18.6 (specs/014). A senha vem de .secrets/db_password (Compose `secrets:`, criado por
+# `pnpm keys:generate`) via POSTGRES_PASSWORD_FILE: assim ela não aparece no Config.Env do
+# `docker inspect`. O caminho do arquivo é relativo a este diretório.
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:18.6-alpine}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-leilao}
       POSTGRES_USER: ${POSTGRES_USER:-leilao}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD em .env.local}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       TZ: ${TZ:-UTC}
+    secrets:
+      - db_password
+    # Só no loopback do host: o banco de dev não fica acessível pela rede local.
     ports:
-      - '${POSTGRES_PORT:-15432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-15432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql
     read_only: true
     tmpfs:
-      - /run
-      - /var/run/postgresql
-      - /tmp
+      - /run:size=8m
+      - /var/run/postgresql:size=8m
+      - /tmp:size=16m
+    # Root só no entrypoint: ler o segredo (dono no host, 600: DAC_OVERRIDE), dar o PGDATA ao
+    # usuário postgres (CHOWN) e trocar de usuário com gosu (SETUID, SETGID). Sem FOWNER e sem KILL:
+    # init, reinício e parada testados sem eles. O postgres roda sem capabilities.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: ${POSTGRES_NOFILE:-4096}
@@ -24,12 +42,23 @@ services:
         limits:
           cpus: '${POSTGRES_CPUS:-1}'
           memory: ${POSTGRES_MEM:-300m}
+          # Equivale a pids_limit (o Compose recusa os dois juntos); conta processos e threads.
+          pids: ${POSTGRES_PIDS:-200}
+    # Por TCP (-h 127.0.0.1): durante o init o servidor temporário só escuta no socket, então o
+    # healthcheck não marca healthy antes do servidor definitivo. O init de um volume novo leva de
+    # 5 s a ~40 s conforme o fsync do disco; start_period 60 s mantém a checagem a cada 1 s nesse período.
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 60s
+      start_interval: 1s
     restart: unless-stopped
+
+secrets:
+  db_password:
+    file: ../../.secrets/db_password
 
 volumes:
   pgdata:
