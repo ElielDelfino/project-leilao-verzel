@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:?defina DB_PASSWORD em .env.local}
       TZ: ${TZ:-UTC}
     ports:
-      - "${POSTGRES_PORT:-15432}:5432"
+      - '${POSTGRES_PORT:-15432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql
     read_only: true
@@ -22,10 +22,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${POSTGRES_CPUS:-1}"
+          cpus: '${POSTGRES_CPUS:-1}'
           memory: ${POSTGRES_MEM:-300m}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
       timeout: 3s
       retries: 10

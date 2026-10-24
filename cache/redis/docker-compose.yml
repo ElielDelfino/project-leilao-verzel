@@ -1,20 +1,35 @@
+# Redis 8.8 sem persistência (ADR 0010): sem RDB (`save ""`), sem AOF e sem volume de dados.
 services:
   redis:
     image: ${REDIS_IMAGE:-redis:8.8.3-alpine}
+    # A senha vai para um redis.conf no tmpfs /run (600, dono redis), nunca para o argv: argumentos
+    # aparecem em `docker inspect` e no `ps` do host. Depois segue o entrypoint oficial, que rebaixa
+    # o processo para o usuário redis. O valor é base64url (pnpm keys:generate), sem espaço nem aspas.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        umask 077
+        mkdir -p /run/redis
+        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /run/redis/redis.conf
+        chown -R redis:redis /run/redis
+        unset REDIS_PASSWORD
+        exec docker-entrypoint.sh "$$@"
+      - redis-entrypoint
     command:
       - redis-server
-      - --requirepass
-      - ${REDIS_PASSWORD:?defina REDIS_PASSWORD em .env.local}
+      - /run/redis/redis.conf
       - --maxmemory
       - ${REDIS_MAXMEMORY:-48mb}
       - --maxmemory-policy
       - volatile-lru
+      - --save
+      - ''
       - --appendonly
-      - "no"
+      - 'no'
     ports:
-      - "${REDIS_PORT:-16379}:6379"
-    volumes:
-      - redisdata:/data
+      - '${REDIS_PORT:-16379}:6379'
     read_only: true
     tmpfs:
       - /run
@@ -26,16 +41,14 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${REDIS_CPUS:-0.5}"
+          cpus: '${REDIS_CPUS:-0.5}'
           memory: ${REDIS_MEM:-64m}
+    # REDISCLI_AUTH em vez de `redis-cli -a`: a senha não entra no argv do healthcheck.
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 10
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?defina REDIS_PASSWORD em .env.local}
     restart: unless-stopped
-
-volumes:
-  redisdata:
