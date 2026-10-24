@@ -247,15 +247,88 @@ describe('serializador err (sem PII de drivers)', () => {
 
     expect(() => criarLogger('info', destino).error({ err: erro }, 'ciclo')).not.toThrow();
     expect(JSON.stringify(linhas)).not.toContain(PII);
+    expect(linhas[0]?.err).toMatchObject({ contexto: { eu: '[Circular]' } });
   });
 
-  it('campo com toJSON (ex.: Date) continua serializado pelo próprio toJSON', () => {
+  it('ciclo direto num valor que não é Error vira "[Circular]"', () => {
+    const ciclo: Record<string, unknown> = { code: 'X', detail: PII };
+    ciclo.eu = ciclo;
+
+    expect(serializarErro(ciclo)).toEqual({ code: 'X', eu: '[Circular]' });
+  });
+
+  it('o mesmo objeto em dois ramos é copiado nos dois, sem "[Circular]"', () => {
+    const compartilhado = { tabela: 'users', detail: PII };
+    const erro = Object.assign(new Error('x'), { a: compartilhado, b: compartilhado });
+
+    expect(serializarErro(erro)).toMatchObject({
+      a: { tabela: 'users' },
+      b: { tabela: 'users' },
+    });
+    expect(JSON.stringify(serializarErro(erro))).not.toContain(PII);
+  });
+
+  it('Date, Buffer e TypedArray continuam serializados pelo próprio formato', () => {
     const { destino, linhas } = capturarLogs();
     const quando = new Date('2026-10-24T20:00:00.000Z');
+    const erro = Object.assign(new Error('x'), {
+      quando,
+      bytes: Buffer.from('ab'),
+      numeros: new Uint8Array([1, 2]),
+    });
 
-    criarLogger('info', destino).error({ err: Object.assign(new Error('x'), { quando }) }, 'x');
+    criarLogger('info', destino).error({ err: erro }, 'x');
 
-    expect(linhas[0]?.err).toMatchObject({ quando: '2026-10-24T20:00:00.000Z' });
+    expect(linhas[0]?.err).toMatchObject({
+      quando: '2026-10-24T20:00:00.000Z',
+      bytes: { type: 'Buffer', data: [97, 98] },
+      numeros: { 0: 1, 1: 2 },
+    });
+  });
+
+  it('toJSON próprio do erro não contorna o filtro de PII', () => {
+    const erro = Object.assign(new Error('e'), { toJSON: () => ({ detail: PII, code: 'X' }) });
+
+    const serializado = serializarErro(erro);
+
+    expect(JSON.stringify(serializado)).not.toContain(PII);
+    expect(JSON.parse(JSON.stringify(serializado))).toEqual({ code: 'X' });
+  });
+
+  it('toJSON de um objeto aninhado também passa pelo filtro', () => {
+    const aninhado = { toJSON: () => ({ params: [PII], tabela: 'users' }) };
+    const erro = Object.assign(new Error('e'), { consulta: aninhado });
+
+    const serializado = JSON.stringify(serializarErro(erro));
+
+    expect(serializado).not.toContain(PII);
+    expect(serializado).toContain('"consulta":{"tabela":"users"}');
+  });
+
+  it('toJSON que lança não derruba o log', () => {
+    const quebrado = {
+      toJSON: () => {
+        throw new Error('toJSON quebrado');
+      },
+    };
+
+    expect(serializarErro(Object.assign(new Error('e'), { quebrado }))).toMatchObject({
+      quebrado: '[toJSON falhou]',
+    });
+  });
+
+  it('objeto profundo demais é truncado, sem RangeError', () => {
+    const { destino, linhas } = capturarLogs();
+    let profundo: Record<string, unknown> = { detail: PII };
+    for (let nivel = 0; nivel < 20_000; nivel += 1) {
+      profundo = { filho: profundo };
+    }
+    const erro = Object.assign(new Error('fundo'), { profundo });
+
+    expect(() => criarLogger('info', destino).error({ err: erro }, 'fundo')).not.toThrow();
+    expect(linhas).toHaveLength(1);
+    expect(JSON.stringify(serializarErro(erro))).toContain('[Truncated]');
+    expect(JSON.stringify(linhas)).not.toContain(PII);
   });
 
   it('valor que não é Error passa sem os campos de PII', () => {
