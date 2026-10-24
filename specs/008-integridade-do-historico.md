@@ -17,7 +17,7 @@ Qualquer alteração, remoção ou inserção posterior no histórico, mesmo dir
 - Pseudônimo: `"Licitante #" + hex(HMAC-SHA256(PSEUDONYM_HMAC_KEY, loteId + ":" + userId))[0..6]`. É estável dentro do lote e diferente entre lotes, então não dá para ligar um licitante entre lotes.
 - Defesa adicional: triggers impedem UPDATE/DELETE em `bids` e `lot_seals` (um superusuário pode removê-los, e a detecção continua valendo).
 
-## Chaves (proposta, ADR 0023)
+## Chaves (ADR 0023)
 Formatos que a API, o seed e a verificação no navegador leem. Origem de cada variável em specs/014 §Segredos.
 
 - `ED25519_PRIVATE_KEY`: seed Ed25519 de 32 bytes (RFC 8032 §5.1.5) em base64url sem padding (43 caracteres). A API decodifica, recusa no boot o que não tiver 32 bytes e deriva a chave pública (32 bytes, RFC 8032 §5.1.5). A chave pública não é configurada.
@@ -57,4 +57,4 @@ Veredito: `integro` se tudo passar; senão `adulterado` + lista de problemas. A 
 - [ ] A API não sobe com `ED25519_PRIVATE_KEY` ou `PSEUDONYM_HMAC_KEY` que não decodifique para 32 bytes; a mensagem cita só o nome (teste de unidade do env).
 
 ## Decisões relacionadas
-- decisions/0005-integridade-hash-chain-ed25519.md, 0023-segredos-em-arquivo-e-formatos.md (proposta)
+- decisions/0005-integridade-hash-chain-ed25519.md, 0023-segredos-em-arquivo-e-formatos.md

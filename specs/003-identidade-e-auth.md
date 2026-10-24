@@ -9,14 +9,14 @@ Dois papéis com permissões disjuntas. Sem recuperação de senha (fora de esco
 ## Requisitos
 - RF-01 Cadastro público com nome (2–80 caracteres), e-mail (único, case-insensitive, até 254 caracteres), senha (10–128 caracteres) e papel (`leiloeiro` | `licitante`). O papel é imutável.
 - RF-02 Login (e-mail até 254 caracteres, senha de 1 a 128 caracteres), logout, refresh, `me` e emissão do token CSRF.
-- RF-03 O seed cria `leiloeiro@demo.local`, `ana@demo.local` e `bruno@demo.local` (licitantes) com a senha de `SEED_DEMO_PASSWORD`, publicada no README. Ela não é segredo: valor fixo no `.env` versionado, o mesmo em dev, CI e produção, com 10 a 128 caracteres `A–Z a–z 0–9 - _` (proposta da ADR 0023: `leilao-demo-2026`; origem em specs/014 §Segredos).
+- RF-03 O seed cria `leiloeiro@demo.local`, `ana@demo.local` e `bruno@demo.local` (licitantes) com a senha de `SEED_DEMO_PASSWORD`, publicada no README. Ela não é segredo: valor fixo no `.env` versionado, o mesmo em dev, CI e produção, com 10 a 128 caracteres `A–Z a–z 0–9 - _` valor `leilao-demo-2026`, ADR 0023; origem em specs/014 §Segredos.
 - RNF-01 Senha com hash argon2id (parâmetros padrão OWASP 2025: m=19 MiB, t=2, p=1).
 - RNF-02 Rate limit do login: 5 tentativas/min por IP + e-mail → 429 `MUITAS_TENTATIVAS` com header `Retry-After` (segundos).
 - RNF-03 Mensagem de login inválido idêntica para e-mail inexistente e senha errada (`CREDENCIAIS_INVALIDAS`). Para e-mail inexistente, o login verifica a senha contra um hash argon2id dummy (mesmos parâmetros do RNF-01), para que o tempo de resposta seja o mesmo nos dois casos.
 - RNF-04 Rate limit do cadastro: 5 cadastros/min por IP → 429 `MUITAS_TENTATIVAS` com header `Retry-After` (segundos).
 
 ## Comportamento
-- Access token JWT HS256 (15 min) no cookie `access_token`, assinado com os 32 bytes decodificados de `JWT_SECRET` (base64url sem padding, 43 caracteres; formato e origem em specs/014 §Segredos, proposta da ADR 0023). Refresh token opaco (256 bits) no cookie `refresh_token`; no banco só fica o SHA-256. Cada uso gera um novo token na mesma família; reuso de um token já substituído revoga a família inteira.
+- Access token JWT HS256 (15 min) no cookie `access_token`, assinado com os 32 bytes decodificados de `JWT_SECRET` (base64url sem padding, 43 caracteres; formato e origem em specs/014 §Segredos, ADR 0023). Refresh token opaco (256 bits) no cookie `refresh_token`; no banco só fica o SHA-256. Cada uso gera um novo token na mesma família; reuso de um token já substituído revoga a família inteira.
 - CSRF: cookie `csrf_token` (não httpOnly) + header `X-CSRF-Token` obrigatório em POST/PUT/PATCH/DELETE, inclusive cadastro e login; comparação em tempo constante. `GET /api/auth/csrf` (sem autenticação) emite um `csrf_token` novo; a SPA a chama antes do primeiro POST só quando o cookie `csrf_token` não existir.
 - Logout: lê o `refresh_token`, revoga a família dele (se houver) e expira os três cookies com os mesmos `Path` da emissão. Responde 204 mesmo sem sessão.
 - Guards: `@Papel('licitante')`, `@Papel('leiloeiro')`, `@Publico()`. Rota restrita a outro papel → 403 `PAPEL_NAO_PERMITIDO` (ex.: leiloeiro em `POST /api/carteira/depositos`); o lance tem código próprio, `LEILOEIRO_NAO_PODE_LANCAR` (specs/007). Recurso de outro usuário → 404 (não 403), para não vazar existência.
@@ -66,4 +66,4 @@ O 409 `EMAIL_EM_USO` do cadastro revela se um e-mail já tem conta. O RNF-04 lim
 Recuperação de senha, verificação de e-mail, OAuth, 2FA, exclusão de conta.
 
 ## Decisões relacionadas
-- decisions/0006-autenticacao-jwt-cookies.md, 0022-complementos-auth-e-idempotencia.md, 0023-segredos-em-arquivo-e-formatos.md (proposta)
+- decisions/0006-autenticacao-jwt-cookies.md, 0022-complementos-auth-e-idempotencia.md, 0023-segredos-em-arquivo-e-formatos.md

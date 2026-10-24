@@ -1,8 +1,9 @@
 # 0023 — Segredos em arquivo, formatos das chaves e variáveis não secretas
 
-Status: proposta
+Status: aceita
 Data: 2026-10-24
-Substitui: ADR 0015, quando aceita (mantém o Secret Manager e troca a entrega dos segredos)
+Substitui: ADR 0015 (mantém o Secret Manager e troca a entrega dos segredos)
+Decisão: do humano, em 2026-10-24 (tarefa 015), aceitando os itens 1 a 7 como propostos e fixando o valor de `SEED_DEMO_PASSWORD`.
 
 ## Contexto
 A ADR 0015 manda gravar os 5 segredos em `/run/leilao/secrets.env` e usar `${VAR:?}`. Fatos novos desde então:
@@ -17,7 +18,7 @@ A ADR 0015 manda gravar os 5 segredos em `/run/leilao/secrets.env` e usar `${VAR
 3. **Leitura pela API (e pelo runner de migrations e pelo seed):** para cada um dos 5 segredos, exatamente uma de `<VAR>` (o valor; dev e CI) ou `<VAR>_FILE` (caminho do arquivo com o valor; produção). As duas juntas, nenhuma das duas, arquivo ilegível ou conteúdo fora do formato fazem o processo não subir, com mensagem que cita só o nome da variável.
 4. **Formatos:** os 5 segredos são 32 bytes aleatórios em base64url sem padding (43 caracteres). `ED25519_PRIVATE_KEY` é a seed de 32 bytes da RFC 8032 §5.1.5. `JWT_SECRET` e `PSEUDONYM_HMAC_KEY` são usados como os 32 bytes decodificados. `DB_PASSWORD` e `REDIS_PASSWORD` são usados como o próprio texto de 43 caracteres.
 5. **`ED25519_KEY_ID` deixa de ser variável:** a API o deriva da chave pública (16 primeiros caracteres hex minúsculos do SHA-256 dos 32 bytes da chave pública).
-6. **`SEED_DEMO_PASSWORD` não é segredo:** valor fixo no `.env` versionado, o mesmo em dev, CI e produção, publicado no README (specs/003 RF-03). Valor proposto: `leilao-demo-2026`.
+6. **`SEED_DEMO_PASSWORD` não é segredo:** valor fixo no `.env` versionado, o mesmo em dev, CI e produção, publicado no README (specs/003 RF-03). Valor: `leilao-demo-2026`.
 7. **Reinício da VM:** como `/run` é tmpfs, uma unidade systemd roda o `fetch-secrets.sh` no boot, antes do `docker.service`, para que os containers com `restart: always` encontrem os arquivos.
 
 ## Alternativas consideradas

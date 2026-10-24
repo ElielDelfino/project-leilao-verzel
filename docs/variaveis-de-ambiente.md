@@ -1,6 +1,6 @@
 # Variáveis de ambiente
 
-Fonte: specs/014 §Segredos, specs/008 §Chaves e ADR 0015 (substituição proposta na ADR 0023, pendente de decisão do humano). Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
+Fonte: specs/014 §Segredos, specs/008 §Chaves e ADR 0023 (que substitui a 0015). Produção: [deploy.md](deploy.md). Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
 
 ## Onde cada grupo vive
 
@@ -9,7 +9,7 @@ Fonte: specs/014 §Segredos, specs/008 §Chaves e ADR 0015 (substituição propo
 | Defaults não sensíveis (portas, imagens, limites) | `.env` (versionado) | `.env` | `.env` |
 | Segredos | `.env.local` (fora do Git), criado por `pnpm keys:generate` | GitHub Secrets | GCP Secret Manager → um arquivo por segredo em `/run/leilao/secrets/` (tmpfs, 600, dono uid 1000), montado com Compose `secrets:`; a API lê `<VAR>_FILE` |
 | Não secretas com valor público (`SEED_DEMO_PASSWORD`) | `.env` | `.env` | `.env` |
-| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | a definir (tarefa 006) | os arquivos de `/run/leilao/secrets/` (`LEILAO_SECRETS_DIR`) |
+| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | a definir (tarefa 006) | `db_password` e `redis_password` no diretório `LEILAO_SECRETS_DIR` do `infra/docker-compose.prod.yml` (padrão `../.secrets`; na VM, `/run/leilao/secrets/`), montados com Compose `secrets:` em `/run/secrets/<nome>` (tarefa 007) |
 
 A infra local sobe com `pnpm infra:up` (= `docker compose --env-file .env --env-file .env.local up -d`).
 
@@ -51,10 +51,10 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 | `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
 | `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5, gerada com `@noble/ed25519`), base64url sem padding (43 caracteres) | API: assinatura dos lances e do selo (specs/008 §Chaves) | Secret Manager → `ed25519_private_key` |
 
-Variáveis que o `pnpm keys:generate` ainda gera e que saem dele com a ADR 0023 (pedido ao infra):
+Variáveis que o `pnpm keys:generate` ainda gera e que saem dele pela ADR 0023 (pedido ao infra):
 
 - `ED25519_KEY_ID`: deixa de existir. A API deriva o `keyId` da chave pública: 16 primeiros caracteres hex minúsculos de SHA-256 dos 32 bytes dela (specs/008 §Chaves, com vetor de teste).
-- `SEED_DEMO_PASSWORD`: não é segredo. Vai para o `.env` versionado, com o mesmo valor em dev, CI e produção (proposta: `leilao-demo-2026`; 10 a 128 caracteres `A–Z a–z 0–9 - _`, specs/003 RF-03), e é publicada no README. Um `.env.local` antigo que ainda tenha essas linhas sobrescreve o `.env` em dev: apague-as.
+- `SEED_DEMO_PASSWORD`: não é segredo. Vai para o `.env` versionado, com o mesmo valor em dev, CI e produção (valor `leilao-demo-2026`, decidido na ADR 0023; 10 a 128 caracteres `A–Z a–z 0–9 - _`, specs/003 RF-03), e é publicada no README. Um `.env.local` antigo que ainda tenha essas linhas sobrescreve o `.env` em dev: apague-as.
 
 Base64url (RFC 4648 §5) usa só `A–Z a–z 0–9 - _`, então nenhum valor precisa de aspas no `.env` nem de escape no compose ou numa URL de conexão. O entrypoint do Redis recusa uma senha fora desse conjunto (uma quebra de linha injetaria diretivas no `redis.conf`) e sai com erro, sem exibir o valor.
 

@@ -17,9 +17,7 @@ Sem staging (ADR 0013): só uma e2-micro é gratuita; a paridade vem do compose.
 - Caddy: TLS automático, serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), proxy de `/api/*` e `/socket.io/*` para a API, headers de segurança (CSP, HSTS, nosniff, frame-ancestors none).
 - Host: `<ip>.sslip.io` com TLS automático do Caddy até haver um domínio próprio (ADR 0020, provisória).
 
-## Segredos (ADR 0015; proposta em ADR 0023)
-> Proposta da tarefa 015, pendente de decisão do humano: ADR 0023 (entrega em arquivo, `*_FILE`, origem de `ED25519_KEY_ID` e `SEED_DEMO_PASSWORD`).
-
+## Segredos (ADR 0023)
 - GCP Secret Manager: `DB_PASSWORD`, `REDIS_PASSWORD`, `JWT_SECRET`, `ED25519_PRIVATE_KEY`, `PSEUDONYM_HMAC_KEY` (5 de 6 versões ativas gratuitas). Ao rotacionar, destrua a versão anterior.
 - A conta de serviço da VM tem só `roles/secretmanager.secretAccessor`, sem chave JSON.
 - A API valida o env com Zod no boot e falha rápido.
@@ -32,7 +30,7 @@ Sem staging (ADR 0013): só uma e2-micro é gratuita; a paridade vem do compose.
 | `JWT_SECRET` | 32 bytes aleatórios em base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | `.env.local` | GitHub Secrets | Secret Manager → arquivo | specs/003 §Comportamento |
 | `PSEUDONYM_HMAC_KEY` | idem; a chave HMAC-SHA256 são os 32 bytes decodificados | `.env.local` | GitHub Secrets | Secret Manager → arquivo | specs/008 §Chaves |
 | `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5) em base64url sem padding (43 caracteres) | `.env.local` | GitHub Secrets | Secret Manager → arquivo | specs/008 §Chaves |
-| `SEED_DEMO_PASSWORD` | não é segredo: 10 a 128 caracteres `A–Z a–z 0–9 - _` (proposta: `leilao-demo-2026`) | `.env` versionado | `.env` | `.env` | specs/003 RF-03 |
+| `SEED_DEMO_PASSWORD` | não é segredo: 10 a 128 caracteres `A–Z a–z 0–9 - _` valor `leilao-demo-2026` | `.env` versionado | `.env` | `.env` | specs/003 RF-03 |
 
 - Não existe `ED25519_KEY_ID`: a API deriva o `keyId` da chave pública (specs/008 §Chaves).
 - Todo `.env.local` e todo arquivo de segredo tem permissão 600; nenhum valor tem quebra de linha.
@@ -56,7 +54,7 @@ Sem staging (ADR 0013): só uma e2-micro é gratuita; a paridade vem do compose.
 - Mensagens verificadas no Docker Compose 5.5.1 em 2026-10-24; em outra versão, o critério é o `up` falhar citando o caminho do arquivo ausente.
 
 ## Conexão da API com Postgres e Redis
-A API e o runner de migrations (`pnpm db:migrate`) leem a conexão em partes, com os mesmos nomes dos segredos de ADR 0015 e dos defaults do `.env`. Não existem `DATABASE_URL` nem `REDIS_URL`.
+A API e o runner de migrations (`pnpm db:migrate`) leem a conexão em partes, com os mesmos nomes dos segredos de ADR 0023 e dos defaults do `.env`. Não existem `DATABASE_URL` nem `REDIS_URL`.
 
 | Destino | Variáveis (todas obrigatórias) | dev (API no host) | prod (API no compose) |
 |---|---|---|---|
@@ -95,4 +93,4 @@ A API e o runner de migrations (`pnpm db:migrate`) leem a conexão em partes, co
 - [ ] Depois de `sudo reboot` da VM, `/api/health/ready` volta a responder 200 em até 5 min sem intervenção.
 
 ## Decisões relacionadas
-- decisions/0013-deploy-gcp-e2-micro.md, 0015-segredos-gcp-secret-manager.md, 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md, 0020-host-publico-e-uptime.md, 0023-segredos-em-arquivo-e-formatos.md (proposta)
+- decisions/0013-deploy-gcp-e2-micro.md, 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md, 0020-host-publico-e-uptime.md, 0023-segredos-em-arquivo-e-formatos.md

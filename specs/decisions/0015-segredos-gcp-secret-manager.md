@@ -1,6 +1,6 @@
 # 0015 — Segredos no GCP Secret Manager
 
-Status: aceita
+Status: Substituída por 0023
 Data: 2026-10-24
 
 ## Contexto

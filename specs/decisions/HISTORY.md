@@ -18,7 +18,7 @@
 | [0012](0012-typescript-6.md) | TypeScript 6.0.x | provisória | revisar quando o Nest adotar o TS 7 |
 | [0013](0013-deploy-gcp-e2-micro.md) | Deploy GCP e2-micro | aceita | infra de produção e alternativas descartadas |
 | [0014](0014-rnfs-de-demo.md) | RNFs de demo | provisória | metas rebaixadas; revisar se sair da e2-micro |
-| [0015](0015-segredos-gcp-secret-manager.md) | Secret Manager | aceita | gestão de segredos |
+| [0015](0015-segredos-gcp-secret-manager.md) | Secret Manager | substituída por 0023 | gestão de segredos |
 | [0016](0016-testes-dois-niveis.md) | Testes e verify | aceita | pirâmide e dois níveis |
 | [0017](0017-ci-cd-github-actions.md) | CI/CD | aceita | pipeline e rollback |
 | [0018](0018-observabilidade-e-backup.md) | Observabilidade e backup | aceita | logs, health, uptime, pg_dump |
@@ -26,4 +26,4 @@
 | [0020](0020-host-publico-e-uptime.md) | Host público e uptime | provisória | sslip.io + UptimeRobot; revisar na tarefa 008 |
 | [0021](0021-orquestracao-e-agentes-executores.md) | Orquestrador e agentes executores | aceita | hub-and-spoke, três camadas (frontmatter, gates, hook), opus, revisão pelos globais |
 | [0022](0022-complementos-auth-e-idempotencia.md) | Complementos de auth e idempotência | aceita | complementa a 0006: refresh_token em Path=/api/auth, GET /api/auth/csrf, PAPEL_NAO_PERMITIDO, rate limit do cadastro, Idempotency-Key com corpo diferente → 422 |
-| [0023](0023-segredos-em-arquivo-e-formatos.md) | Segredos em arquivo e formatos | proposta | substitui a 0015 quando aceita: segredos em arquivo (`*_FILE`) em produção, formatos base64url de 32 bytes, `keyId` derivado da chave pública, `SEED_DEMO_PASSWORD` fixa no `.env` |
+| [0023](0023-segredos-em-arquivo-e-formatos.md) | Segredos em arquivo e formatos | aceita | substitui a 0015: Secret Manager mantido, segredos em arquivo (`*_FILE`) em produção, formatos base64url de 32 bytes, `keyId` derivado da chave pública, `SEED_DEMO_PASSWORD=leilao-demo-2026` fixa no `.env` |
