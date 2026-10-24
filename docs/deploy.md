@@ -15,6 +15,7 @@ docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml u
 - `API_IMAGE` e `WEB_IMAGE` escolhem as imagens (prod: `ghcr.io/<owner>/leilao-api:<sha>` e `leilao-web:<sha>`). Sem elas, o compose constrói as imagens locais.
 - Redes: `borda` (Caddy e API, com saída para a Scryfall) e `dados` (`internal`, sem saída: Postgres, Redis e API).
 - Só o Caddy publica portas: 80 e 443 TCP (`CADDY_HTTP_PORT` e `CADDY_HTTPS_PORT` para testes locais). O endereço público vem de `CADDY_SITE_ADDRESS`: em prod, `<ip-com-hifens>.sslip.io` (ADR 0020); o padrão `localhost` usa a CA local do Caddy.
+- Limites de RAM (ADR 0024): Postgres 300 MB, API 300 MB, Redis 64 MB e Caddy 64 MB (`GOMEMLIMIT` 48 MiB), 728 MB no total. Só Postgres e API têm swap (2× o limite). O Caddy serve só HTTP/1.1 e HTTP/2, sem 443/udp.
 - O healthcheck da API usa `/api/health/live` até a tarefa 017; depois passa a `/api/health/ready` (Postgres + Redis), que é o que o deploy verifica (specs/014 §CI/CD).
 
 ## Segredos em produção (ADR 0023)

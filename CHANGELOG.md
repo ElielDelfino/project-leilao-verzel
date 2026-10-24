@@ -23,3 +23,4 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), versionamen
 - Hash chain + Ed25519 + selo; carteira em ledger; encerramento por varredura de 1 s.
 - Deploy GCP e2-micro (Always Free); RNFs de demo; segredos no Secret Manager.
 - Segredos entregues em arquivo (`<VAR>_FILE`) em produção, `keyId` derivado da chave pública e `SEED_DEMO_PASSWORD` pública e fixa (ADR 0023, substitui a 0015).
+- Caddy de produção com 64 MB (era 32 MB) e `GOMEMLIMIT` 48 MiB; swap 2× só para Postgres e API; HTTP/3 desligado; CSP `img-src 'self' data:` (ADR 0024, task 015).

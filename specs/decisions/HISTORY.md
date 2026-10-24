@@ -27,3 +27,4 @@
 | [0021](0021-orquestracao-e-agentes-executores.md) | Orquestrador e agentes executores | aceita | hub-and-spoke, três camadas (frontmatter, gates, hook), opus, revisão pelos globais |
 | [0022](0022-complementos-auth-e-idempotencia.md) | Complementos de auth e idempotência | aceita | complementa a 0006: refresh_token em Path=/api/auth, GET /api/auth/csrf, PAPEL_NAO_PERMITIDO, rate limit do cadastro, Idempotency-Key com corpo diferente → 422 |
 | [0023](0023-segredos-em-arquivo-e-formatos.md) | Segredos em arquivo e formatos | aceita | substitui a 0015: Secret Manager mantido, segredos em arquivo (`*_FILE`) em produção, formatos base64url de 32 bytes, `keyId` derivado da chave pública, `SEED_DEMO_PASSWORD=leilao-demo-2026` fixa no `.env` |
+| [0024](0024-limites-do-caddy-swap-e-http3.md) | Limites do Caddy, swap e HTTP/3 | aceita | complementa a 0013: Caddy com 64 MB e GOMEMLIMIT 48 MiB, swap 2× só para Postgres e API, sem HTTP/3, CSP `img-src 'self' data:` |

@@ -13,8 +13,8 @@ Sem staging (ADR 0013): só uma e2-micro é gratuita; a paridade vem do compose.
 
 ## Produção
 - VM Debian 13 com Docker Engine, swap de 2 GB e firewall liberando só 22 (restrito), 80 e 443.
-- `infra/docker-compose.prod.yml` inclui Postgres, Redis, API e Caddy, com os limites do `.env` (PG 300 MB, API 300 MB, Redis 64 MB, Caddy 32 MB), `read_only`, `tmpfs /run`, `ulimits` e portas internas.
-- Caddy: TLS automático, serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), proxy de `/api/*` e `/socket.io/*` para a API, headers de segurança (CSP, HSTS, nosniff, frame-ancestors none).
+- `infra/docker-compose.prod.yml` inclui Postgres, Redis, API e Caddy, com os limites de RAM do `.env` (PG 300 MB, API 300 MB, Redis 64 MB, Caddy 64 MB; soma 728 MB, ADR 0024), `read_only`, `tmpfs /run`, `ulimits` e portas internas. Swap por container (`memswap_limit`) de 2× o limite só para Postgres e API (600 MB); Redis e Caddy sem swap. O Caddy roda com `GOMEMLIMIT` de 48 MiB.
+- Caddy: TLS automático, serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), proxy de `/api/*` e `/socket.io/*` para a API, headers de segurança (CSP com `img-src 'self' data:`, HSTS, nosniff, frame-ancestors none). Só HTTP/1.1 e HTTP/2: HTTP/3 desligado e 443/udp não publicado (ADR 0024).
 - Host: `<ip>.sslip.io` com TLS automático do Caddy até haver um domínio próprio (ADR 0020, provisória).
 
 ## Segredos (ADR 0023)
@@ -103,4 +103,4 @@ A API e o runner de migrations (`pnpm db:migrate`) leem a conexão em partes, co
 - [ ] Depois de `sudo reboot` da VM, `/api/health/ready` volta a responder 200 em até 5 min sem intervenção (depende da tarefa 008, infra).
 
 ## Decisões relacionadas
-- decisions/0013-deploy-gcp-e2-micro.md, 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md, 0020-host-publico-e-uptime.md, 0023-segredos-em-arquivo-e-formatos.md
+- decisions/0013-deploy-gcp-e2-micro.md, 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md, 0020-host-publico-e-uptime.md, 0023-segredos-em-arquivo-e-formatos.md, 0024-limites-do-caddy-swap-e-http3.md
