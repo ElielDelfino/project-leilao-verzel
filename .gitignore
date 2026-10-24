@@ -1,0 +1,51 @@
+# Fila de trabalho e temporários (obrigatório: specs/002)
+/tasks/
+/tmp/
+
+# Workspace de estudo pessoal (skill teach)
+/learning/
+
+# Rascunho da entrevista
+/.grill/
+
+# Segredos e ambientes locais (o .env versionado só tem defaults não sensíveis)
+.env.local
+.env.*.local
+.env.prod
+secrets.env
+*.pem
+*.key
+
+# Dependências e builds
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+.vite/
+
+# Testes
+playwright-report/
+test-results/
+blob-report/
+k6-results/
+
+# Dados locais, dumps e logs
+*.log
+logs/
+*.dump
+*.sql.gz
+pgdata/
+redisdata/
+
+# Editores e SO
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Claude Code: worktrees e configurações locais
+.claude/worktrees/
+.claude/settings.local.json

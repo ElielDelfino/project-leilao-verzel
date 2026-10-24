@@ -1,0 +1,99 @@
+# Contrato de tempo real (AsyncAPI 3). Fonte: specs/009. Dono: spec-guardian.
+# Esqueleto inicial; a tarefa 009 o valida no CI e completa os schemas.
+asyncapi: 3.0.0
+info:
+  title: Casa de Leilões — tempo real
+  version: 0.1.0
+  description: Eventos Socket.IO do namespace /leilao. Publicados somente após o COMMIT.
+servers:
+  local:
+    host: localhost:13000
+    protocol: wss
+    pathname: /socket.io
+channels:
+  lote:
+    address: 'lote:{loteId}'
+    parameters:
+      loteId:
+        description: UUIDv7 do lote
+    messages:
+      lanceAceito: { $ref: '#/components/messages/lance_aceito' }
+      fimEstendido: { $ref: '#/components/messages/fim_estendido' }
+      loteIniciado: { $ref: '#/components/messages/lote_iniciado' }
+      loteEncerrado: { $ref: '#/components/messages/lote_encerrado' }
+      loteCancelado: { $ref: '#/components/messages/lote_cancelado' }
+  usuario:
+    address: 'usuario:{usuarioId}'
+    parameters:
+      usuarioId:
+        description: UUIDv7 do usuário autenticado
+    messages:
+      voceFoiSuperado: { $ref: '#/components/messages/voce_foi_superado' }
+      saldoAtualizado: { $ref: '#/components/messages/saldo_atualizado' }
+      loteArrematado: { $ref: '#/components/messages/lote_arrematado' }
+operations:
+  receberEventosDoLote:
+    action: send
+    channel: { $ref: '#/channels/lote' }
+  receberEventosDoUsuario:
+    action: send
+    channel: { $ref: '#/channels/usuario' }
+components:
+  schemas:
+    Uuid: { type: string, format: uuid }
+    Centavos: { type: integer, minimum: 0 }
+    Instante: { type: string, format: date-time }
+  messages:
+    lance_aceito:
+      payload:
+        type: object
+        required: [loteId, seq, pseudonimo, valorCentavos, criadoEm, fimEm, totalLances]
+        properties:
+          loteId: { $ref: '#/components/schemas/Uuid' }
+          seq: { type: integer, minimum: 1 }
+          pseudonimo: { type: string, pattern: '^Licitante #[0-9a-f]{6}$' }
+          valorCentavos: { $ref: '#/components/schemas/Centavos' }
+          criadoEm: { $ref: '#/components/schemas/Instante' }
+          fimEm: { $ref: '#/components/schemas/Instante' }
+          totalLances: { type: integer }
+    fim_estendido:
+      payload:
+        type: object
+        required: [loteId, fimEm]
+        properties:
+          loteId: { $ref: '#/components/schemas/Uuid' }
+          fimEm: { $ref: '#/components/schemas/Instante' }
+    lote_iniciado:
+      payload: { type: object, required: [loteId], properties: { loteId: { $ref: '#/components/schemas/Uuid' } } }
+    lote_encerrado:
+      payload:
+        type: object
+        required: [loteId]
+        properties:
+          loteId: { $ref: '#/components/schemas/Uuid' }
+          vencedorPseudonimo: { type: string }
+          valorArremateCentavos: { $ref: '#/components/schemas/Centavos' }
+    lote_cancelado:
+      payload: { type: object, required: [loteId], properties: { loteId: { $ref: '#/components/schemas/Uuid' } } }
+    voce_foi_superado:
+      payload:
+        type: object
+        required: [loteId, valorCentavos]
+        properties:
+          loteId: { $ref: '#/components/schemas/Uuid' }
+          valorCentavos: { $ref: '#/components/schemas/Centavos' }
+    saldo_atualizado:
+      payload:
+        type: object
+        required: [totalCentavos, comprometidoCentavos, disponivelCentavos]
+        properties:
+          totalCentavos: { $ref: '#/components/schemas/Centavos' }
+          comprometidoCentavos: { $ref: '#/components/schemas/Centavos' }
+          disponivelCentavos: { $ref: '#/components/schemas/Centavos' }
+    lote_arrematado:
+      payload:
+        type: object
+        required: [loteId, codigoComprovante]
+        properties:
+          loteId: { $ref: '#/components/schemas/Uuid' }
+          codigoComprovante: { type: string, pattern: '^[0-9A-Za-z]{16}$' }

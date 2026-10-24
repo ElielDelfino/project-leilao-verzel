@@ -1,0 +1,41 @@
+services:
+  redis:
+    image: ${REDIS_IMAGE:-redis:8.8.3-alpine}
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?defina REDIS_PASSWORD em .env.local}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-48mb}
+      - --maxmemory-policy
+      - volatile-lru
+      - --appendonly
+      - "no"
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - redisdata:/data
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+    ulimits:
+      nofile:
+        soft: ${REDIS_NOFILE:-4096}
+        hard: ${REDIS_NOFILE:-4096}
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPUS:-0.5}"
+          memory: ${REDIS_MEM:-64m}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+    restart: unless-stopped
+
+volumes:
+  redisdata:
