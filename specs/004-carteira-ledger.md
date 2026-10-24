@@ -54,4 +54,4 @@ Tipos de lançamento e efeito na projeção:
 Saque, pagamento real, moedas diferentes de BRL.
 
 ## Decisões relacionadas
-- decisions/0007-carteira-ledger-append-only.md
+- decisions/0007-carteira-ledger-append-only.md, 0022-complementos-auth-e-idempotencia.md

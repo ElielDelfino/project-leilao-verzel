@@ -257,7 +257,10 @@ components:
       type: apiKey
       in: cookie
       name: refresh_token
-      description: Token opaco de 256 bits, Path=/api/auth, 7 dias; atributos em specs/003 §Cookies.
+      description: |
+        Token opaco de 256 bits, 7 dias; atributos em specs/003 §Cookies. Com Path=/api/auth (casa por
+        prefixo), o cookie chega às rotas sob /api/auth (incluindo refresh e logout) e não às demais
+        rotas da API. Só refresh e logout o leem; o login revoga a família de um refresh_token recebido.
     csrf:
       type: apiKey
       in: header

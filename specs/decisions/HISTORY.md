@@ -25,3 +25,4 @@
 | [0019](0019-organizacao-agentes-e-git.md) | Organização e Git | aceita | papéis, worktrees, PR |
 | [0020](0020-host-publico-e-uptime.md) | Host público e uptime | provisória | sslip.io + UptimeRobot; revisar na tarefa 008 |
 | [0021](0021-orquestracao-e-agentes-executores.md) | Orquestrador e agentes executores | aceita | hub-and-spoke, três camadas (frontmatter, gates, hook), opus, revisão pelos globais |
+| [0022](0022-complementos-auth-e-idempotencia.md) | Complementos de auth e idempotência | aceita | complementa a 0006: refresh_token em Path=/api/auth, GET /api/auth/csrf, PAPEL_NAO_PERMITIDO, rate limit do cadastro, Idempotency-Key com corpo diferente → 422 |
