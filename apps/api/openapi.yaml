@@ -5,7 +5,7 @@
 openapi: 3.1.0
 info:
   title: Casa de Leilões API
-  version: 0.2.0
+  version: 0.3.0
   license: { name: MIT, identifier: MIT }
   description: |
     Envelope (specs/001 §Contratos): sucesso `{ sucesso: true, dados }`; erro
@@ -13,6 +13,12 @@ info:
     Rotas que alteram estado (POST/PUT/PATCH/DELETE) exigem o header `X-CSRF-Token` igual ao cookie
     `csrf_token` (double-submit, specs/003); a SPA obtém o cookie em `GET /api/auth/csrf` antes do
     primeiro POST. Corpo com campo desconhecido responde 422 `DADOS_INVALIDOS`.
+
+    Toda rota declara `default` com o envelope `Erro`: ele cobre os 4xx que o framework responde
+    antes ou fora da rota (JSON malformado, corpo grande, content-type não suportado, rota
+    inexistente) e o 500 `INDISPONIVEL` de erro não tratado. Tradução de status em código e nível
+    de log em specs/001 §Erros. Nenhuma resposta de erro leva stack, SQL, mensagem interna ou a URL
+    da requisição.
 servers:
   - url: http://localhost:13000
 tags:
@@ -27,19 +33,25 @@ paths:
     get:
       tags: [health]
       operationId: healthLive
-      summary: Processo vivo
+      summary: Processo vivo, sem consultar dependências (specs/014 §Observabilidade)
       security: []
       responses:
-        '200': { $ref: '#/components/responses/Ok' }
+        '200': { $ref: '#/components/responses/SaudeOk' }
+        default: { $ref: '#/components/responses/Erro' }
   /api/health/ready:
     get:
       tags: [health]
       operationId: healthReady
-      summary: Pronto (Postgres e Redis respondendo)
+      summary: Pronto (Postgres e Redis respondendo; specs/014 §Observabilidade)
+      description: |
+        Cada verificação tem 2 s para responder. Com qualquer dependência fora, ou sem verificações
+        registradas, responde 503 `INDISPONIVEL` sem `detalhes`: a resposta não diz qual dependência
+        falhou (o nome e o motivo vão só para o log).
       security: []
       responses:
-        '200': { $ref: '#/components/responses/Ok' }
-        '503': { $ref: '#/components/responses/Erro' }
+        '200': { $ref: '#/components/responses/SaudeOk' }
+        '503': { $ref: '#/components/responses/ErroIndisponivel' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/csrf:
     get:
@@ -53,6 +65,7 @@ paths:
           description: Cookie `csrf_token` emitido.
           headers:
             Set-Cookie: { $ref: '#/components/headers/CookieCsrf' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/cadastro:
     post:
@@ -79,6 +92,7 @@ paths:
         '409': { $ref: '#/components/responses/ErroEmailEmUso' }
         '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
         '429': { $ref: '#/components/responses/ErroMuitasTentativas' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/login:
     post:
@@ -107,6 +121,7 @@ paths:
         '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
         '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
         '429': { $ref: '#/components/responses/ErroMuitasTentativas' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/refresh:
     post:
@@ -126,6 +141,7 @@ paths:
             Set-Cookie: { $ref: '#/components/headers/CookiesDeSessao' }
         '401': { $ref: '#/components/responses/ErroSessaoExpirada' }
         '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/logout:
     post:
@@ -143,6 +159,7 @@ paths:
           headers:
             Set-Cookie: { $ref: '#/components/headers/CookiesExpirados' }
         '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/auth/me:
     get:
@@ -162,6 +179,7 @@ paths:
                   sucesso: { const: true }
                   dados: { $ref: '#/components/schemas/Usuario' }
         '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/carteira:
     get:
@@ -182,6 +200,7 @@ paths:
                   sucesso: { const: true }
                   dados: { $ref: '#/components/schemas/Saldo' }
         '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/carteira/depositos:
     post:
@@ -218,6 +237,7 @@ paths:
         '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
         '403': { $ref: '#/components/responses/ErroCsrfOuPapel' }
         '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+        default: { $ref: '#/components/responses/Erro' }
 
   /api/carteira/extrato:
     get:
@@ -245,6 +265,7 @@ paths:
                   meta: { $ref: '#/components/schemas/MetaPaginacao' }
         '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
         '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+        default: { $ref: '#/components/responses/Erro' }
 
 components:
   securitySchemes:
@@ -415,6 +436,13 @@ components:
             lancamento: { $ref: '#/components/schemas/Lancamento' }
             saldo: { $ref: '#/components/schemas/Saldo' }
 
+    EstadoDeSaude:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: { const: ok }
+
     MetaPaginacao:
       type: object
       required: [total, pagina, limite]
@@ -460,21 +488,42 @@ components:
             detalhes: { type: object, additionalProperties: true }
 
   responses:
-    Ok:
-      description: Sucesso
+    SaudeOk:
+      description: Processo vivo (live) ou dependências respondendo (ready).
       content:
         application/json:
           schema:
             type: object
             required: [sucesso, dados]
+            additionalProperties: false
             properties:
               sucesso: { const: true }
-              dados: { type: object, additionalProperties: true }
+              dados: { $ref: '#/components/schemas/EstadoDeSaude' }
     Erro:
-      description: Erro no envelope padrão
+      description: |
+        Qualquer erro não listado na rota, no envelope padrão (specs/001 §Erros): 4xx do framework
+        com o próprio status e o código da tabela de specs/001 (400, 409, 413, 414, 415, 422 e
+        demais → DADOS_INVALIDOS; 401 → NAO_AUTENTICADO; 403 → PAPEL_NAO_PERMITIDO; 404 e 405 →
+        NAO_ENCONTRADO; 429 → MUITAS_TENTATIVAS, com `Retry-After`), 5xx do framework com o
+        próprio status (por exemplo 503) e INDISPONIVEL, e 500 INDISPONIVEL para erro não tratado.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Erro' }
+    ErroIndisponivel:
+      description: |
+        Dependência fora ou não verificada (INDISPONIVEL), com mensagem fixa e sem `detalhes`.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo]
+                    properties:
+                      codigo: { const: INDISPONIVEL }
+                      detalhes: false
     # Respostas por código: o envelope Erro com `codigo` fixo.
     ErroDadosInvalidos:
       description: |

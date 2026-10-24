@@ -14,6 +14,32 @@ A infra local sobe com `pnpm infra:up` (= `docker compose --env-file .env --env-
 
 Os composes de dev não recebem senha por variável de ambiente: o Postgres e o Redis leem os arquivos de `.secrets/`, montados pelo Compose `secrets:` (bind mount somente leitura em `/run/secrets/<nome>`). Assim nenhuma senha aparece no `Config.Env`, no argv ou no healthcheck do `docker inspect`. Sem o arquivo, o `up` falha com `bind source path does not exist: .../.secrets/<nome>`; rode `pnpm keys:generate`. O `.env.local` continua com `DB_PASSWORD` e `REDIS_PASSWORD` porque a API, que roda no host em dev, lê as senhas de lá.
 
+## Configuração da API (não sensível)
+
+A API valida estas variáveis com Zod no boot (`apps/api/src/config/env.ts`). Faltando uma obrigatória, ou com valor inválido, ela não sobe, e a mensagem cita só o nome da variável. Em dev, `pnpm dev` passa `.env` e `.env.local` à API com `--env-file` (sem interpolação: `${VAR}` não é expandido).
+
+| Variável | Formato | Default | Valor em dev | Lida desde |
+|---|---|---|---|---|
+| `API_PORT` | inteiro de 1 a 65535 | nenhum (obrigatória) | `13000` (`.env`) | tarefa 004 |
+| `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` ou `silent` | `info` | ausente (usa o default) | tarefa 004 |
+
+### Conexão com Postgres e Redis (specs/014 §Conexão da API com Postgres e Redis)
+
+A conexão é lida em partes; não existem `DATABASE_URL` nem `REDIS_URL`. Uma URL completa repetiria a senha no `.env.local`, porque o `--env-file` não interpola, e em produção exigiria um sexto segredo ou a senha no `environment:` do compose. Todas são obrigatórias, sem default no código. Usadas pela API e pelo runner de migrations a partir das tarefas 003 e 017.
+
+| Variável | Formato | Valor em dev | Produção |
+|---|---|---|---|
+| `POSTGRES_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `postgres` (serviço do compose) |
+| `POSTGRES_PORT` | inteiro de 1 a 65535 | `15432` (`.env`; é também a porta publicada pelo compose de dev) | `5432` (porta interna), no `environment:` do serviço da API |
+| `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test` | `leilao` |
+| `POSTGRES_USER` | nome do usuário | `leilao` (`.env`) | `leilao` |
+| `DB_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager |
+| `REDIS_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `redis` (serviço do compose) |
+| `REDIS_PORT` | inteiro de 1 a 65535 | `16379` (`.env`; também a porta publicada) | `6379` (porta interna) |
+| `REDIS_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager |
+
+Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produção, ela está na rede do compose e usa o nome do serviço e a porta interna.
+
 ## Segredos (`.env.local`)
 
 | Variável | Formato gerado | Usado por | Produção |
