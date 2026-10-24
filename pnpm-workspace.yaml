@@ -10,6 +10,9 @@ engineStrict: true
 # lefthook: o postinstall instala os git hooks (pre-commit e commit-msg).
 # unrs-resolver: o binário nativo vem pela dependência opcional da plataforma; o postinstall
 # (download de fallback) não é necessário.
+# esbuild (via drizzle-kit, só em dev): idem; o binário vem do @esbuild/<plataforma> opcional e o
+# postinstall só valida ou baixa o binário quando a dependência opcional falta.
 allowBuilds:
+  esbuild: false
   lefthook: true
   unrs-resolver: false
