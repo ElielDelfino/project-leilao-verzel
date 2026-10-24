@@ -1,9 +1,12 @@
 # Contrato de tempo real (AsyncAPI 3). Fonte: specs/009. Dono: spec-guardian.
-# Esqueleto inicial; a tarefa 009 o valida no CI e completa os schemas.
+# Tarefa 009: `name` de cada mensagem = nome do evento Socket.IO; payloads usados na geração de tipos
+# (packages/contracts, tarefa 021). Cliente → servidor (entrar_lote/sair_lote e o ack `estado`) entra na F3.
+# Ponto de atenção: Centavos (e Pseudonimo, quando as rotas da F3 entrarem) é duplicado em
+# apps/api/openapi.yaml; mude os dois juntos.
 asyncapi: 3.0.0
 info:
   title: Casa de Leilões — tempo real
-  version: 0.1.0
+  version: 0.2.0
   description: Eventos Socket.IO do namespace /leilao. Publicados somente após o COMMIT.
 servers:
   local:
@@ -41,22 +44,28 @@ operations:
 components:
   schemas:
     Uuid: { type: string, format: uuid }
-    Centavos: { type: integer, minimum: 0 }
+    Centavos: { type: integer, minimum: 0, maximum: 9007199254740991 }
     Instante: { type: string, format: date-time }
+    Pseudonimo:
+      description: Pseudônimo estável por lote (specs/008).
+      type: string
+      pattern: '^Licitante #[0-9a-f]{6}$'
   messages:
     lance_aceito:
+      name: lance_aceito
       payload:
         type: object
         required: [loteId, seq, pseudonimo, valorCentavos, criadoEm, fimEm, totalLances]
         properties:
           loteId: { $ref: '#/components/schemas/Uuid' }
           seq: { type: integer, minimum: 1 }
-          pseudonimo: { type: string, pattern: '^Licitante #[0-9a-f]{6}$' }
+          pseudonimo: { $ref: '#/components/schemas/Pseudonimo' }
           valorCentavos: { $ref: '#/components/schemas/Centavos' }
           criadoEm: { $ref: '#/components/schemas/Instante' }
           fimEm: { $ref: '#/components/schemas/Instante' }
-          totalLances: { type: integer }
+          totalLances: { type: integer, minimum: 1 }
     fim_estendido:
+      name: fim_estendido
       payload:
         type: object
         required: [loteId, fimEm]
@@ -64,18 +73,22 @@ components:
           loteId: { $ref: '#/components/schemas/Uuid' }
           fimEm: { $ref: '#/components/schemas/Instante' }
     lote_iniciado:
+      name: lote_iniciado
       payload: { type: object, required: [loteId], properties: { loteId: { $ref: '#/components/schemas/Uuid' } } }
     lote_encerrado:
+      name: lote_encerrado
       payload:
         type: object
         required: [loteId]
         properties:
           loteId: { $ref: '#/components/schemas/Uuid' }
-          vencedorPseudonimo: { type: string }
+          vencedorPseudonimo: { $ref: '#/components/schemas/Pseudonimo' }
           valorArremateCentavos: { $ref: '#/components/schemas/Centavos' }
     lote_cancelado:
+      name: lote_cancelado
       payload: { type: object, required: [loteId], properties: { loteId: { $ref: '#/components/schemas/Uuid' } } }
     voce_foi_superado:
+      name: voce_foi_superado
       payload:
         type: object
         required: [loteId, valorCentavos]
@@ -83,6 +96,7 @@ components:
           loteId: { $ref: '#/components/schemas/Uuid' }
           valorCentavos: { $ref: '#/components/schemas/Centavos' }
     saldo_atualizado:
+      name: saldo_atualizado
       payload:
         type: object
         required: [totalCentavos, comprometidoCentavos, disponivelCentavos]
@@ -91,6 +105,7 @@ components:
           comprometidoCentavos: { $ref: '#/components/schemas/Centavos' }
           disponivelCentavos: { $ref: '#/components/schemas/Centavos' }
     lote_arrematado:
+      name: lote_arrematado
       payload:
         type: object
         required: [loteId, codigoComprovante]

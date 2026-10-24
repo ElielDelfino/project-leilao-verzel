@@ -24,6 +24,10 @@ Depende de: 003 a 011
   - `JA_ESTA_GANHANDO`: "Você já está ganhando este lote."
   - `LOTE_NAO_INICIADO`: "Este lote ainda não começou. Abre em {inicio}."
   - `LOTE_ENCERRADO`: "Este lote já foi encerrado."
+- Erros de sessão e permissão (specs/003), em qualquer tela:
+  - `PAPEL_NAO_PERMITIDO`: "Sua conta não tem permissão para esta ação."
+  - `SESSAO_EXPIRADA`: "Sua sessão expirou. Entre novamente." (leva a `/entrar`)
+  - `MUITAS_TENTATIVAS`: "Muitas tentativas. Tente de novo em {segundos} s." (`{segundos}` vem do header `Retry-After`)
 - Sala: botão de lance rápido com o valor mínimo pré-preenchido; indicador "Você está ganhando" / "Você foi superado" com cor **e** ícone **e** texto (não só cor); contagem regressiva corrigida pelo relógio do servidor; destaque visual quando o fim é estendido.
 - Dinheiro sempre por `Intl.NumberFormat('pt-BR', {style: 'currency', currency: 'BRL'})`; datas em `America/Sao_Paulo`.
 - Dark mode: tokens CSS em `:root` e `[data-theme="dark"]`; segue `prefers-color-scheme` por padrão; alternância salva no `localStorage`.

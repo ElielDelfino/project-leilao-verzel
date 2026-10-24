@@ -1,18 +1,32 @@
 # Contrato REST (OpenAPI 3.1). Fonte: specs/001 e specs/003–011. Dono: spec-guardian.
-# Esqueleto inicial; a tarefa 009 completa as rotas da F1 e liga a validação no CI.
+# F1 (tarefa 009): rotas de specs/003 (auth) e specs/004 (carteira). As demais fases acrescentam as suas.
+# Ponto de atenção: Centavos (e Pseudonimo, quando as rotas da F3 entrarem) é duplicado em
+# eventbus/socketio/asyncapi.yaml; mude os dois juntos.
 openapi: 3.1.0
 info:
   title: Casa de Leilões API
-  version: 0.1.0
+  version: 0.2.0
   license: { name: MIT, identifier: MIT }
+  description: |
+    Envelope (specs/001 §Contratos): sucesso `{ sucesso: true, dados }`; erro
+    `{ sucesso: false, erro: { codigo, mensagem, detalhes? } }`. Dinheiro sempre em centavos inteiros.
+    Rotas que alteram estado (POST/PUT/PATCH/DELETE) exigem o header `X-CSRF-Token` igual ao cookie
+    `csrf_token` (double-submit, specs/003); a SPA obtém o cookie em `GET /api/auth/csrf` antes do
+    primeiro POST. Corpo com campo desconhecido responde 422 `DADOS_INVALIDOS`.
 servers:
   - url: http://localhost:13000
 tags:
   - name: health
+    description: Health checks (ADR 0018).
+  - name: auth
+    description: CSRF, cadastro, login, refresh, logout e sessão (specs/003).
+  - name: carteira
+    description: Saldo, depósito simulado e extrato do ledger (specs/004).
 paths:
   /api/health/live:
     get:
       tags: [health]
+      operationId: healthLive
       summary: Processo vivo
       security: []
       responses:
@@ -20,24 +34,406 @@ paths:
   /api/health/ready:
     get:
       tags: [health]
+      operationId: healthReady
       summary: Pronto (Postgres e Redis respondendo)
       security: []
       responses:
         '200': { $ref: '#/components/responses/Ok' }
         '503': { $ref: '#/components/responses/Erro' }
+
+  /api/auth/csrf:
+    get:
+      tags: [auth]
+      operationId: authCsrf
+      summary: Emite um cookie `csrf_token` novo, sem autenticação (specs/003)
+      description: A SPA chama esta rota antes do primeiro POST, inclusive antes do cadastro e do login.
+      security: []
+      responses:
+        '204':
+          description: Cookie `csrf_token` emitido.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/CookieCsrf' }
+
+  /api/auth/cadastro:
+    post:
+      tags: [auth]
+      operationId: authCadastro
+      summary: Cadastro público com papel imutável (specs/003 RF-01)
+      description: Limite de 5 cadastros por minuto por IP (specs/003 RNF-04).
+      security:
+        - csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CadastroEntrada' }
+      responses:
+        '201':
+          description: Conta criada e sessão iniciada.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/CookiesDeSessao' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaUsuarioLogado' }
+        '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+        '409': { $ref: '#/components/responses/ErroEmailEmUso' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+        '429': { $ref: '#/components/responses/ErroMuitasTentativas' }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      operationId: authLogin
+      summary: Login por e-mail e senha (specs/003 RF-02)
+      description: |
+        Mesma resposta para e-mail inexistente e senha errada (specs/003 RNF-03).
+        Limite de 5 tentativas por minuto por IP + e-mail (specs/003 RNF-02).
+      security:
+        - csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginEntrada' }
+      responses:
+        '200':
+          description: Sessão iniciada.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/CookiesDeSessao' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaUsuarioLogado' }
+        '401': { $ref: '#/components/responses/ErroCredenciaisInvalidas' }
+        '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+        '429': { $ref: '#/components/responses/ErroMuitasTentativas' }
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: authRefresh
+      summary: Troca o refresh token por um par novo, na mesma família (specs/003)
+      description: |
+        Lê o cookie `refresh_token`. Reuso de um token já substituído revoga a família inteira e
+        responde 401 `SESSAO_EXPIRADA`.
+      security:
+        - cookieRefresh: []
+          csrf: []
+      responses:
+        '204':
+          description: Cookies renovados.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/CookiesDeSessao' }
+        '401': { $ref: '#/components/responses/ErroSessaoExpirada' }
+        '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      summary: Encerra a sessão e revoga a família do refresh token (specs/003)
+      description: |
+        Lê o cookie `refresh_token` (Path=/api/auth) e revoga a família dele, se houver. Responde 204
+        mesmo sem sessão e expira os três cookies com os mesmos Path com que foram emitidos.
+      security:
+        - csrf: []
+      responses:
+        '204':
+          description: Sessão encerrada; os cookies de sessão são expirados.
+          headers:
+            Set-Cookie: { $ref: '#/components/headers/CookiesExpirados' }
+        '403': { $ref: '#/components/responses/ErroCsrfInvalido' }
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      operationId: authMe
+      summary: Usuário da sessão atual (specs/003 RF-02)
+      responses:
+        '200':
+          description: Usuário autenticado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/Usuario' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+
+  /api/carteira:
+    get:
+      tags: [carteira]
+      operationId: carteiraSaldo
+      summary: Saldo do usuário, para os dois papéis (specs/004 RF-01, RF-02)
+      description: disponivelCentavos = totalCentavos − comprometidoCentavos.
+      responses:
+        '200':
+          description: Saldo atual (projeção `wallet_balances`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/Saldo' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+
+  /api/carteira/depositos:
+    post:
+      tags: [carteira]
+      operationId: carteiraDepositar
+      summary: Depósito simulado, só licitante (specs/004 RF-03)
+      description: |
+        Valor entre 100 e 10.000.000 centavos (R$ 1,00 a R$ 100.000,00) por operação.
+        Idempotente por (usuário, `Idempotency-Key`): repetir a chave com o mesmo corpo responde 200
+        com o mesmo lançamento e o saldo atual; repetir a chave com corpo diferente responde 422
+        `DADOS_INVALIDOS`. Nos dois casos, nenhum lançamento novo é gravado (specs/004).
+        Leiloeiro recebe 403 `PAPEL_NAO_PERMITIDO`.
+      security:
+        - cookieAcesso: []
+          csrf: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepositoEntrada' }
+      responses:
+        '201':
+          description: Depósito lançado no ledger.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaDeposito' }
+        '200':
+          description: Repetição da mesma `Idempotency-Key` com o mesmo corpo; mesmo lançamento, saldo atual.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaDeposito' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroCsrfOuPapel' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+
+  /api/carteira/extrato:
+    get:
+      tags: [carteira]
+      operationId: carteiraExtrato
+      summary: Lançamentos do ledger do usuário, paginados, para os dois papéis (specs/004)
+      description: Ordem do mais recente para o mais antigo; 20 lançamentos por página (`meta.limite` = 20).
+      parameters:
+        - $ref: '#/components/parameters/Pagina'
+      responses:
+        '200':
+          description: Página do extrato.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados, meta]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados:
+                    type: array
+                    maxItems: 20
+                    items: { $ref: '#/components/schemas/Lancamento' }
+                  meta: { $ref: '#/components/schemas/MetaPaginacao' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
+
 components:
   securitySchemes:
-    cookieAcesso: { type: apiKey, in: cookie, name: access_token }
-    csrf: { type: apiKey, in: header, name: X-CSRF-Token }
+    cookieAcesso:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: JWT HS256 de 15 min; atributos em specs/003 §Cookies.
+    cookieRefresh:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: |
+        Token opaco de 256 bits, 7 dias; atributos em specs/003 §Cookies. Com Path=/api/auth (casa por
+        prefixo), o cookie chega às rotas sob /api/auth (incluindo refresh e logout) e não às demais
+        rotas da API. Só refresh e logout o leem; o login revoga a família de um refresh_token recebido.
+    csrf:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Deve ser igual ao cookie `csrf_token` (não httpOnly); comparação em tempo constante.
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID gerado pelo cliente por operação.
+      schema: { type: string, format: uuid }
+    Pagina:
+      name: pagina
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, default: 1 }
+
+  headers:
+    # Atributos dos cookies (specs/003 §Cookies). "Secure em produção": ausente só em dev (http://localhost).
+    CookieCsrf:
+      description: |
+        `csrf_token=<aleatório>; Path=/; Max-Age=604800; SameSite=Lax; Secure` (Secure em produção; sem HttpOnly).
+      schema: { type: string }
+    CookiesDeSessao:
+      description: |
+        Um Set-Cookie por cookie:
+        - `access_token=<JWT>; Path=/; Max-Age=900; HttpOnly; SameSite=Lax; Secure` (Secure em produção);
+        - `refresh_token=<opaco>; Path=/api/auth; Max-Age=604800; HttpOnly; SameSite=Lax; Secure` (Secure em produção);
+        - `csrf_token=<aleatório>; Path=/; Max-Age=604800; SameSite=Lax; Secure` (Secure em produção; sem HttpOnly).
+      schema: { type: string }
+    CookiesExpirados:
+      description: |
+        Um Set-Cookie por cookie, com valor vazio, `Max-Age=0` e os mesmos Path, HttpOnly, SameSite e
+        Secure da emissão: `access_token` (Path=/), `refresh_token` (Path=/api/auth) e `csrf_token` (Path=/).
+      schema: { type: string }
+    RetryAfter:
+      description: Segundos até a próxima tentativa ser aceita.
+      required: true
+      schema: { type: integer, minimum: 1 }
+
   schemas:
+    Uuid: { type: string, format: uuid }
+    Centavos:
+      description: Valor monetário em centavos inteiros (nunca float). Duplicado no asyncapi.yaml.
+      type: integer
+      minimum: 0
+      maximum: 9007199254740991
+    Instante: { type: string, format: date-time }
+    Papel:
+      type: string
+      enum: [leiloeiro, licitante]
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+
+    Usuario:
+      type: object
+      required: [id, nome, email, papel]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        nome: { type: string, minLength: 2, maxLength: 80 }
+        email: { $ref: '#/components/schemas/Email' }
+        papel: { $ref: '#/components/schemas/Papel' }
+
+    CadastroEntrada:
+      type: object
+      required: [nome, email, senha, papel]
+      additionalProperties: false
+      properties:
+        nome: { type: string, minLength: 2, maxLength: 80 }
+        email:
+          description: Único, sem diferenciar maiúsculas.
+          allOf: [{ $ref: '#/components/schemas/Email' }]
+        senha: { type: string, minLength: 10, maxLength: 128 }
+        papel: { $ref: '#/components/schemas/Papel' }
+
+    LoginEntrada:
+      type: object
+      required: [email, senha]
+      additionalProperties: false
+      properties:
+        email: { $ref: '#/components/schemas/Email' }
+        senha: { type: string, minLength: 1, maxLength: 128 }
+
+    RespostaUsuarioLogado:
+      type: object
+      required: [sucesso, dados]
+      additionalProperties: false
+      properties:
+        sucesso: { const: true }
+        dados:
+          type: object
+          required: [usuario]
+          additionalProperties: false
+          properties:
+            usuario: { $ref: '#/components/schemas/Usuario' }
+
+    Saldo:
+      type: object
+      required: [totalCentavos, comprometidoCentavos, disponivelCentavos]
+      additionalProperties: false
+      properties:
+        totalCentavos: { $ref: '#/components/schemas/Centavos' }
+        comprometidoCentavos: { $ref: '#/components/schemas/Centavos' }
+        disponivelCentavos: { $ref: '#/components/schemas/Centavos' }
+
+    DepositoEntrada:
+      type: object
+      required: [valorCentavos]
+      additionalProperties: false
+      properties:
+        valorCentavos: { type: integer, minimum: 100, maximum: 10000000 }
+
+    TipoLancamento:
+      type: string
+      enum: [deposito, compromisso, liberacao, estorno, debito_arremate, credito_arremate]
+
+    Lancamento:
+      type: object
+      required: [id, tipo, valorCentavos, loteId, criadoEm]
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        tipo: { $ref: '#/components/schemas/TipoLancamento' }
+        valorCentavos:
+          description: Sempre positivo; o efeito no saldo depende do tipo (specs/004 §Comportamento).
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        loteId:
+          description: Lote que causou o lançamento; null em depósitos.
+          oneOf:
+            - { $ref: '#/components/schemas/Uuid' }
+            - { type: 'null' }
+        criadoEm: { $ref: '#/components/schemas/Instante' }
+
+    RespostaDeposito:
+      type: object
+      required: [sucesso, dados]
+      additionalProperties: false
+      properties:
+        sucesso: { const: true }
+        dados:
+          type: object
+          required: [lancamento, saldo]
+          additionalProperties: false
+          properties:
+            lancamento: { $ref: '#/components/schemas/Lancamento' }
+            saldo: { $ref: '#/components/schemas/Saldo' }
+
+    MetaPaginacao:
+      type: object
+      required: [total, pagina, limite]
+      additionalProperties: false
+      properties:
+        total: { type: integer, minimum: 0 }
+        pagina: { type: integer, minimum: 1 }
+        limite: { type: integer, minimum: 1 }
+
     Erro:
       type: object
       required: [sucesso, erro]
+      additionalProperties: false
       properties:
         sucesso: { const: false }
         erro:
           type: object
           required: [codigo, mensagem]
+          additionalProperties: false
           properties:
             codigo:
               type: string
@@ -45,6 +441,7 @@ components:
                 - DADOS_INVALIDOS
                 - NAO_AUTENTICADO
                 - CSRF_INVALIDO
+                - PAPEL_NAO_PERMITIDO
                 - NAO_ENCONTRADO
                 - MUITAS_TENTATIVAS
                 - CREDENCIAIS_INVALIDAS
@@ -61,6 +458,7 @@ components:
                 - INDISPONIVEL
             mensagem: { type: string }
             detalhes: { type: object, additionalProperties: true }
+
   responses:
     Ok:
       description: Sucesso
@@ -71,11 +469,99 @@ components:
             required: [sucesso, dados]
             properties:
               sucesso: { const: true }
-              dados: { type: object }
+              dados: { type: object, additionalProperties: true }
     Erro:
       description: Erro no envelope padrão
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Erro' }
+    # Respostas por código: o envelope Erro com `codigo` fixo.
+    ErroDadosInvalidos:
+      description: |
+        Corpo, parâmetro ou header fora do contrato, incluindo campo desconhecido e `Idempotency-Key`
+        repetida com corpo diferente (DADOS_INVALIDOS).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: DADOS_INVALIDOS } } }
+    ErroNaoAutenticado:
+      description: Sem cookie `access_token` válido (NAO_AUTENTICADO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: NAO_AUTENTICADO } } }
+    ErroCsrfInvalido:
+      description: Header `X-CSRF-Token` ausente ou diferente do cookie `csrf_token` (CSRF_INVALIDO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: CSRF_INVALIDO } } }
+    ErroCsrfOuPapel:
+      description: |
+        CSRF inválido (CSRF_INVALIDO) ou rota restrita a outro papel (PAPEL_NAO_PERMITIDO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo]
+                    properties: { codigo: { enum: [CSRF_INVALIDO, PAPEL_NAO_PERMITIDO] } }
+    ErroCredenciaisInvalidas:
+      description: E-mail inexistente ou senha errada, com a mesma mensagem (CREDENCIAIS_INVALIDAS).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: CREDENCIAIS_INVALIDAS } } }
+    ErroEmailEmUso:
+      description: E-mail já cadastrado, sem diferenciar maiúsculas (EMAIL_EM_USO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: EMAIL_EM_USO } } }
+    ErroSessaoExpirada:
+      description: Refresh token ausente, expirado, revogado ou reutilizado (SESSAO_EXPIRADA).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: SESSAO_EXPIRADA } } }
+    ErroMuitasTentativas:
+      description: Limite de tentativas excedido (MUITAS_TENTATIVAS).
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: MUITAS_TENTATIVAS } } }
 security:
   - cookieAcesso: []
