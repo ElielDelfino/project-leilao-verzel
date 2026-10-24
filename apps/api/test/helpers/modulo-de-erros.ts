@@ -1,5 +1,16 @@
-import { BadRequestException, Controller, Get, Module } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpException,
+  Module,
+  Param,
+  ParseIntPipe,
+  Post,
+} from '@nestjs/common';
 
+import { type RespostaDeSucesso, sucesso } from '../../src/common/envelope.js';
 import { ErroApi } from '../../src/common/erros/erro-api.js';
 
 export const MENSAGEM_INTERNA = 'falha interna com detalhe que não pode vazar';
@@ -33,9 +44,26 @@ class ControladorDeErros {
     throw new ErroApi({ codigo: 'LOTE_ENCERRADO', status: 409, mensagem: 'Lote encerrado.' });
   }
 
+  @Get('dominio-5xx')
+  dominio5xx(): never {
+    throw new ErroApi({ codigo: 'CATALOGO_INDISPONIVEL', status: 503, mensagem: 'Catálogo fora.' });
+  }
+
   @Get('http-do-framework')
   httpDoFramework(): never {
     throw new BadRequestException(MENSAGEM_INTERNA);
+  }
+
+  /** Lança uma HttpException do Nest com o status pedido. */
+  @Get('http/:status')
+  http(@Param('status', ParseIntPipe) status: number): never {
+    throw new HttpException(MENSAGEM_INTERNA, status);
+  }
+
+  /** Ecoa o corpo JSON: exercita os erros de parse do Fastify. */
+  @Post('eco')
+  eco(@Body() corpo: unknown): RespostaDeSucesso<unknown> {
+    return sucesso(corpo);
   }
 }
 

@@ -3,19 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { criarLogger, LoggerNestPino } from '../../src/logger/logger.js';
 import { criarAppDeTeste } from '../helpers/app-de-teste.js';
+import { capturarLogs, UUID } from '../helpers/captura-de-logs.js';
 import { MENSAGEM_INTERNA, ModuloDeErros } from '../helpers/modulo-de-erros.js';
-
-type LinhaDeLog = Record<string, unknown>;
-
-function capturarLogs(): { destino: { write: (linha: string) => void }; linhas: LinhaDeLog[] } {
-  const linhas: LinhaDeLog[] = [];
-  return {
-    destino: { write: (linha: string) => linhas.push(JSON.parse(linha) as LinhaDeLog) },
-    linhas,
-  };
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe('logger Pino JSON com requestId (ADR 0018)', () => {
   let app: NestFastifyApplication | undefined;
@@ -60,6 +49,26 @@ describe('logger Pino JSON com requestId (ADR 0018)', () => {
     });
 
     expect(linhas.some((linha) => linha.requestId === 'forjado')).toBe(false);
+  });
+
+  it('a requisição é logada só com método e caminho, sem query string nem cabeçalhos', async () => {
+    const { destino, linhas } = capturarLogs();
+    app = await criarAppDeTeste({ destinoDosLogs: destino });
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/health/live?token=SEGREDO123&email=fulano@exemplo.com',
+      headers: { authorization: 'Bearer SEGREDO123', cookie: 'access_token=SEGREDO123' },
+    });
+
+    const comReq = linhas.filter((linha) => 'req' in linha);
+    expect(comReq.length).toBeGreaterThan(0);
+    for (const linha of comReq) {
+      expect(linha.req).toEqual({ method: 'GET', url: '/api/health/live' });
+    }
+    const tudo = JSON.stringify(linhas);
+    expect(tudo).not.toContain('SEGREDO123');
+    expect(tudo).not.toContain('fulano@exemplo.com');
   });
 
   it('erro não tratado é logado no servidor com o requestId e a causa', async () => {
@@ -110,5 +119,31 @@ describe('LoggerNestPino', () => {
         stack: 'pilha simulada',
       }),
     ]);
+  });
+
+  it('não lança ao logar BigInt nem objeto com referência circular', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+    const circular: Record<string, unknown> = { nome: 'ciclo' };
+    circular.eu = circular;
+
+    expect(() => logger.log({ valor: 10n })).not.toThrow();
+    expect(() => logger.log(circular)).not.toThrow();
+    expect(() => logger.log(10n)).not.toThrow();
+
+    expect(linhas).toHaveLength(3);
+    expect(linhas[2]?.msg).toBe('10');
+  });
+
+  it('loga Error com a causa serializada', () => {
+    const { destino, linhas } = capturarLogs();
+    const logger = new LoggerNestPino(criarLogger('info', destino));
+
+    logger.error(new Error('quebrou'), 'Contexto');
+
+    expect(linhas).toEqual([
+      expect.objectContaining({ level: 50, msg: 'quebrou', contexto: 'Contexto' }),
+    ]);
+    expect(linhas[0]?.err).toMatchObject({ message: 'quebrou' });
   });
 });
