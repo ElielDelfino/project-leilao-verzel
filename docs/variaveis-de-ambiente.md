@@ -31,8 +31,10 @@ A chave pública não é gravada: a API a deriva de `ED25519_PRIVATE_KEY`.
 
 - Cria `.env.local` na raiz do repositório com permissão 600.
 - Se o arquivo já existe, não altera nada e sai com código 0. Para regerar todos os segredos: `pnpm keys:generate --force`.
-- Nunca imprime valores: a saída lista só os nomes das variáveis.
-- A gravação é atômica (arquivo temporário + `link`/`rename`): uma falha no meio não deixa um `.env.local` incompleto.
-- `--out <caminho>` grava em outro arquivo; existe para os testes (`pnpm test:scripts`).
+- Com `--force`, o arquivo anterior é guardado antes da troca em `.env.bak-<data-hora UTC>-<sufixo>.local` (permissão 600, no mesmo diretório). O nome casa com o padrão `.env.*.local` do `.gitignore`. A saída cita o caminho do backup, nunca os valores. Os backups não são apagados automaticamente: apague-os quando não precisar mais da chave antiga.
+- Nunca imprime valores: a saída lista só nomes de variáveis e caminhos.
+- A gravação é atômica (arquivo temporário `.env.tmp-<pid>-<nome>.local` + `link`/`rename`): uma falha no meio não deixa um `.env.local` incompleto.
+- Recusa, sem gravar nada, um destino que o git versionaria: o alvo, o temporário ou o backup dentro de uma working tree sem estar no `.gitignore`, ou um arquivo já rastreado. Também recusa link simbólico (mesmo pendente), diretório e diretório de destino inexistente.
+- `--out <caminho>` grava em outro arquivo, só fora do repositório ou em caminho ignorado pelo git; existe para os testes (`pnpm test:scripts`).
 
-Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê `POSTGRES_PASSWORD` ao inicializar o volume. Recrie o volume local (`docker compose down -v`, apaga os dados de dev) ou troque a senha no banco antes de subir de novo. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`).
+Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê `POSTGRES_PASSWORD` ao inicializar o volume. Recrie o volume local (`docker compose down -v`, apaga os dados de dev) ou troque a senha no banco antes de subir de novo. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`); a chave antiga só fica no backup.

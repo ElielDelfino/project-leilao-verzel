@@ -1,17 +1,27 @@
 // Testes de `pnpm keys:generate` (task 010, specs/014 §Segredos, ADR 0015). Rodar: pnpm test:scripts
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import * as ed from '@noble/ed25519';
 
-import { VARIAVEIS, gerarEnvLocal } from './keys-generate.mjs';
+import { VARIAVEIS, gerarEnvLocal, nomeBackup, nomeTemporario } from './keys-generate.mjs';
 
 const SCRIPT = resolve(import.meta.dirname, 'keys-generate.mjs');
+const RAIZ = resolve(import.meta.dirname, '..');
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const BYTES_256_BITS = 32;
 
@@ -33,6 +43,22 @@ function bytes(valorBase64url) {
 function rodarCli(args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' });
 }
+
+function git(cwd, args) {
+  const saida = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  if (saida.error) throw saida.error;
+  return saida;
+}
+
+// Repositório git descartável com o .gitignore informado.
+function repoTemporario(pai, gitignore) {
+  const repo = mkdtempSync(join(pai, 'repo-'));
+  assert.equal(git(repo, ['init', '-q']).status, 0);
+  writeFileSync(join(repo, '.gitignore'), gitignore);
+  return repo;
+}
+
+const ignoradoNoRepo = (relativo) => git(RAIZ, ['check-ignore', '-q', '--', relativo]).status === 0;
 
 describe('keys:generate', () => {
   let dir;
@@ -154,9 +180,135 @@ describe('keys:generate', () => {
     const caminho = join(sub, '.env.local');
 
     await gerarEnvLocal({ caminho });
-    await gerarEnvLocal({ caminho, forcar: true });
+    const { backup } = await gerarEnvLocal({ caminho, forcar: true });
 
-    assert.deepEqual(readdirSync(sub), ['.env.local']);
+    assert.deepEqual(readdirSync(sub).sort(), ['.env.local', basename(backup)].sort());
+  });
+
+  describe('backup no --force', () => {
+    it('guarda o arquivo anterior intacto, com permissão 600', async () => {
+      const caminho = novoCaminho('backup.env');
+      await gerarEnvLocal({ caminho });
+      const anterior = readFileSync(caminho);
+
+      const { backup } = await gerarEnvLocal({ caminho, forcar: true });
+
+      assert.ok(backup, 'sem caminho de backup');
+      assert.deepEqual(readFileSync(backup), anterior);
+      assert.equal(statSync(backup).mode & 0o777, 0o600);
+      assert.notDeepEqual(readFileSync(caminho), anterior);
+    });
+
+    it('dois --force seguidos geram backups distintos', async () => {
+      const caminho = novoCaminho('backup-duplo.env');
+      await gerarEnvLocal({ caminho });
+
+      const primeiro = await gerarEnvLocal({ caminho, forcar: true });
+      const segundo = await gerarEnvLocal({ caminho, forcar: true });
+
+      assert.notEqual(primeiro.backup, segundo.backup);
+      assert.ok(existsSync(primeiro.backup) && existsSync(segundo.backup));
+    });
+
+    it('não cria backup quando o arquivo ainda não existia', async () => {
+      const sub = mkdtempSync(join(dir, 'sem-backup-'));
+
+      const resultado = await gerarEnvLocal({ caminho: join(sub, '.env.local'), forcar: true });
+
+      assert.equal(resultado.status, 'criado');
+      assert.equal(resultado.backup, undefined);
+      assert.deepEqual(readdirSync(sub), ['.env.local']);
+    });
+  });
+
+  describe('.gitignore do repositório', () => {
+    it('ignora o .env.local, o temporário e o backup que o script cria na raiz', () => {
+      const alvo = join(RAIZ, '.env.local');
+      const nomes = [alvo, nomeTemporario(alvo), nomeBackup(alvo)].map((c) => basename(c));
+
+      for (const nome of nomes) assert.ok(ignoradoNoRepo(nome), `${nome} versionável`);
+    });
+  });
+
+  describe('destino versionável', () => {
+    it('recusa um caminho dentro deste repositório que não é ignorado', async () => {
+      const caminho = join(RAIZ, 'scripts', 'segredos-teste-keys-generate.txt');
+      try {
+        await assert.rejects(gerarEnvLocal({ caminho }), /versionad/);
+        assert.equal(existsSync(caminho), false);
+      } finally {
+        rmSync(caminho, { force: true });
+      }
+    });
+
+    it('recusa um caminho não ignorado em outro repositório git', async () => {
+      const repo = repoTemporario(dir, '');
+      const caminho = join(repo, 'segredos.txt');
+
+      await assert.rejects(gerarEnvLocal({ caminho }), /versionad/);
+
+      assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
+    });
+
+    it('recusa quando o alvo é ignorado mas o temporário não é', async () => {
+      const repo = repoTemporario(dir, 'meu.env\n');
+
+      await assert.rejects(gerarEnvLocal({ caminho: join(repo, 'meu.env') }), /versionad/);
+
+      assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
+    });
+
+    it('aceita um caminho ignorado pelo git, com temporário e backup também ignorados', async () => {
+      const repo = repoTemporario(dir, '.env.local\n.env.*.local\n');
+      const caminho = join(repo, '.env.local');
+
+      await gerarEnvLocal({ caminho });
+      const { backup } = await gerarEnvLocal({ caminho, forcar: true });
+
+      assert.ok(existsSync(caminho) && existsSync(backup));
+    });
+
+    it('recusa um arquivo já versionado, mesmo que o padrão o ignore', async () => {
+      const repo = repoTemporario(dir, '.env.*.local\n');
+      const caminho = join(repo, '.env.local');
+      writeFileSync(caminho, 'X=1\n');
+      assert.equal(git(repo, ['add', '.env.local']).status, 0);
+      writeFileSync(join(repo, '.gitignore'), '.env.local\n.env.*.local\n');
+
+      await assert.rejects(gerarEnvLocal({ caminho, forcar: true }), /versionad/);
+
+      assert.equal(readFileSync(caminho, 'utf8'), 'X=1\n');
+    });
+
+    it('recusa diretório de destino inexistente', async () => {
+      const caminho = join(dir, 'nao-existe', '.env.local');
+
+      await assert.rejects(gerarEnvLocal({ caminho }), /diretório/);
+    });
+  });
+
+  describe('alvo que não é arquivo comum', () => {
+    it('recusa link simbólico pendente sem criar nada', async () => {
+      const sub = mkdtempSync(join(dir, 'link-pendente-'));
+      const caminho = join(sub, '.env.local');
+      symlinkSync(join(sub, 'nao-existe'), caminho);
+
+      await assert.rejects(gerarEnvLocal({ caminho, forcar: true }), /arquivo comum/);
+
+      assert.deepEqual(readdirSync(sub), ['.env.local']);
+    });
+
+    it('recusa link simbólico para arquivo existente sem alterá-lo', async () => {
+      const sub = mkdtempSync(join(dir, 'link-'));
+      const real = join(sub, 'real.env');
+      writeFileSync(real, 'X=1\n');
+      const caminho = join(sub, '.env.local');
+      symlinkSync(real, caminho);
+
+      await assert.rejects(gerarEnvLocal({ caminho, forcar: true }), /arquivo comum/);
+
+      assert.equal(readFileSync(real, 'utf8'), 'X=1\n');
+    });
   });
 
   describe('CLI', () => {
@@ -199,6 +351,31 @@ describe('keys:generate', () => {
       assert.notEqual(saida.status, 0);
       assert.match(saida.stderr, /--forca/);
       assert.equal(existsSync(caminho), false);
+    });
+
+    it('no --force, cita o caminho do backup e não os valores', () => {
+      const caminho = novoCaminho('cli-backup.env');
+      rodarCli(['--out', caminho]);
+      const anterior = lerEnv(caminho);
+
+      const saida = rodarCli(['--out', caminho, '--force']);
+
+      assert.equal(saida.status, 0, saida.stderr);
+      const backup = /(\S*\.env\.bak-\S+\.local)/.exec(saida.stdout)?.[1];
+      assert.ok(backup, `backup não citado: ${saida.stdout}`);
+      assert.deepEqual(lerEnv(backup), anterior);
+      for (const nome of VARIAVEIS) assert.ok(!saida.stdout.includes(anterior[nome]), nome);
+    });
+
+    it('recusa --out versionável com código ≠ 0 sem gravar nada', () => {
+      const repo = repoTemporario(dir, '');
+      const caminho = join(repo, 'segredos.txt');
+
+      const saida = rodarCli(['--out', caminho]);
+
+      assert.notEqual(saida.status, 0);
+      assert.match(saida.stderr, /versionad/);
+      assert.deepEqual(readdirSync(repo).sort(), ['.git', '.gitignore']);
     });
 
     it('recusa --out sem caminho', () => {
