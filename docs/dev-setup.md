@@ -6,7 +6,7 @@ Fonte: specs/014 §Ambientes (dev: Postgres e Redis via `pnpm infra:up`; API e w
 
 | Ferramenta | Versão | Observação |
 |---|---|---|
-| Node | 24 LTS | `.nvmrc`; `nvm use` na raiz |
+| Node | 24 LTS, **>= 24.7** | `.nvmrc`; `nvm use` na raiz. A API usa `crypto.argon2`, do Node 24.7 (ADR 0027) |
 | pnpm | 12 | fixado em `packageManager` do `package.json` |
 | Docker Engine + Docker Compose | Compose com `include`, `secrets:` de arquivo, `--env-file` repetido e `start_interval` no healthcheck | testado com Docker 29.8.1 e Compose 5.5.1 |
 
@@ -21,7 +21,16 @@ docker compose ps     # os dois serviços devem aparecer como "healthy" em pouco
 
 `pnpm infra:up` é `docker compose --env-file .env --env-file .env.local up -d`. O compose sozinho só lê o `.env` (defaults não sensíveis, versionado); o `.env.local` (fora do Git) é passado explicitamente e, em ordem, sobrescreve o `.env`. As senhas dos containers não vêm do `.env.local`, e sim de `.secrets/db_password` e `.secrets/redis_password` (Compose `secrets:`), que o `pnpm keys:generate` cria e mantém iguais ao `.env.local`.
 
-Quem já tinha um `.env.local` de antes desta mudança: rode `pnpm keys:generate` uma vez; ele não altera o `.env.local` e só cria `.secrets/` com as mesmas senhas, então o volume do Postgres continua válido.
+Quem já tinha um `.env.local` de antes desta mudança: rode `pnpm keys:generate` uma vez; ele não altera nenhuma linha do `.env.local` e só cria `.secrets/` com as mesmas senhas, então o volume do Postgres continua válido.
+
+**Depois de cada pull que traga segredos ou migrations novos** (task 042), rode de novo:
+
+```sh
+pnpm keys:generate   # acrescenta ao .env.local só o que faltar (hoje: DB_API_PASSWORD), sem --force
+pnpm db:migrate      # cria o papel leilao_api e aplica a senha dele (ADR 0026)
+```
+
+Sem `POSTGRES_API_USER` (já no `.env`) e `DB_API_PASSWORD`, o `pnpm db:migrate` falha antes de conectar. Para os testes e2e, instale o Chromium do Playwright uma vez, quando a config do Playwright existir: `pnpm exec playwright install chromium` (no CI isso é um passo próprio, com cache).
 
 `pnpm dev` (API em :13000, web em :15173), `pnpm db:migrate` e `pnpm db:seed` dependem das tarefas da fase F0 e F1 e ainda podem ser stubs.
 
@@ -98,6 +107,7 @@ Quando usar: logo depois de `pnpm keys:generate --force`, ou sempre que a API de
 ```sh
 pnpm keys:generate --force   # novos segredos no .env.local e em .secrets/
 pnpm db:sync-password        # aplica a senha nova no volume leilao_pgdata, sem apagar dados
+pnpm db:migrate              # aplica a senha nova do papel leilao_api (DB_API_PASSWORD); o sync-password só troca a do dono
 docker compose restart redis # o Redis só lê o arquivo novo ao reiniciar
 ```
 

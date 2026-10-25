@@ -33,8 +33,10 @@ A conexão é lida em partes; não existem `DATABASE_URL` nem `REDIS_URL`. Uma U
 | `POSTGRES_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `postgres` (serviço do compose) |
 | `POSTGRES_PORT` | inteiro de 1 a 65535 | `15432` (`.env`; é também a porta publicada pelo compose de dev) | `5432` (porta interna), no `environment:` do serviço da API |
 | `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test_<sufixo>`, um banco por worktree (specs/013 §Banco de teste) | `leilao` |
-| `POSTGRES_USER` | nome do usuário | `leilao` (`.env`) | `leilao` |
-| `DB_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `DB_PASSWORD_FILE=/run/secrets/db_password` |
+| `POSTGRES_USER` | nome do dono do banco (migrations, seed, Postgres) | `leilao` (`.env`) | `leilao`; a API em produção **não** o recebe (usa `POSTGRES_API_USER`) |
+| `POSTGRES_API_USER` | nome do papel da API | `leilao_api` (`.env`; o `db:migrate` exige esse nome) | `leilao_api`, no `environment:` da API (ADR 0026) |
+| `DB_PASSWORD` | ver §Segredos; senha do **dono** (`POSTGRES_USER`): `db:migrate`, `db:seed`, `db:sync-password` e os testes; a API **não** a lê | `.env.local` | Secret Manager, `DB_PASSWORD_FILE=/run/secrets/db_password` só no Postgres e nos one-shots de migrations e seed; a API não a recebe |
+| `DB_API_PASSWORD` | ver §Segredos; senha do papel da API | `.env.local` | Secret Manager, lida por `DB_API_PASSWORD_FILE=/run/secrets/db_api_password` |
 | `REDIS_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `redis` (serviço do compose) |
 | `REDIS_PORT` | inteiro de 1 a 65535 | `16379` (`.env`; também a porta publicada) | `6379` (porta interna) |
 | `REDIS_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `REDIS_PASSWORD_FILE=/run/secrets/redis_password` |
@@ -46,6 +48,7 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 | Variável | Formato gerado | Usado por | Produção |
 |---|---|---|---|
 | `DB_PASSWORD` | 32 bytes aleatórios, base64url canônico sem padding (43 caracteres; recodificar os bytes reproduz o texto); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager → `db_password` |
+| `DB_API_PASSWORD` | idem | API (conecta como `leilao_api`, `POSTGRES_API_USER`); `pnpm db:migrate`, que a aplica ao papel com `ALTER ROLE ... PASSWORD '<verificador SCRAM-SHA-256>'` (ADR 0026). Não há cópia em `.secrets/`: o Postgres de dev não a lê | Secret Manager → `db_api_password` |
 | `REDIS_PASSWORD` | idem | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | Secret Manager → `redis_password` |
 | `JWT_SECRET` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | API: assinatura do access token (specs/003) | Secret Manager → `jwt_secret` |
 | `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
@@ -63,13 +66,13 @@ A chave pública não é gravada: a API a deriva de `ED25519_PRIVATE_KEY`.
 
 ## `<VAR>` ou `<VAR>_FILE` (specs/014 §Segredos)
 
-Para cada um dos 5 segredos, a API, o runner de migrations e o seed leem exatamente uma de `<VAR>` (o valor; dev e CI) ou `<VAR>_FILE` (caminho do arquivo com o valor; produção, `/run/secrets/<nome>`). Não sobem com as duas, sem nenhuma, com arquivo ausente ou ilegível, com valor fora do formato acima ou com quebra de linha no fim do arquivo; a mensagem cita só o nome da variável. Os arquivos de `.secrets/` e de `/run/leilao/secrets/` são gravados sem quebra de linha.
+Para cada um dos 6 segredos que o processo usa, a API, o runner de migrations e o seed leem exatamente uma de `<VAR>` (o valor; dev e CI) ou `<VAR>_FILE` (caminho do arquivo com o valor; produção, `/run/secrets/<nome>`). Não sobem com as duas, sem nenhuma, com arquivo ausente ou ilegível, com valor fora do formato acima ou com quebra de linha no fim do arquivo; a mensagem cita só o nome da variável. Os arquivos de `.secrets/` e de `/run/leilao/secrets/` são gravados sem quebra de linha.
 
 ## `pnpm keys:generate`
 
 - Cria `.env.local` na raiz do repositório com permissão 600.
 - Cria `.secrets/` (permissão 700) ao lado do `.env.local`, com `db_password` e `redis_password` (permissão 600, só o valor, sem quebra de linha), copiados de `DB_PASSWORD` e `REDIS_PASSWORD`. O `.env.local` é a fonte: os arquivos de `.secrets/` sempre seguem os valores dele.
-- Se o `.env.local` já existe, o conteúdo dele não é alterado e o comando sai com código 0. Os arquivos de `.secrets/` são criados se faltarem, mantidos se iguais ao `.env.local` e regravados se diferentes (o anterior vai para backup). Para regerar todos os segredos: `pnpm keys:generate --force`.
+- Se o `.env.local` já existe, nenhuma linha dele é alterada e o comando sai com código 0. Se faltar alguma variável de `VARIAVEIS` (por exemplo `DB_API_PASSWORD`, num arquivo anterior à task 042), o comando **acrescenta só as que faltam**, no fim, sem `--force`, com valores novos e sem trocar nenhuma das outras (as linhas existentes ficam byte a byte como estavam; o arquivo continua 600), e avisa os nomes acrescentados. Depois disso, rode `pnpm db:migrate` para aplicar a senha nova ao papel `leilao_api`. Os arquivos de `.secrets/` são criados se faltarem, mantidos se iguais ao `.env.local` e regravados se diferentes (o anterior vai para backup). Para regerar todos os segredos: `pnpm keys:generate --force`.
 - Permissões que já existiam são corrigidas, nunca aceitas: um `.env.local` ou arquivo de `.secrets/` mantido com outro modo (por exemplo 644) volta a 600, e um `.secrets/` existente (por exemplo 755) volta a 700. A saída diz `permissão corrigida para 600` (ou `700`). A troca de modo abre o caminho com `O_NOFOLLOW`, então um link simbólico colocado no lugar é recusado.
 - Dono dos arquivos: o do usuário que roda o comando. O Compose ignora `uid`, `gid` e `mode` de secrets com `file:` (ADR 0023), então só o uid 1000 (usuário `node` da imagem da API) consegue ler `.secrets/` pelo `infra/docker-compose.prod.yml` local. Com outro uid, o comando avisa. Em dev isso não importa: a API roda no host e lê o `.env.local`.
 - Recusa um `.env.local` existente sem `DB_PASSWORD` ou `REDIS_PASSWORD` em base64url; a mensagem cita o nome da variável, nunca o valor.
@@ -79,7 +82,7 @@ Para cada um dos 5 segredos, a API, o runner de migrations e o seed leem exatame
 - Recusa, sem gravar nada, um destino que o git versionaria: o alvo, os arquivos de `.secrets/`, os temporários ou os backups dentro de uma working tree sem estar no `.gitignore`, ou um arquivo já rastreado. Também recusa link simbólico (mesmo pendente) no `.env.local`, em `.secrets/` ou nos arquivos dele, diretório no lugar de arquivo e diretório de destino inexistente.
 - `--out <caminho>` grava em outro arquivo (e `.secrets/` no mesmo diretório), só fora do repositório ou em caminho ignorado pelo git; existe para os testes (`pnpm test:scripts`).
 
-Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê a senha ao inicializar o volume. Rode `pnpm db:sync-password`: ele aplica a senha nova no volume existente, sem apagar dados (ver [dev-setup.md](dev-setup.md#problemas-comuns)). Não use `docker compose down -v`, que apaga o volume compartilhado por todos os worktrees. O Redis lê o arquivo a cada início do container: `docker compose restart redis`. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`); a chave antiga só fica no backup.
+Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê a senha ao inicializar o volume. Rode `pnpm db:sync-password`: ele aplica a senha nova **do dono** (`DB_PASSWORD`) no volume existente, sem apagar dados; a do papel da API (`DB_API_PASSWORD`) é aplicada pelo `pnpm db:migrate`, que também roda depois do `--force` (ver [dev-setup.md](dev-setup.md#problemas-comuns)). Não use `docker compose down -v`, que apaga o volume compartilhado por todos os worktrees. O Redis lê o arquivo a cada início do container: `docker compose restart redis`. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`); a chave antiga só fica no backup.
 
 ## Saídas que expõem segredos
 

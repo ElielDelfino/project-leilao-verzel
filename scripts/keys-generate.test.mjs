@@ -101,7 +101,7 @@ describe('keys:generate', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('cria o arquivo com os 5 segredos da ADR 0023, sem valor vazio', async () => {
+  it('cria o arquivo com os 6 segredos da ADR 0023 e da 0026, sem valor vazio', async () => {
     const caminho = novoCaminho('cria.env');
 
     const resultado = await gerarEnvLocal({ caminho });
@@ -110,6 +110,7 @@ describe('keys:generate', () => {
     const env = lerEnv(caminho);
     assert.deepEqual(Object.keys(env).sort(), [...VARIAVEIS].sort());
     assert.deepEqual([...VARIAVEIS].sort(), [
+      'DB_API_PASSWORD',
       'DB_PASSWORD',
       'ED25519_PRIVATE_KEY',
       'JWT_SECRET',
@@ -474,12 +475,101 @@ describe('keys:generate', () => {
     });
   });
 
+  describe('.env.local anterior ao DB_API_PASSWORD (task 042)', () => {
+    // Um .env.local da F0: sem DB_API_PASSWORD, com linhas fora do padrão e sem quebra de linha final.
+    const ANTIGO = [
+      '# comentário  com espaços duplos',
+      'DB_PASSWORD=' + 'a'.repeat(CARACTERES_DO_SEGREDO),
+      'REDIS_PASSWORD=' + 'b'.repeat(CARACTERES_DO_SEGREDO),
+      'JWT_SECRET=' + 'c'.repeat(CARACTERES_DO_SEGREDO),
+      'PSEUDONYM_HMAC_KEY=' + 'd'.repeat(CARACTERES_DO_SEGREDO),
+      'ED25519_PRIVATE_KEY=' + 'e'.repeat(CARACTERES_DO_SEGREDO),
+    ].join('\n');
+
+    function envAnterior(nome, conteudo = `${ANTIGO}\n`) {
+      const caminho = join(mkdtempSync(join(dir, `${nome}-`)), '.env.local');
+      writeFileSync(caminho, conteudo, { mode: 0o600 });
+      return caminho;
+    }
+
+    it('acrescenta só DB_API_PASSWORD e mantém as outras linhas byte a byte', async () => {
+      const caminho = envAnterior('acrescenta');
+      const antes = readFileSync(caminho);
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.status, 'mantido');
+      assert.deepEqual(resultado.acrescentadas, ['DB_API_PASSWORD']);
+      const depois = readFileSync(caminho);
+      assert.deepEqual(depois.subarray(0, antes.length), antes);
+      const novo = depois.subarray(antes.length).toString('utf8');
+      assert.match(novo, /^DB_API_PASSWORD=[A-Za-z0-9_-]{43}\n$/);
+    });
+
+    it('o valor acrescentado é canônico (43 caracteres, 32 bytes) e o modo segue 600', async () => {
+      const caminho = envAnterior('canonico-acrescentado');
+
+      await gerarEnvLocal({ caminho });
+
+      const valor = lerEnv(caminho).DB_API_PASSWORD;
+      assert.equal(valor.length, CARACTERES_DO_SEGREDO);
+      assert.equal(bytes(valor).length, BYTES_256_BITS);
+      assert.equal(bytes(valor).toString('base64url'), valor);
+      assert.equal(modo(caminho), 0o600);
+    });
+
+    it('arquivo sem quebra de linha final ganha uma antes da linha nova', async () => {
+      const caminho = envAnterior('sem-newline', ANTIGO);
+      const antes = readFileSync(caminho);
+
+      await gerarEnvLocal({ caminho });
+
+      const depois = readFileSync(caminho);
+      assert.deepEqual(depois.subarray(0, antes.length), antes);
+      assert.match(depois.subarray(antes.length).toString('utf8'), /^\nDB_API_PASSWORD=/);
+    });
+
+    it('a segunda execução não altera mais nada', async () => {
+      const caminho = envAnterior('idempotente');
+      await gerarEnvLocal({ caminho });
+      const depoisDaPrimeira = readFileSync(caminho);
+
+      const segunda = await gerarEnvLocal({ caminho });
+
+      assert.equal(segunda.acrescentadas, undefined);
+      assert.deepEqual(readFileSync(caminho), depoisDaPrimeira);
+    });
+
+    it('não deixa temporário nem backup ao lado do arquivo', async () => {
+      const caminho = envAnterior('limpo-acrescentado');
+
+      await gerarEnvLocal({ caminho });
+
+      assert.deepEqual(readdirSync(dirname(caminho)).sort(), ['.env.local', DIRETORIO_DE_SEGREDOS]);
+    });
+
+    it('a CLI avisa pelo nome da variável e não mostra valores', () => {
+      const caminho = envAnterior('cli-acrescentado');
+
+      const saida = rodarCli(['--out', caminho]);
+
+      assert.equal(saida.status, 0, saida.stderr);
+      assert.match(saida.stdout, /DB_API_PASSWORD/);
+      assert.match(saida.stdout, /db:migrate/);
+      const env = lerEnv(caminho);
+      for (const nome of VARIAVEIS) assert.ok(!saida.stdout.includes(env[nome]), nome);
+    });
+  });
+
   describe('.env.local antigo com variáveis que saíram (ADR 0023)', () => {
     function envAntigo(sub) {
       const caminho = join(sub, '.env.local');
       const linhas = [
         'DB_PASSWORD=' + 'a'.repeat(CARACTERES_DO_SEGREDO),
         'REDIS_PASSWORD=' + 'b'.repeat(CARACTERES_DO_SEGREDO),
+        ...VARIAVEIS.filter((nome) => !['DB_PASSWORD', 'REDIS_PASSWORD'].includes(nome)).map(
+          (nome) => `${nome}=` + 'c'.repeat(CARACTERES_DO_SEGREDO),
+        ),
         'ED25519_KEY_ID=valorDoKeyIdAntigo',
         'SEED_DEMO_PASSWORD=valorDaSenhaDemoAntiga',
         '',

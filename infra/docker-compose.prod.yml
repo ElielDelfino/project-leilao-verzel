@@ -8,8 +8,10 @@
 # têm nome fixo, leilao-prod_*, e não se misturam com os de dev).
 # Nenhuma senha passa por `environment:` ou `command:`: as senhas são arquivos montados pelo
 # Compose `secrets:` em /run/secrets/<nome> (ADR 0023).
-#   LEILAO_SECRETS_DIR  diretório com db_password e redis_password (padrão ../.secrets, criado por
-#                       `pnpm keys:generate`). Na VM, /run/leilao/secrets, gravado pelo
+#   LEILAO_SECRETS_DIR  diretório com os 6 arquivos de segredo (db_password, db_api_password,
+#                       redis_password, jwt_secret, pseudonym_hmac_key, ed25519_private_key). O padrão
+#                       ../.secrets só tem db_password e redis_password (`pnpm keys:generate`): para
+#                       subir a API localmente, falta criar os outros 4. Na VM, /run/leilao/secrets, gravado pelo
 #                       infra/deploy/fetch-secrets.sh a partir do Secret Manager (tarefa 008).
 #   API_IMAGE, WEB_IMAGE  imagens a usar (prod: ghcr.io/<owner>/leilao-api:<sha> e leilao-web:<sha>,
 #                       com `pull` e `up --no-build`); sem elas, o compose constrói as imagens locais.
@@ -179,26 +181,30 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-leilao}
-      POSTGRES_USER: ${POSTGRES_USER:-leilao}
+      # A API conecta como o papel `leilao_api` (ADR 0026), nunca como o dono `leilao`.
+      POSTGRES_API_USER: ${POSTGRES_API_USER:-leilao_api}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       # Origem pública da SPA (CORS e cookies); a validação no boot é do api-dev.
       WEB_ORIGIN: https://${CADDY_SITE_ADDRESS:-localhost}
-      # Caminhos (não os valores) das senhas: a API lê <VAR> ou <VAR>_FILE (ADR 0023).
-      DB_PASSWORD_FILE: /run/secrets/db_password
+      # Caminhos (não os valores) dos 5 segredos da API: ela lê <VAR> ou <VAR>_FILE (ADR 0023). Sem
+      # DB_PASSWORD_FILE: a senha do dono do banco não chega à API (specs/014 §Produção, ADR 0026).
+      DB_API_PASSWORD_FILE: /run/secrets/db_api_password
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
-      # JWT_SECRET (F1), PSEUDONYM_HMAC_KEY e ED25519_PRIVATE_KEY (F3) entram só neste serviço, como
-      # JWT_SECRET_FILE etc. + secrets jwt_secret, pseudonym_hmac_key e ed25519_private_key, quando a
-      # API passar a lê-los (ADR 0023). Nunca em environment:. Montá-los antes faria o `up` falhar,
-      # porque os arquivos ainda não existem em .secrets/.
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      PSEUDONYM_HMAC_KEY_FILE: /run/secrets/pseudonym_hmac_key
+      ED25519_PRIVATE_KEY_FILE: /run/secrets/ed25519_private_key
     # Os arquivos montados por `secrets:` (bind) mantêm dono e modo do host; uid/gid/mode do
     # Compose valem só no Swarm. A API roda como uid 1000 sem capabilities, então os arquivos que ela
     # lê precisam ser do uid 1000 e só dele: `chown 1000:1000` e modo 600 (specs/014 §Segredos) ou
     # 0400, diretório 700, nunca 644 (keys:generate: tarefa 023; fetch-secrets na VM: tarefa 008).
     # O Postgres e o Redis leem como root no entrypoint (DAC_OVERRIDE e DAC_READ_SEARCH).
     secrets:
-      - db_password
+      - db_api_password
       - redis_password
+      - jwt_secret
+      - pseudonym_hmac_key
+      - ed25519_private_key
     # borda: alcançada pelo Caddy e com saída para a Scryfall; dados: Postgres e Redis.
     networks:
       - borda
@@ -294,8 +300,16 @@ networks:
 secrets:
   db_password:
     file: ${LEILAO_SECRETS_DIR:-../.secrets}/db_password
+  db_api_password:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/db_api_password
   redis_password:
     file: ${LEILAO_SECRETS_DIR:-../.secrets}/redis_password
+  jwt_secret:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/jwt_secret
+  pseudonym_hmac_key:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/pseudonym_hmac_key
+  ed25519_private_key:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/ed25519_private_key
 
 # Nomes explícitos: mesmo com o projeto errado (COMPOSE_PROJECT_NAME=leilao do .env, sem -p), o
 # compose de prod nunca anexa o volume leilao_pgdata do dev.
