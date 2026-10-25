@@ -72,7 +72,7 @@ A API e o runner de migrations (`pnpm db:migrate`) leem a conexão em partes, co
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | `127.0.0.1`, `16379` (`.env`); senha no `.env.local` | `redis`, `6379`, da mesma forma; senha por `REDIS_PASSWORD_FILE=/run/secrets/redis_password` |
 
 - Motivo: o `--env-file` do Node não interpola variáveis, então uma URL completa repetiria a senha no `.env.local` (duas fontes para o mesmo segredo); em produção, ela exigiria um sexto segredo no Secret Manager ou montar a URL no `environment:` do compose, onde a senha aparece no `docker inspect`.
-- Os testes trocam só o banco: `POSTGRES_DB=leilao_test` com o banco local (specs/013) ou host e porta do container com Testcontainers.
+- Os testes trocam só o banco: `POSTGRES_DB=leilao_test_<sufixo>` (um por worktree) com o banco local ou host e porta do container com Testcontainers (specs/013 §Banco de teste).
 - Nenhuma dessas variáveis tem default no código: faltando qualquer uma (para as senhas, `<VAR>` ou `<VAR>_FILE`, §Segredos), a API não sobe e a mensagem cita só o nome da variável, nunca o valor.
 
 ## CI/CD (ADR 0017)
