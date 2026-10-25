@@ -4,8 +4,11 @@ export type { SaldoComDisponivel, SaldoEmCentavos } from './efeito.js';
 export {
   type CodigoDoErroDeCarteira,
   comprometer,
+  creditarArremate,
+  debitarArremate,
   type DetalhesDoErroDeCarteira,
   ErroDeCarteira,
+  estornar,
   liberar,
   ordemDeTrava,
   type ReferenciaDoLance,

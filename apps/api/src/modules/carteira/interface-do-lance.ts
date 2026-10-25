@@ -1,11 +1,14 @@
-// Interface pública da carteira para o lance (specs/004 §Comportamento, tarefa 074): comprometer
-// e liberar na transação de quem chama, com a linha de wallet_balances travada (FOR UPDATE).
+// Interface pública da carteira para lance, liquidação e cancelamento (specs/004 §Comportamento,
+// tarefas 074 e 103): comprometer, liberar, estornar, debitarArremate e creditarArremate na
+// transação de quem chama, com a linha de wallet_balances travada (FOR UPDATE).
 // Ordem dos locks (D12): o lote primeiro (quem chama já o travou), depois as carteiras em ordem
 // crescente de user_id. Quem mexe em mais de uma carteira na mesma transação (lance que supera
-// outro licitante, liquidação) chama travarCarteiras com todas antes de comprometer ou liberar.
+// outro licitante, liquidação: vencedor e leiloeiro) chama travarCarteiras com todas antes de
+// movimentar. O depósito trava uma carteira só e não trava lote.
 // Todo ErroDeCarteira exige rollback da tx de quem chama: nunca capturar e seguir para o commit.
-// Em LANCE_JA_PROCESSADO (tarefa 093) a tx já está abortada no Postgres pela violação do índice
-// único (lance_id, tipo): qualquer comando seguinte nela falha até o rollback.
+// Em LANCE_JA_PROCESSADO (tarefa 093) e LIQUIDACAO_JA_PROCESSADA (tarefa 103) a tx já está
+// abortada no Postgres pela violação de um índice único: qualquer comando seguinte nela falha
+// até o rollback.
 import { converterErroDoBanco, ErroDoBanco, type Transacao } from '../../db/banco.js';
 import {
   comDisponivel,
@@ -23,10 +26,16 @@ export interface ReferenciaDoLance {
 }
 
 export type CodigoDoErroDeCarteira =
-  'SALDO_INSUFICIENTE' | 'COMPROMETIDO_INSUFICIENTE' | 'LANCE_JA_PROCESSADO';
+  | 'SALDO_INSUFICIENTE'
+  | 'COMPROMETIDO_INSUFICIENTE'
+  | 'LANCE_JA_PROCESSADO'
+  | 'LIQUIDACAO_JA_PROCESSADA';
+
+/** Códigos de lançamento repetido: sem valor nem saldo. */
+type CodigoDeRepeticao = 'LANCE_JA_PROCESSADO' | 'LIQUIDACAO_JA_PROCESSADA';
 
 /** Códigos que levam o valor pedido e o saldo que o recusou. */
-type CodigoComDetalhes = Exclude<CodigoDoErroDeCarteira, 'LANCE_JA_PROCESSADO'>;
+type CodigoComDetalhes = Exclude<CodigoDoErroDeCarteira, CodigoDeRepeticao>;
 
 export interface DetalhesDoErroDeCarteira {
   readonly valor: number;
@@ -38,16 +47,17 @@ export interface DetalhesDoErroDeCarteira {
  * Recusa de domínio (não HTTP): quem chama decide a resposta. No lance, a recusa
  * SALDO_INSUFICIENTE (specs/007) vem só de comprometer, sob o lock da carteira; a API a traduz
  * em 422 com detalhes.disponivelCentavos. LANCE_JA_PROCESSADO (comprometer ou liberar repetidos
- * para o mesmo lanceId) não leva valor nem saldo. O erro exige rollback da tx de quem chama.
+ * para o mesmo lanceId) e LIQUIDACAO_JA_PROCESSADA (estorno, débito ou crédito repetidos para o
+ * mesmo loteId) não levam valor nem saldo. O erro exige rollback da tx de quem chama.
  */
 export class ErroDeCarteira extends Error {
   readonly codigo: CodigoDoErroDeCarteira;
-  /** undefined só em LANCE_JA_PROCESSADO. */
+  /** undefined só nos códigos de repetição. */
   readonly valor: number | undefined;
   readonly disponivel: number | undefined;
   readonly comprometido: number | undefined;
 
-  constructor(codigo: 'LANCE_JA_PROCESSADO');
+  constructor(codigo: CodigoDeRepeticao);
   constructor(codigo: CodigoComDetalhes, detalhes: DetalhesDoErroDeCarteira);
   constructor(codigo: CodigoDoErroDeCarteira, detalhes?: DetalhesDoErroDeCarteira) {
     super(`operação na carteira recusada: ${codigo}`);
@@ -59,21 +69,29 @@ export class ErroDeCarteira extends Error {
   }
 }
 
-/** Índice único parcial de ledger_entries (migration 0004, tarefa 092). */
-const INDICE_DO_LANCE = 'ledger_entries_lance_id_tipo_unico';
+/**
+ * Índices únicos parciais de ledger_entries e o código de cada um: (lance_id, tipo) para
+ * compromisso e liberação (migration 0004, tarefa 092); (lote_id, tipo) para estorno, débito e
+ * crédito do arremate (tarefa 102, D4).
+ */
+const CODIGO_POR_INDICE: ReadonlyMap<string, CodigoDeRepeticao> = new Map([
+  ['ledger_entries_lance_id_tipo_unico', 'LANCE_JA_PROCESSADO'],
+  ['ledger_entries_lote_id_tipo_unico', 'LIQUIDACAO_JA_PROCESSADA'],
+]);
 const VIOLACAO_DE_UNICIDADE = '23505';
 
 /**
- * Violação do índice (lance_id, tipo) vira LANCE_JA_PROCESSADO, sem `cause`: o erro do driver
+ * Violação de um dos índices vira o ErroDeCarteira do índice, sem `cause`: o erro do driver
  * traz SQL, parâmetros e a linha (`detail`). Qualquer outro erro volta como veio.
  */
 function traduzirLancamentoRepetido(erro: unknown): unknown {
   const convertido = converterErroDoBanco(erro);
-  const repetido =
-    convertido instanceof ErroDoBanco &&
-    convertido.codigo === VIOLACAO_DE_UNICIDADE &&
-    convertido.restricao === INDICE_DO_LANCE;
-  return repetido ? new ErroDeCarteira('LANCE_JA_PROCESSADO') : erro;
+  if (!(convertido instanceof ErroDoBanco) || convertido.codigo !== VIOLACAO_DE_UNICIDADE) {
+    return erro;
+  }
+  const restricao = convertido.restricao;
+  const codigo = restricao === undefined ? undefined : CODIGO_POR_INDICE.get(restricao);
+  return codigo === undefined ? erro : new ErroDeCarteira(codigo);
 }
 
 /**
@@ -107,7 +125,7 @@ export async function travarCarteiras(
 async function movimentar(
   tx: Transacao,
   userId: string,
-  tipo: Extract<TipoDeLancamento, 'compromisso' | 'liberacao'>,
+  tipo: Exclude<TipoDeLancamento, 'deposito'>,
   valorCentavos: number,
   referencia: ReferenciaDoLance,
   conferir: (saldo: SaldoEmCentavos) => void,
@@ -159,12 +177,65 @@ export function liberar(
   valorCentavos: number,
   referencia: ReferenciaDoLance,
 ): Promise<SaldoComDisponivel> {
-  return movimentar(tx, userId, 'liberacao', valorCentavos, referencia, (saldo) => {
-    if (saldo.comprometido < valorCentavos) {
-      throw new ErroDeCarteira('COMPROMETIDO_INSUFICIENTE', {
-        valor: valorCentavos,
-        comprometido: saldo.comprometido,
-      });
-    }
+  return movimentar(tx, userId, 'liberacao', valorCentavos, referencia, (saldo) =>
+    exigirComprometido(saldo, valorCentavos),
+  );
+}
+
+/**
+ * Estorno (lote cancelado com líder, specs/006): comprometido −= valor do líder. Recusa com
+ * COMPROMETIDO_INSUFICIENTE se o valor passa do comprometido. `referencia` é o lote e o último
+ * lance (D4). Devolve o saldo novo.
+ */
+export function estornar(
+  tx: Transacao,
+  userId: string,
+  valorCentavos: number,
+  referencia: ReferenciaDoLance,
+): Promise<SaldoComDisponivel> {
+  return movimentar(tx, userId, 'estorno', valorCentavos, referencia, (saldo) =>
+    exigirComprometido(saldo, valorCentavos),
+  );
+}
+
+/**
+ * Débito do arremate (liquidação, specs/010): total −= valor e comprometido −= valor do
+ * vencedor. Recusa com COMPROMETIDO_INSUFICIENTE se o valor passa do comprometido. Devolve o
+ * saldo novo.
+ */
+export function debitarArremate(
+  tx: Transacao,
+  userId: string,
+  valorCentavos: number,
+  referencia: ReferenciaDoLance,
+): Promise<SaldoComDisponivel> {
+  return movimentar(tx, userId, 'debito_arremate', valorCentavos, referencia, (saldo) =>
+    exigirComprometido(saldo, valorCentavos),
+  );
+}
+
+/**
+ * Crédito do arremate (liquidação, specs/010): total += valor do leiloeiro. Sem conferência de
+ * saldo; a linha de wallet_balances nasce aqui se o leiloeiro ainda não tinha (specs/004).
+ * Devolve o saldo novo.
+ */
+export function creditarArremate(
+  tx: Transacao,
+  leiloeiroId: string,
+  valorCentavos: number,
+  referencia: ReferenciaDoLance,
+): Promise<SaldoComDisponivel> {
+  return movimentar(tx, leiloeiroId, 'credito_arremate', valorCentavos, referencia, () => {
+    // Crédito não depende do saldo anterior.
   });
+}
+
+/** COMPROMETIDO_INSUFICIENTE se o valor passa do comprometido (bug de quem chama). */
+function exigirComprometido(saldo: SaldoEmCentavos, valorCentavos: number): void {
+  if (saldo.comprometido < valorCentavos) {
+    throw new ErroDeCarteira('COMPROMETIDO_INSUFICIENTE', {
+      valor: valorCentavos,
+      comprometido: saldo.comprometido,
+    });
+  }
 }
