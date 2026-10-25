@@ -29,6 +29,14 @@ export interface EstadoDaSala {
   readonly anuncioSuperado: string;
   /** "O fim do lote foi estendido para …", ou vazio. */
   readonly avisoFimEstendido: string;
+  /**
+   * Maior `fimEm` já anunciado por um `fim_estendido` (ou o `fimEm` do estado do servidor, que já
+   * reflete as extensões anteriores). Invariante: só cresce e é independente de `lote.fimEm`.
+   * O servidor publica `lance_aceito` (com o `fimEm` novo) antes de `fim_estendido`, e a ordem
+   * entre eventos não é garantida; por isso `lance_aceito` move `lote.fimEm` mas nunca este
+   * campo, e `fim_estendido` é novo se, e só se, o seu `fimEm` passa dele.
+   */
+  readonly fimAnunciadoEm: string;
 }
 
 /** Substitui todo o estado local pelo do servidor (entrada na sala e resync). */
@@ -42,6 +50,7 @@ export function criarEstadoDaSala(estado: EstadoDoServidor, relogioLocalMs: numb
     anuncioCortes: '',
     anuncioSuperado: '',
     avisoFimEstendido: '',
+    fimAnunciadoEm: estado.lote.fimEm,
   };
 }
 
@@ -103,12 +112,15 @@ export function aplicarFimEstendido(
   evento: EventosDoServidor['fim_estendido'],
 ): EstadoDaSala {
   if (ehTerminal(estado)) return estado;
+  // Repetido (resync, reconexão) ou atrasado: já anunciado, não pisca o aviso de novo.
+  if (Date.parse(evento.fimEm) <= Date.parse(estado.fimAnunciadoEm)) return estado;
+  // O `lance_aceito` pode já ter gravado este fim (ou um maior): o fim exibido nunca recua.
   const fimEm = maiorFim(estado.lote.fimEm, evento.fimEm);
-  if (fimEm === estado.lote.fimEm) return estado;
   return {
     ...estado,
-    lote: { ...estado.lote, fimEm },
+    lote: fimEm === estado.lote.fimEm ? estado.lote : { ...estado.lote, fimEm },
     avisoFimEstendido: `O fim do lote foi estendido para ${formatarDataHora(fimEm)}.`,
+    fimAnunciadoEm: evento.fimEm,
   };
 }
 
