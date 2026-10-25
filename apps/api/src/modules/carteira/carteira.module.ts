@@ -5,8 +5,8 @@ import { ServicoDeCarteira } from './servico-de-carteira.js';
 
 /**
  * Módulo carteira (specs/004): dono de `ledger_entries` e `wallet_balances`. Depende do provider
- * global BANCO (AppModule). Na F1 nenhum outro módulo chama a carteira; a interface
- * `carteira.*(tx, ...)` para lances, liquidação e cancelamento entra nas fases F3 e F4.
+ * global BANCO (AppModule). Outros módulos usam as funções `(tx, ...)` exportadas por index.ts
+ * (comprometer, liberar, travarCarteiras; tarefa 074); liquidação e estorno entram na F4.
  */
 @Module({
   controllers: [CarteiraController],

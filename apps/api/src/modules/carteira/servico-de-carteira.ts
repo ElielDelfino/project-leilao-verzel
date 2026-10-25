@@ -6,7 +6,7 @@ import type { SchemasApi } from '@leilao/contracts';
 import { ErroApi } from '../../common/erros/erro-api.js';
 import { BANCO } from '../../config/banco.module.js';
 import { type BancoVerificavel, ErroDoBanco } from '../../db/banco.js';
-import { efeitoDoLancamento, type SaldoEmCentavos } from './efeito.js';
+import { comDisponivel, efeitoDoLancamento, type SaldoEmCentavos } from './efeito.js';
 import {
   atualizarSaldo,
   buscarPorChave,
@@ -42,11 +42,7 @@ export interface PaginaDoExtrato {
 }
 
 function paraSaldo(saldo: SaldoEmCentavos): Saldo {
-  return {
-    totalCentavos: saldo.total,
-    comprometidoCentavos: saldo.comprometido,
-    disponivelCentavos: saldo.total - saldo.comprometido,
-  };
+  return comDisponivel(saldo);
 }
 
 function paraLancamento(linha: LinhaDeLancamento): Lancamento {
