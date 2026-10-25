@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { ambienteDeTeste } from '../../src/db/ambiente-de-teste.js';
+import { ambienteDeTeste } from '../db/ambiente-de-teste.js';
 import { PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
 import { BANCO_DE_TESTE } from './banco-de-teste.js';
 import { bancoDeTesteDoAmbiente } from './global.js';

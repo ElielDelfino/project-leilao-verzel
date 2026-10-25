@@ -1,7 +1,7 @@
 // Setup global do Vitest para os testes da API (tarefa 011, specs/013), ligado por
 // test/setup/vitest.config.ts. Roda uma vez, antes de criar os workers:
 // - LEILAO_TEST_DB ausente ou vazio: nada a fazer; os testes de banco ficam "skipped"
-//   (src/db/ambiente-de-teste.ts).
+//   (test/db/ambiente-de-teste.ts).
 // - LEILAO_TEST_DB=local: Postgres local já no ar (pnpm infra:up). Refaz o leilao_test_tpl se o hash
 //   das migrations mudou, recria o leilao_test a partir dele e troca só POSTGRES_DB para os workers
 //   (specs/014 §Conexão: não há DATABASE_URL).

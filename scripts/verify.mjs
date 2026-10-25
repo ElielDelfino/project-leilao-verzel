@@ -6,8 +6,8 @@
 //
 // quick: só o que mudou desde `git merge-base HEAD main` (commits, alterações e arquivos novos):
 //   formato e lint só nesses arquivos; typecheck dos pacotes afetados e dos que dependem deles;
-//   testes ligados ao que mudou (src/x.ts → test/x.test.ts ou src/x.test.ts, o próprio teste
-//   alterado, e os testes de banco quando as migrations ou o setup mudam); banco local via
+//   testes ligados ao que mudou (src/x.ts → test/x.test.ts, o próprio teste alterado, e os
+//   testes de banco quando as migrations, o setup ou os helpers de test/db mudam); banco local via
 //   TEMPLATE (LEILAO_TEST_DB=local, apps/api/test/setup/). Roda todos os passos; sai ≠ 0 se algum
 //   falhar.
 // full: formato, lint, typecheck, todos os testes, contrato e build (--e2e: Playwright). Para na
@@ -39,8 +39,13 @@ const CONFIG_DE_TESTE = { 'apps/api': 'test/setup/vitest.config.ts' };
 
 /** Pacote dono dos testes de banco e o que, ao mudar, faz rodá-los no quick. */
 const PACOTE_DO_BANCO = 'apps/api';
-const GATILHOS_DO_BANCO = ['database/postgres/migrations/', 'apps/api/test/setup/'];
-const TESTES_DO_BANCO = ['test/db/', 'src/db/', 'test/setup/'];
+// Desde a tarefa 025 os testes de banco ficam em test/db/ (com o helper ambiente-de-teste.ts).
+const GATILHOS_DO_BANCO = [
+  'database/postgres/migrations/',
+  'apps/api/test/setup/',
+  'apps/api/test/db/',
+];
+const TESTES_DO_BANCO = ['test/db/', 'test/setup/'];
 
 const HOSTS_LOCAIS = new Set(['127.0.0.1', 'localhost', '::1']);
 const ESPERA_DO_POSTGRES_MS = 1000;
@@ -177,12 +182,15 @@ export function pacotesAfetados(pacotes, alterados) {
 
 // ---------------------------------------------------------------- testes ligados ao que mudou
 
-/** Testes (relativos ao pacote) ligados a um arquivo alterado do pacote. */
+/**
+ * Testes (relativos ao pacote) ligados a um arquivo alterado do pacote (specs/013):
+ * o próprio teste, ou src/x.ts(x) → test/x.test.ts(x). Os configs do Vitest coletam só test/.
+ */
 function testesDoArquivo(relativoAoPacote) {
   if (ARQUIVO_DE_TESTE.test(relativoAoPacote)) return [relativoAoPacote];
   if (!relativoAoPacote.startsWith('src/') || !EXTENSOES_TS.test(relativoAoPacote)) return [];
   const base = relativoAoPacote.slice('src/'.length).replace(EXTENSOES_TS, '');
-  return ['ts', 'tsx'].flatMap((ext) => [`test/${base}.test.${ext}`, `src/${base}.test.${ext}`]);
+  return ['ts', 'tsx'].map((ext) => `test/${base}.test.${ext}`);
 }
 
 function listarTestes(raiz, pasta, prefixos) {

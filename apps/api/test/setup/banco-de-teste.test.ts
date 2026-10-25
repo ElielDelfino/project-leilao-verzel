@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { ambienteDeTeste } from '../../src/db/ambiente-de-teste.js';
+import { ambienteDeTeste } from '../db/ambiente-de-teste.js';
 import { type ConexaoDoBanco, trocarBanco } from '../../src/db/conexao.js';
 import { PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
 import {
