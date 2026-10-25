@@ -16,6 +16,7 @@ import {
   criarAppDeTeste,
   novoPrefixoDaScryfall,
 } from '../helpers/app-de-teste.js';
+import { registrarChaveDeAssinatura } from '../../src/modules/lances/index.js';
 import { exigeCsrf, operacoesDoContrato } from '../helpers/contrato.js';
 import { ID_CARTA_SIMPLES } from '../helpers/fixtures-scryfall/cartas.js';
 import {
@@ -38,8 +39,20 @@ import {
 
 const HORA_MS = 60 * 60 * 1000;
 const TITULO_CRIADO = `matriz-${randomBytes(6).toString('hex')}`;
-/** Preenchido no beforeAll: um lote e seu snapshot, para as rotas com parâmetro de caminho. */
-const alvo = { loteId: '', snapshotId: '' };
+/**
+ * Preenchido no beforeAll: um lote e seu snapshot, para as rotas com parâmetro de caminho, e um
+ * lote à parte para os lances (que ficam gravados para sempre: `bids` é append-only).
+ */
+const alvo = { loteId: '', snapshotId: '', loteDeLances: '' };
+const LANCE_INICIAL_DA_MATRIZ_CENTAVOS = 100;
+const INCREMENTO_DA_MATRIZ_CENTAVOS = 100;
+const SALDO_PARA_LANCAR_CENTAVOS = 1_000_000;
+let ultimoValorDeLance = LANCE_INICIAL_DA_MATRIZ_CENTAVOS - INCREMENTO_DA_MATRIZ_CENTAVOS;
+
+function proximoValorDeLance(): number {
+  ultimoValorDeLance += INCREMENTO_DA_MATRIZ_CENTAVOS;
+  return ultimoValorDeLance;
+}
 
 type Papel = 'anonimo' | 'licitante' | 'leiloeiro';
 const PAPEIS: readonly Papel[] = ['anonimo', 'licitante', 'leiloeiro'];
@@ -58,6 +71,8 @@ interface Operacao {
   /** Corpo (e headers extras) válidos para a operação; recebe o e-mail de uma conta existente. */
   readonly corpo?: (email: string) => object;
   readonly extras?: () => Record<string, string>;
+  /** Saldo a depositar na conta licitante antes da chamada (operações que gastam saldo). */
+  readonly saldoDoLicitanteCentavos?: number;
   /** Resultado com CSRF válido, por papel. */
   readonly comCsrf: Readonly<Record<Papel, Esperado>>;
   /**
@@ -189,27 +204,28 @@ const OPERACOES: readonly Operacao[] = [
       leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
     },
   },
-  // F3 (openapi 0.5.0): rotas pendentes até as tarefas 079 (POST lances), 080 (leituras de lances) e 081 (auditoria).
+  // F3 (openapi 0.5.0): lances (079, 080). A auditoria (081) segue pendente.
   {
     metodo: 'POST',
     caminho: '/api/lotes/{id}/lances',
-    url: () => `/api/lotes/${alvo.loteId}/lances`,
-    corpo: () => ({ valorCentavos: 100_000 }),
+    // Lote próprio (alvo.loteDeLances): `bids` é append-only, então este lote não entra na limpeza.
+    url: () => `/api/lotes/${alvo.loteDeLances}/lances`,
+    // Cada chamada pede um valor maior que o anterior: o licitante de cada caso é uma conta nova,
+    // então o 201 nunca esbarra em JA_ESTA_GANHANDO nem em LANCE_ABAIXO_DO_MINIMO.
+    corpo: () => ({ valorCentavos: proximoValorDeLance() }),
     extras: () => ({ 'idempotency-key': randomUUID() }),
-    // O lote do alvo precisa estar ativo para o 201 do licitante: a 079 ajusta o cenário.
+    saldoDoLicitanteCentavos: SALDO_PARA_LANCAR_CENTAVOS,
     comCsrf: {
       anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
       licitante: { status: 201 },
       leiloeiro: { status: 403, codigo: 'LEILOEIRO_NAO_PODE_LANCAR' },
     },
-    pendente: { tarefa: '079', motivo: 'POST /api/lotes/{id}/lances ainda não existe na API' },
   },
   {
     metodo: 'GET',
     caminho: '/api/lotes/{id}/lances',
     url: () => `/api/lotes/${alvo.loteId}/lances`,
     comCsrf: igualParaTodos({ status: 200 }),
-    pendente: { tarefa: '080', motivo: 'GET /api/lotes/{id}/lances ainda não existe na API' },
   },
   {
     metodo: 'GET',
@@ -219,7 +235,6 @@ const OPERACOES: readonly Operacao[] = [
       licitante: { status: 200 },
       leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
     },
-    pendente: { tarefa: '080', motivo: 'GET /api/me/lances ainda não existe na API' },
   },
   {
     metodo: 'GET',
@@ -288,6 +303,16 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       const lote = await inserirLote(pool, dono.id, { titulo: 'Lote da matriz' });
       alvo.loteId = lote.id;
       alvo.snapshotId = lote.snapshotId;
+      await registrarChaveDeAssinatura(app);
+      // Leiloeiro fora de `usuarios`: o lote com lances não pode ser apagado (append-only).
+      const donoDosLances = await inserirUsuario(pool, 'leiloeiro');
+      alvo.loteDeLances = (
+        await inserirLote(pool, donoDosLances.id, {
+          titulo: 'Lote de lances da matriz',
+          lance_inicial_centavos: LANCE_INICIAL_DA_MATRIZ_CENTAVOS,
+          incremento_minimo_centavos: INCREMENTO_DA_MATRIZ_CENTAVOS,
+        })
+      ).id;
     });
 
     afterAll(async () => {
@@ -345,6 +370,27 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       });
     }
 
+    /** Deposita o saldo que a operação gasta, só na conta licitante (as outras não o usam). */
+    async function prepararSaldo(
+      navegador: Navegador,
+      operacao: Operacao,
+      papel: Papel,
+    ): Promise<void> {
+      if (operacao.saldoDoLicitanteCentavos === undefined || papel !== 'licitante') return;
+      const csrf = navegador.cookies.get('csrf_token') ?? '';
+      const resposta = await app.inject({
+        method: 'POST',
+        url: '/api/carteira/depositos',
+        headers: {
+          cookie: navegador.cabecalhoCookie(),
+          'x-csrf-token': csrf,
+          'idempotency-key': randomUUID(),
+        },
+        payload: { valorCentavos: operacao.saldoDoLicitanteCentavos },
+      });
+      expect(resposta.statusCode).toBe(201);
+    }
+
     async function contaExistente(): Promise<string> {
       const { email, resposta } = await cadastrar(new Navegador(app, ipNovo()));
       expect(resposta.statusCode).toBe(201);
@@ -368,6 +414,7 @@ describe.skipIf(!INFRA_DISPONIVEL)(
         it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
           const navegador = await navegadorDe(papel);
           const email = await contaExistente();
+          await prepararSaldo(navegador, operacao, papel);
 
           const resposta = await chamar(navegador, operacao, email, true);
 
@@ -383,6 +430,7 @@ describe.skipIf(!INFRA_DISPONIVEL)(
         it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
           const navegador = await navegadorDe(papel);
           const email = await contaExistente();
+          await prepararSaldo(navegador, operacao, papel);
 
           const resposta = await chamar(navegador, operacao, email, false);
 
