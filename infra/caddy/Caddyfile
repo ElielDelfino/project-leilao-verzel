@@ -32,10 +32,11 @@
 	# Headers de segurança em todas as respostas (SPA e proxy). A SPA não tem script nem estilo
 	# inline (/tema-inicial.js é externo), então script-src 'self' basta, sem nonce.
 	# connect-src 'self' cobre o fetch de /api e o WebSocket do Socket.IO na mesma origem;
-	# img-src 'self' data: (ADR 0024): imagens das cartas vêm da própria API.
+	# img-src 'self' data: (ADR 0024): imagens das cartas vêm da própria API. A ADR 0029 acrescenta só
+	# https://cards.scryfall.io (miniaturas da busca do painel), em todas as rotas; ver docs/deploy.md.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://cards.scryfall.io; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
