@@ -1,9 +1,29 @@
 // Acesso a `lots` (specs/006 §Dados). O papel da API tem SELECT e INSERT na tabela e UPDATE só
 // nas colunas de COLUNAS_ATUALIZAVEIS (ADR 0026). "Agora" é o now() do Postgres (specs/006
 // §Estados e status derivado).
-import { and, count, desc, eq, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  lte,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm';
 
 import type { BancoDrizzle, Transacao } from '../../db/banco.js';
+import {
+  escaparLike,
+  type FiltrosDaVitrine,
+  type OrdemDaVitrine,
+  type StatusDaVitrine,
+} from './esquemas-da-vitrine.js';
 import { lots } from './schema.js';
 
 export type StatusDoLote = 'agendado' | 'ao_vivo' | 'encerrado' | 'cancelado';
@@ -109,6 +129,107 @@ export async function listarLotesDoLeiloeiro(
     .orderBy(desc(lots.criadoEm), desc(lots.id))
     .limit(pagina.limite)
     .offset(pagina.deslocamento);
+}
+
+/** Preço da faixa e da ordem `maior_lance` (specs/006 §Vitrine). */
+const preco = sql<number>`coalesce(${lots.lanceAtualCentavos}, ${lots.lanceInicialCentavos})`;
+
+/** Ainda não encerrado nem cancelado pelo status gravado. */
+const abertoPeloStatusGravado = inArray(lots.status, ['agendado', 'ao_vivo']);
+
+/**
+ * Status derivado escrito como predicados sobre as colunas (equivalente a `statusDerivado = x`),
+ * para o planner usar os índices (status, inicio_em) e (status, fim_em). Sem status: tudo menos
+ * cancelado.
+ */
+function condicaoDoStatus(status: StatusDaVitrine | null): SQL | undefined {
+  switch (status) {
+    case 'agendado':
+      return and(
+        abertoPeloStatusGravado,
+        gt(lots.inicioEm, sql`now()`),
+        gt(lots.fimEm, sql`now()`),
+      );
+    case 'ao_vivo':
+      return and(
+        abertoPeloStatusGravado,
+        lte(lots.inicioEm, sql`now()`),
+        gt(lots.fimEm, sql`now()`),
+      );
+    case 'encerrado':
+      return or(
+        eq(lots.status, 'encerrado'),
+        and(abertoPeloStatusGravado, lte(lots.fimEm, sql`now()`)),
+      );
+    case null:
+      return ne(lots.status, 'cancelado');
+  }
+}
+
+function condicaoDaVitrine(filtros: FiltrosDaVitrine): SQL | undefined {
+  const padrao = filtros.q === null ? null : `%${escaparLike(filtros.q)}%`;
+  return and(
+    condicaoDoStatus(filtros.status),
+    padrao === null ? undefined : or(ilike(lots.titulo, padrao), ilike(lots.cartaNome, padrao)),
+    filtros.precoMin === null ? undefined : sql`${preco} >= ${filtros.precoMin}`,
+    filtros.precoMax === null ? undefined : sql`${preco} <= ${filtros.precoMax}`,
+    filtros.raridade === null ? undefined : eq(lots.raridade, filtros.raridade),
+  );
+}
+
+const ORDENACOES: Readonly<Record<OrdemDaVitrine, readonly SQL[]>> = {
+  termina_antes: [asc(lots.fimEm), desc(lots.id)],
+  mais_recente: [desc(lots.criadoEm), desc(lots.id)],
+  maior_lance: [desc(preco), desc(lots.id)],
+};
+
+export async function contarLotesDaVitrine(
+  db: BancoDrizzle,
+  filtros: FiltrosDaVitrine,
+): Promise<number> {
+  const [linha] = await db.select({ total: count() }).from(lots).where(condicaoDaVitrine(filtros));
+  return linha?.total ?? 0;
+}
+
+/** Página da vitrine; o desempate por id decrescente deixa a paginação estável. */
+export async function listarLotesDaVitrine(
+  db: BancoDrizzle,
+  filtros: FiltrosDaVitrine,
+  pagina: { readonly limite: number; readonly deslocamento: number },
+): Promise<LinhaDoLote[]> {
+  return db
+    .select(COLUNAS_DO_LOTE)
+    .from(lots)
+    .where(condicaoDaVitrine(filtros))
+    .orderBy(...ORDENACOES[filtros.ordem])
+    .limit(pagina.limite)
+    .offset(pagina.deslocamento);
+}
+
+export interface LinhaDoDetalhe extends LinhaDoLote {
+  readonly descricao: string | null;
+  readonly fimOriginalEm: Date;
+  /** Só para calcular `suaPosicao`; nunca vai para a resposta. */
+  readonly liderId: string | null;
+  readonly vencedorId: string | null;
+}
+
+/** Qualquer status, inclusive cancelado (specs/006 §Detalhe); `id` já é UUID. */
+export async function lerLoteDoDetalhe(
+  db: BancoDrizzle,
+  id: string,
+): Promise<LinhaDoDetalhe | undefined> {
+  const [linha] = await db
+    .select({
+      ...COLUNAS_DO_LOTE,
+      descricao: lots.descricao,
+      fimOriginalEm: lots.fimOriginalEm,
+      liderId: lots.liderId,
+      vencedorId: lots.vencedorId,
+    })
+    .from(lots)
+    .where(eq(lots.id, id));
+  return linha;
 }
 
 /** Só lotes com status gravado `encerrado` (gravado pelo job, specs/010). */

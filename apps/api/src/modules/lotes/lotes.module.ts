@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { CatalogoModule } from '../catalogo/index.js';
+import { LotesController } from './lotes.controller.js';
 import { PainelController } from './painel.controller.js';
 import { ServicoDeLotes } from './servico-de-lotes.js';
 
@@ -10,7 +11,7 @@ import { ServicoDeLotes } from './servico-de-lotes.js';
  */
 @Module({
   imports: [CatalogoModule],
-  controllers: [PainelController],
+  controllers: [LotesController, PainelController],
   providers: [ServicoDeLotes],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- módulo Nest: o conteúdo vem do decorator
