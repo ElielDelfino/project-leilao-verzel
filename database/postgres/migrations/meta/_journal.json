@@ -36,6 +36,13 @@
       "when": 1792952659982,
       "tag": "0004_ledger_unico_por_lance",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792967536603,
+      "tag": "0005_receipts_liquidacao",
+      "breakpoints": true
     }
   ]
 }

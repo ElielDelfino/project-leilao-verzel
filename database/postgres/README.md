@@ -200,6 +200,34 @@ Tarefa 092 (specs/004 §Dados e §Comportamento). Só cria um índice; não alte
   `db:generate` não gera diff. Não é restrição (`pg_constraint`): o teste de snapshot o confere
   entre os índices.
 
+## Migration 0005 (`0005_receipts_liquidacao.sql`)
+
+Tarefa 102 (specs/010 §Dados, D4 e D8 do relatório f4-spec-guardian-1). Cria uma tabela e dois
+índices; não altera nem remove coluna.
+
+- `receipts` (comprovante de arremate do módulo `liquidacao`, append-only), todas as colunas
+  `NOT NULL`: `lote_id` único (um por lote vendido); `codigo_publico` único, 16 base62
+  (`^[0-9A-Za-z]{16}$`); `vencedor_id`; `vencedor_pseudonimo` no formato de `bids.pseudonimo`;
+  `valor_centavos` de 100 a 2^53 − 1; `hash_final` com 32 bytes; `assinatura_selo` com 64;
+  `key_id` com 16 hex minúsculos; `selado_em` `timestamptz(3)`; `emitido_em` `timestamptz(3)` com
+  default `clock_timestamp()`. `key_id` e `selado_em` são copiados do selo na emissão (D8):
+  `liquidacao` não lê `lot_seals`. Índice `(vencedor_id, emitido_em DESC, id DESC)` para
+  `GET /api/me/arremates`; `emitido_em` com 3 casas para o cursor da API em milissegundos.
+- FKs só no SQL, sem `CASCADE`: `lote_id` → `lots(id)`, `vencedor_id` → `users(id)` e `key_id` →
+  `signing_keys(key_id)` (outro módulo, ao contrário das de `bids` e `lot_seals`). `key_id` sem
+  índice, como nas outras tabelas. Um `TRUNCATE` de `signing_keys` agora precisa listar
+  `receipts` também para passar da checagem de FK.
+- Triggers `receipts_append_only` e `receipts_sem_truncate` com `impedir_alteracao()`: até o dono
+  recebe 23001; `leilao_api` só tem SELECT e INSERT (42501 no resto).
+- Índice único parcial `ledger_entries_lote_id_tipo_unico` em `ledger_entries (lote_id, tipo)`
+  `WHERE tipo IN ('estorno', 'debito_arremate', 'credito_arremate') AND lote_id IS NOT NULL`
+  (D4): cada lote recebe no máximo um estorno (cancelamento), um débito e um crédito de arremate
+  (liquidação), de qualquer usuário. Um retry da liquidação ou do cancelamento falha com 23505,
+  reconhecido pelo nome do índice. `compromisso`, `liberacao`, `deposito` e linhas com `lote_id`
+  nulo ficam fora. Declarado no `carteira/schema.ts`. Não é `CONCURRENTLY` (a migration roda em
+  transação): `ledger_entries` é pequeno e, antes da F4, não há linha desses tipos com
+  `lote_id`, então a criação não recusa dados existentes.
+
 ## Papéis (D2 e D3 da tarefa 036)
 
 | Papel | Quem usa | Atributos |
@@ -229,7 +257,7 @@ Tarefa 092 (specs/004 §Dados e §Comportamento). Só cria um índice; não alte
   | `ledger_entries` | SELECT, INSERT |
   | `card_snapshots` | SELECT, INSERT |
   | `lots` | SELECT, INSERT; UPDATE só em `fim_em`, `status`, `lance_atual_centavos`, `lider_id`, `total_lances`, `vencedor_id`, `valor_arremate_centavos`, `encerrado_em`, `cancelado_em` |
-  | `bids`, `lot_seals`, `signing_keys` | SELECT, INSERT (append-only) |
+  | `bids`, `lot_seals`, `signing_keys`, `receipts` | SELECT, INSERT (append-only) |
 
 - A matriz é testada (`apps/api/test/db/papeis.test.ts`): toda tabela nova em `public` precisa
   entrar em `MATRIZ` (com `[]` se a API não a acessa) e ganhar os `GRANT`s na própria migration.

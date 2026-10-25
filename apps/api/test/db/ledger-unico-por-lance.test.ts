@@ -150,13 +150,15 @@ describe.skipIf(!AMBIENTE.disponivel)(
       });
     });
 
+    // Sem lote_id: estorno e os da liquidação são únicos por lote (índice da 0005, tarefa 102,
+    // em receipts-liquidacao.test.ts); aqui só importa que este índice não os pega.
     it.each(['deposito', 'estorno', 'debito_arremate', 'credito_arremate'] as const)(
       '%s repetido com o mesmo lance_id não é afetado',
       async (tipo) => {
         const ref = await criarLoteELance(pool);
         await emTransacao(async (cliente) => {
-          await inserir(cliente, lancamento(ref, tipo));
-          await inserir(cliente, lancamento(ref, tipo));
+          await inserir(cliente, { ...lancamento(ref, tipo), loteId: null });
+          await inserir(cliente, { ...lancamento(ref, tipo), loteId: null });
 
           expect(await contar(cliente, ref.lanceId)).toBe(2);
         });
