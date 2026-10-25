@@ -66,6 +66,15 @@ Os filtros se combinam com E. Resposta: `dados` = lista de `Lote` e `meta {total
 
 Interface interna para `liquidacao` (recebe `tx`): travar o lote com `FOR UPDATE` e devolver a linha, e mudar o status (encerrado, cancelado); `lotes` continua dono de `lots`.
 
+### Interface interna para `lances` (ADR 0031)
+`lances` nunca lê `lots`; usa só estas funções públicas de `lotes`, com tipos próprios (sem expor o `schema.ts`):
+Implementação em `apps/api/src/modules/lotes/interface-para-lances.ts` (exportada por `index.ts`; tarefa 075). São funções soltas, importadas de `lotes`; `Transacao` e `BancoDrizzle` são os tipos de `db/banco`.
+- `travarLote(tx, loteId): Promise<LoteTravado | null>`: `SELECT ... FOR UPDATE` na `tx`; `null` se o lote não existe. O lock vai até o fim da `tx`. `LoteTravado` (todos `readonly`): `id`, `leiloeiroId`, `status` (`StatusGravadoDoLote`: `agendado` | `ao_vivo` | `encerrado` | `cancelado`, como gravado na coluna), `inicioEm`, `fimEm`, `fimOriginalEm` (`Date`), `lanceInicialCentavos`, `incrementoMinimoCentavos`, `lanceAtualCentavos` (`number | null`), `liderId` (`string | null`) e `totalLances`. Não devolve o instante `agora`.
+- `agora(tx): Promise<Date>`: instante do Postgres (`clock_timestamp()`), lido como milissegundos desde a época. É uma chamada separada de `travarLote`: `lances` a chama **uma vez**, depois do lock (specs/007 §Relógio).
+- `registrarLance(tx, loteId, {valorCentavos, liderId, novoFimEm?}): Promise<LoteDepoisDoLance | null>`: grava `lance_atual_centavos` = `valorCentavos`, `lider_id`, `total_lances + 1` e, com `novoFimEm` (`Date`), `fim_em = greatest(fim_em, novoFimEm)`, que nunca recua o fim (CHECK `lots_fim_nao_recua`). Chame depois de `travarLote` na mesma `tx`. Devolve `LoteDepoisDoLance` (`lanceAtualCentavos`, `liderId`, `fimEm`, `totalLances`) ou `null` se o lote não existe. Não decide anti-sniping (regra de `lances`, specs/007).
+- `obterResumos(db, ids): Promise<ResumoDoLote[]>`: `db` é o leitor, o banco ou uma transação (`BancoDrizzle | Transacao`). Devolve os resumos dos ids pedidos, **sem ordem garantida** (quem chama reordena) e sem os ids inexistentes; lista vazia → `[]`. `ResumoDoLote` é o `LinhaDoLote` da vitrine (o schema `Lote` de §Vitrine, com `status` derivado) mais `liderId` e `vencedorId`, que servem só para calcular a posição do usuário e nunca vão para uma resposta pública. Serve a `GET /api/me/lances` e ao estado da sala (specs/009).
+- **Pendência (tarefas 079/080):** não há função de leitura sem lock do lote. O 404 anterior ao `FOR UPDATE` (specs/007 §Validação) usa `obterResumos(db, [loteId])` (lista vazia → 404); se a 079/080 precisar de uma leitura própria, ela entra como tarefa nova de `lotes`, não é presumida aqui. O `obterResumos` não impõe limite de ids; o teto de 24 por página é de `GET /api/me/lances`.
+
 ## Dados
 - `lots(id uuid pk, leiloeiro_id fk, snapshot_id fk, carta_nome text, raridade text, titulo, descricao, lance_inicial_centavos, incremento_minimo_centavos, inicio_em, fim_em, fim_original_em, status status_lote, lance_atual_centavos null, lider_id null, total_lances int default 0, vencedor_id null, valor_arremate_centavos null, encerrado_em null, cancelado_em null, criado_em)`
 - `carta_nome` e `raridade` são copiados do snapshot na criação do lote (imutáveis, como o snapshot), para a vitrine buscar e filtrar sem JOIN com `card_snapshots` (tabela de `catalogo`). A migration é do db-dev, na F2.
@@ -83,9 +92,10 @@ Interface interna para `liquidacao` (recebe `tx`): travar o lote com `FOR UPDATE
 - [ ] Falha no preparo do snapshot (Scryfall fora, imagem inválida) → 503 e nenhum `card_snapshots` nem `lots` criado; `scryfallId` inexistente → 422 com `detalhes.campo` `scryfallId`.
 - [ ] `GET /api/painel/lotes` só devolve lotes do próprio leiloeiro (inclusive cancelados); `GET /api/painel/resumo` soma só encerrados com vencedor do próprio usuário.
 - [ ] Nenhuma resposta de `lotes` contém nome ou e-mail de usuário (teste que varre o JSON).
+- [ ] Interface para `lances`: `travarLote` devolve a linha e bloqueia uma segunda transação no mesmo lote; `agora` devolve o instante do Postgres; `registrarLance` atualiza as colunas e o fim, sem recuar o fim; `obterResumos` devolve os resumos pedidos (teste de integração).
 
 ## Fora de escopo
 Edição de lote depois de publicado; lotes com múltiplos itens; preço de reserva; `Idempotency-Key` na criação de lote (F2).
 
 ## Decisões relacionadas
-- decisions/0001-decisoes-iniciais.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md
+- decisions/0001-decisoes-iniciais.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md, 0031-complementos-da-f3.md
