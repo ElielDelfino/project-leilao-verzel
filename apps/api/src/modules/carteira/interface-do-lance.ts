@@ -3,7 +3,10 @@
 // Ordem dos locks (D12): o lote primeiro (quem chama já o travou), depois as carteiras em ordem
 // crescente de user_id. Quem mexe em mais de uma carteira na mesma transação (lance que supera
 // outro licitante, liquidação) chama travarCarteiras com todas antes de comprometer ou liberar.
-import type { Transacao } from '../../db/banco.js';
+// Todo ErroDeCarteira exige rollback da tx de quem chama: nunca capturar e seguir para o commit.
+// Em LANCE_JA_PROCESSADO (tarefa 093) a tx já está abortada no Postgres pela violação do índice
+// único (lance_id, tipo): qualquer comando seguinte nela falha até o rollback.
+import { converterErroDoBanco, ErroDoBanco, type Transacao } from '../../db/banco.js';
 import {
   comDisponivel,
   efeitoDoLancamento,
@@ -19,7 +22,11 @@ export interface ReferenciaDoLance {
   readonly lanceId: string;
 }
 
-export type CodigoDoErroDeCarteira = 'SALDO_INSUFICIENTE' | 'COMPROMETIDO_INSUFICIENTE';
+export type CodigoDoErroDeCarteira =
+  'SALDO_INSUFICIENTE' | 'COMPROMETIDO_INSUFICIENTE' | 'LANCE_JA_PROCESSADO';
+
+/** Códigos que levam o valor pedido e o saldo que o recusou. */
+type CodigoComDetalhes = Exclude<CodigoDoErroDeCarteira, 'LANCE_JA_PROCESSADO'>;
 
 export interface DetalhesDoErroDeCarteira {
   readonly valor: number;
@@ -30,22 +37,43 @@ export interface DetalhesDoErroDeCarteira {
 /**
  * Recusa de domínio (não HTTP): quem chama decide a resposta. No lance, a recusa
  * SALDO_INSUFICIENTE (specs/007) vem só de comprometer, sob o lock da carteira; a API a traduz
- * em 422 com detalhes.disponivelCentavos. O erro exige rollback da tx de quem chama.
+ * em 422 com detalhes.disponivelCentavos. LANCE_JA_PROCESSADO (comprometer ou liberar repetidos
+ * para o mesmo lanceId) não leva valor nem saldo. O erro exige rollback da tx de quem chama.
  */
 export class ErroDeCarteira extends Error {
   readonly codigo: CodigoDoErroDeCarteira;
-  readonly valor: number;
+  /** undefined só em LANCE_JA_PROCESSADO. */
+  readonly valor: number | undefined;
   readonly disponivel: number | undefined;
   readonly comprometido: number | undefined;
 
-  constructor(codigo: CodigoDoErroDeCarteira, detalhes: DetalhesDoErroDeCarteira) {
+  constructor(codigo: 'LANCE_JA_PROCESSADO');
+  constructor(codigo: CodigoComDetalhes, detalhes: DetalhesDoErroDeCarteira);
+  constructor(codigo: CodigoDoErroDeCarteira, detalhes?: DetalhesDoErroDeCarteira) {
     super(`operação na carteira recusada: ${codigo}`);
     this.name = 'ErroDeCarteira';
     this.codigo = codigo;
-    this.valor = detalhes.valor;
-    this.disponivel = detalhes.disponivel;
-    this.comprometido = detalhes.comprometido;
+    this.valor = detalhes?.valor;
+    this.disponivel = detalhes?.disponivel;
+    this.comprometido = detalhes?.comprometido;
   }
+}
+
+/** Índice único parcial de ledger_entries (migration 0004, tarefa 092). */
+const INDICE_DO_LANCE = 'ledger_entries_lance_id_tipo_unico';
+const VIOLACAO_DE_UNICIDADE = '23505';
+
+/**
+ * Violação do índice (lance_id, tipo) vira LANCE_JA_PROCESSADO, sem `cause`: o erro do driver
+ * traz SQL, parâmetros e a linha (`detail`). Qualquer outro erro volta como veio.
+ */
+function traduzirLancamentoRepetido(erro: unknown): unknown {
+  const convertido = converterErroDoBanco(erro);
+  const repetido =
+    convertido instanceof ErroDoBanco &&
+    convertido.codigo === VIOLACAO_DE_UNICIDADE &&
+    convertido.restricao === INDICE_DO_LANCE;
+  return repetido ? new ErroDeCarteira('LANCE_JA_PROCESSADO') : erro;
 }
 
 /**
@@ -87,13 +115,18 @@ async function movimentar(
   // Valida o valor antes de tocar o banco (RangeError se não for inteiro positivo seguro).
   const efeito = efeitoDoLancamento(tipo, valorCentavos);
   conferir(await travarSaldo(tx, userId));
-  await inserirLancamento(tx, {
-    userId,
-    tipo,
-    valorCentavos,
-    loteId: referencia.loteId,
-    lanceId: referencia.lanceId,
-  });
+  try {
+    await inserirLancamento(tx, {
+      userId,
+      tipo,
+      valorCentavos,
+      loteId: referencia.loteId,
+      lanceId: referencia.lanceId,
+    });
+  } catch (erro: unknown) {
+    // Relança sempre, traduzido ou não: o rollback é de quem chama (a 23505 já abortou a tx).
+    throw traduzirLancamentoRepetido(erro);
+  }
   return comDisponivel(await atualizarSaldo(tx, userId, efeito));
 }
 

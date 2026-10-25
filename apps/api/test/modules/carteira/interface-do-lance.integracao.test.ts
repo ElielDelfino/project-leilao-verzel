@@ -226,6 +226,62 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
     });
   });
 
+  describe('lançamento repetido do mesmo lance (tarefa 093)', () => {
+    /** Confere a recusa sem o erro cru do driver: nem em `cause`, nem na mensagem. */
+    async function esperarLanceJaProcessado(tentativa: Promise<unknown>): Promise<void> {
+      const erro: unknown = await tentativa.then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(erro).toBeInstanceOf(ErroDeCarteira);
+      expect(erro).toMatchObject({ codigo: 'LANCE_JA_PROCESSADO', valor: undefined });
+      expect((erro as Error).cause).toBeUndefined();
+      expect((erro as Error).message).not.toMatch(/23505|duplicate|ledger_entries|Key \(/);
+    }
+
+    it('segundo comprometer com o mesmo lanceId → LANCE_JA_PROCESSADO e saldo igual', async () => {
+      const usuario = await novoUsuario(10_000);
+      const ref = await referencia();
+      await banco.transaction((tx) => comprometer(tx, usuario, 2_500, ref));
+      const antes = await linhas(usuario);
+
+      await esperarLanceJaProcessado(
+        banco.transaction((tx) => comprometer(tx, usuario, 2_500, ref)),
+      );
+
+      expect(await linhas(usuario)).toEqual(antes);
+    });
+
+    it('segunda liberar com o mesmo lanceId → LANCE_JA_PROCESSADO e saldo igual', async () => {
+      const usuario = await novoUsuario(10_000);
+      const ref = await referencia();
+      await banco.transaction(async (tx) => {
+        await comprometer(tx, usuario, 4_000, await referencia());
+        await liberar(tx, usuario, 1_000, ref);
+      });
+      const antes = await linhas(usuario);
+
+      await esperarLanceJaProcessado(banco.transaction((tx) => liberar(tx, usuario, 1_000, ref)));
+
+      expect(await linhas(usuario)).toEqual(antes);
+    });
+
+    it('repetição na mesma transação desfaz tudo (o erro exige rollback)', async () => {
+      const usuario = await novoUsuario(10_000);
+      const ref = await referencia();
+      const antes = await linhas(usuario);
+
+      await esperarLanceJaProcessado(
+        banco.transaction(async (tx) => {
+          await comprometer(tx, usuario, 1_000, ref);
+          await comprometer(tx, usuario, 1_000, ref);
+        }),
+      );
+
+      expect(await linhas(usuario)).toEqual(antes);
+    });
+  });
+
   describe('travarCarteiras (D12)', () => {
     it('devolve o saldo de cada carteira, inclusive de quem não tem linha ainda', async () => {
       const comSaldo = await novoUsuario(1_234);
