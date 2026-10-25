@@ -1,6 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { violacoesSerias } from './apoio/axe';
@@ -8,16 +7,19 @@ import { simularPreferenciaDoSistema } from './apoio/matchMedia';
 import { renderizarApp } from './apoio/renderizarApp';
 
 // Falhas simuladas: uma página (dentro do layout) ou o próprio layout (o botão de tema do cabeçalho).
-const falhas = vi.hoisted(() => ({ pagina: null as string | null, layout: false }));
+// A página que falha é a rota curinga (`*`, "não encontrada"): existe em qualquer fase do produto
+// e uma URL inexistente a alcança sem depender de página provisória ou de tela real.
+const falhas = vi.hoisted(() => ({ pagina: false, layout: false }));
 const MENSAGEM_INTERNA = 'falha simulada: detalhe interno';
+const URL_DA_PAGINA_QUE_FALHA = '/rota-de-teste-inexistente';
 
-vi.mock('../src/paginas/PaginaProvisoria', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../src/paginas/PaginaProvisoria')>();
-  function PaginaQuePodeFalhar(props: ComponentProps<typeof original.PaginaProvisoria>) {
-    if (props.titulo === falhas.pagina) throw new Error(MENSAGEM_INTERNA);
-    return <original.PaginaProvisoria {...props} />;
+vi.mock('../src/paginas/PaginaNaoEncontrada', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/paginas/PaginaNaoEncontrada')>();
+  function PaginaQuePodeFalhar() {
+    if (falhas.pagina) throw new Error(MENSAGEM_INTERNA);
+    return <original.PaginaNaoEncontrada />;
   }
-  return { ...original, PaginaProvisoria: PaginaQuePodeFalhar };
+  return { ...original, PaginaNaoEncontrada: PaginaQuePodeFalhar };
 });
 
 vi.mock('../src/tema/AlternarTema', async (importOriginal) => {
@@ -41,13 +43,13 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   afterEach(() => {
-    falhas.pagina = null;
+    falhas.pagina = false;
     falhas.layout = false;
   });
 
   it('falha numa página: mostra o erro em pt-BR dentro do layout', async () => {
-    falhas.pagina = 'Auditoria do lote';
-    renderizarApp('/auditoria/abc');
+    falhas.pagina = true;
+    renderizarApp(URL_DA_PAGINA_QUE_FALHA);
 
     const titulo = await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
     const conteudo = screen.getByRole('main');
@@ -63,8 +65,8 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it('não mostra a tela padrão do React Router nem a mensagem interna do erro', async () => {
-    falhas.pagina = 'Auditoria do lote';
-    renderizarApp('/auditoria/abc');
+    falhas.pagina = true;
+    renderizarApp(URL_DA_PAGINA_QUE_FALHA);
     await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
 
     expect(screen.queryByText(/Unexpected Application Error/i)).not.toBeInTheDocument();
@@ -74,9 +76,9 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it('"Voltar à vitrine" sai do erro e leva o foco ao <main>', async () => {
-    falhas.pagina = 'Auditoria do lote';
+    falhas.pagina = true;
     const usuario = userEvent.setup();
-    renderizarApp('/auditoria/abc');
+    renderizarApp(URL_DA_PAGINA_QUE_FALHA);
     await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
 
     await usuario.click(screen.getByRole('link', { name: 'Voltar à vitrine' }));
@@ -99,11 +101,11 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it.each([
-    ['numa página', () => (falhas.pagina = 'Auditoria do lote')],
+    ['numa página', () => (falhas.pagina = true)],
     ['no layout', () => (falhas.layout = true)],
   ])('a página de erro (%s) não tem violações sérias do axe', async (_onde, falhar) => {
     falhar();
-    renderizarApp(falhas.layout ? '/' : '/auditoria/abc');
+    renderizarApp(falhas.layout ? '/' : URL_DA_PAGINA_QUE_FALHA);
     await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
 
     expect(await violacoesSerias()).toEqual([]);
