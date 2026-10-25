@@ -4,8 +4,8 @@
 // pulado em silêncio. Sem LEILAO_TEST_DB, e faltando alguma variável, os testes de banco ficam
 // como "skipped" no resumo do Vitest e os de unidade continuam rodando.
 // LEILAO_TEST_DB é só um sinalizador: aqui conta apenas se está definido e não vazio; o valor
-// (`local`, `ci`...) não escolhe banco nem muda a conexão, que vem sempre de POSTGRES_* e
-// DB_PASSWORD.
+// (`local` ou `testcontainers`, specs/013; o setup global recusa outros) não escolhe banco nem
+// muda a conexão, que vem sempre de POSTGRES_* e DB_PASSWORD (ou DB_PASSWORD_FILE).
 import { type ConexaoDoBanco, conexaoSeCompleta, lerConexaoDoBanco } from '../../src/db/conexao.js';
 
 export interface AmbienteDeTeste {

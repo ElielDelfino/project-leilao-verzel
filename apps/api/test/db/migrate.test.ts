@@ -7,14 +7,21 @@ import { join } from 'node:path';
 
 import { DrizzleQueryError } from 'drizzle-orm/errors';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   type ConexaoDoBanco,
   ErroDeConfiguracaoDoBanco,
   trocarBanco,
 } from '../../src/db/conexao.js';
-import { aplicarMigrations, descreverFalha, PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
+import {
+  aplicarMigrations,
+  descreverFalha,
+  ErroDoPapelDaApi,
+  PASTA_DAS_MIGRATIONS,
+  sincronizarSenhaDoPapelDaApi,
+} from '../../src/db/migrate.js';
+import { verificadorConfere, verificadorScram } from '../../src/db/scram.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
 
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
@@ -31,14 +38,21 @@ const CHAVE_DO_LOCK = 3_003_000_001;
 const SQLSTATE_APPEND_ONLY = '23001';
 
 interface Diario {
-  readonly entries: readonly unknown[];
+  readonly entries: readonly {
+    readonly idx: number;
+    readonly when: number;
+    readonly tag: string;
+  }[];
+}
+
+function diario(): Diario {
+  return JSON.parse(
+    readFileSync(join(PASTA_DAS_MIGRATIONS, 'meta', '_journal.json'), 'utf8'),
+  ) as Diario;
 }
 
 function quantidadeDeMigrations(): number {
-  const diario = JSON.parse(
-    readFileSync(join(PASTA_DAS_MIGRATIONS, 'meta', '_journal.json'), 'utf8'),
-  ) as Diario;
-  return diario.entries.length;
+  return diario().entries.length;
 }
 
 async function comCliente<T>(
@@ -78,6 +92,43 @@ async function erroDe(cliente: pg.Client, comando: string): Promise<pg.DatabaseE
   }
   throw new Error(`o comando deveria ter falhado: ${comando}`);
 }
+
+describe('_journal.json (database/postgres/README.md, "Ordem do _journal.json")', () => {
+  it('idx é 0, 1, 2... e o when cresce estritamente junto com o idx', () => {
+    const entradas = diario().entries;
+
+    expect(entradas.map((entrada) => entrada.idx)).toEqual(entradas.map((_, indice) => indice));
+    for (let i = 1; i < entradas.length; i++) {
+      expect(entradas[i]?.when, entradas[i]?.tag).toBeGreaterThan(entradas[i - 1]?.when ?? 0);
+    }
+  });
+});
+
+describe('verificador SCRAM-SHA-256', () => {
+  // Vetor da RFC 7677 §3 (senha "pencil"), no formato do pg_authid.
+  const SAL_DA_RFC = Buffer.from('W22ZaJ0SNY7soEsUEjb6gQ==', 'base64');
+  const VERIFICADOR_DA_RFC =
+    'SCRAM-SHA-256$4096:W22ZaJ0SNY7soEsUEjb6gQ==$' +
+    'WG5d8oPm3OtcPnkdi4Uo7BkeZkBFzpcXkuLmtbsT4qY=:wfPLwcE6nTWhTAmQ7tl2KeoiWGPlZqQxSrmfPwDl2dU=';
+
+  it('reproduz o vetor da RFC 7677', () => {
+    expect(verificadorScram('pencil', SAL_DA_RFC)).toBe(VERIFICADOR_DA_RFC);
+  });
+
+  it('confere só a senha certa e recusa formatos estranhos', () => {
+    expect(verificadorConfere(VERIFICADOR_DA_RFC, 'pencil')).toBe(true);
+    expect(verificadorConfere(VERIFICADOR_DA_RFC, 'pencil2')).toBe(false);
+    expect(verificadorConfere(null, 'pencil')).toBe(false);
+    expect(verificadorConfere('md5abc', 'pencil')).toBe(false);
+    expect(verificadorConfere('SCRAM-SHA-256$99999999:YQ==$YQ==:YQ==', 'pencil')).toBe(false);
+  });
+
+  it('o verificador não contém a senha', () => {
+    const senha = randomBytes(32).toString('base64url');
+
+    expect(verificadorScram(senha)).not.toContain(senha);
+  });
+});
 
 describe('descreverFalha', () => {
   it('nunca mostra a mensagem do DrizzleQueryError, nem sem causa', () => {
@@ -206,6 +257,27 @@ describe.skipIf(!AMBIENTE.disponivel)('com Postgres', () => {
     });
   });
 
+  describe('migration 0001: privilégios no banco', () => {
+    it('PUBLIC sem CONNECT nem TEMP; leilao_api com CONNECT e sem TEMP; o dono conecta', async () => {
+      await aplicarMigrations(banco());
+
+      const { rows } = await comCliente(banco(), (cliente) =>
+        cliente.query(
+          `select
+             has_database_privilege('leilao_api', current_database(), 'CONNECT') as api_conecta,
+             has_database_privilege('leilao_api', current_database(), 'TEMP') as api_temp,
+             exists (select 1 from pg_database d, aclexplode(d.datacl) a
+                      where d.datname = current_database() and a.grantee = 0) as publico,
+             current_user as dono`,
+        ),
+      );
+
+      expect(rows).toEqual([
+        { api_conecta: true, api_temp: false, publico: false, dono: admin().user },
+      ]);
+    });
+  });
+
   describe('impedir_alteracao()', () => {
     // Tabela temporária (some com a sessão) com os triggers que as tabelas append-only usarão.
     async function prepararTabela(cliente: pg.Client): Promise<void> {
@@ -316,6 +388,181 @@ describe.skipIf(!AMBIENTE.disponivel)('com Postgres', () => {
           await cliente.query(`drop role if exists ${papel}`);
         }
       });
+    });
+  });
+  describe('senha do papel da API (sincronizarSenhaDoPapelDaApi)', () => {
+    // Papel descartável, com os mesmos atributos de leilao_api: papéis valem para o cluster
+    // inteiro, e trocar a senha do leilao_api real derrubaria a API de dev e os verifies dos
+    // outros worktrees. Ele só ganha CONNECT neste banco descartável.
+    const PAPEL = `t037_api_${randomBytes(4).toString('hex')}`;
+    // Gerada aqui e nunca exibida.
+    const SENHA = randomBytes(32).toString('base64url');
+
+    async function estadoDoPapel(): Promise<{ login: boolean; verificador: string | null }> {
+      return comCliente(admin(), async (cliente) => {
+        const { rows } = await cliente.query<{ login: boolean; verificador: string | null }>(
+          'select rolcanlogin as login, rolpassword as verificador from pg_authid where rolname = $1',
+          [PAPEL],
+        );
+        const estado = rows[0];
+        if (estado === undefined) {
+          throw new Error('papel descartável ausente');
+        }
+        return estado;
+      });
+    }
+
+    async function entraComo(senha: string): Promise<string> {
+      return comCliente(
+        {
+          host: banco().host,
+          port: banco().port,
+          database: banco().database,
+          user: PAPEL,
+          password: senha,
+        },
+        async (cliente) => {
+          const { rows } = await cliente.query<{ papel: string }>('select current_user as papel');
+          return String(rows[0]?.papel);
+        },
+      );
+    }
+
+    beforeAll(async () => {
+      await aplicarMigrations(banco());
+      await comCliente(admin(), (cliente) =>
+        cliente.query(
+          `create role ${PAPEL} nologin nosuperuser nocreatedb nocreaterole noreplication
+             nobypassrls noinherit`,
+        ),
+      );
+      await comCliente(admin(), (cliente) =>
+        cliente.query(`grant connect on database ${NOME_DO_BANCO} to ${PAPEL}`),
+      );
+    });
+
+    afterAll(async () => {
+      await comCliente(admin(), async (cliente) => {
+        // O banco ainda existe aqui (o afterAll externo roda depois): sem o privilégio no banco,
+        // o papel pode ser apagado.
+        const existe = await cliente.query('select 1 from pg_roles where rolname = $1', [PAPEL]);
+        if (existe.rowCount === 1) {
+          await cliente.query(`revoke all on database ${NOME_DO_BANCO} from ${PAPEL}`);
+          await cliente.query(`drop role ${PAPEL}`);
+        }
+      });
+    });
+
+    it('nenhum teste toca no leilao_api real', () => {
+      expect(PAPEL).not.toBe('leilao_api');
+      expect(PAPEL).toMatch(/^t037_api_[0-9a-f]{8}$/);
+    });
+
+    it('db:migrate duas vezes: aplica a senha uma vez e depois não altera nada', async () => {
+      await aplicarMigrations(banco());
+      const primeira = await sincronizarSenhaDoPapelDaApi(banco(), PAPEL, SENHA);
+      const depoisDaPrimeira = await estadoDoPapel();
+      await aplicarMigrations(banco());
+      const segunda = await sincronizarSenhaDoPapelDaApi(banco(), PAPEL, SENHA);
+
+      expect(primeira).toBe('sincronizada');
+      expect(segunda).toBe('ja-sincronizada');
+      expect(await estadoDoPapel()).toEqual(depoisDaPrimeira);
+      expect(depoisDaPrimeira.login).toBe(true);
+      expect(depoisDaPrimeira.verificador).toMatch(/^SCRAM-SHA-256\$4096:/);
+    });
+
+    it('depois dele, um login TCP como o papel funciona, e com outra senha não', async () => {
+      await sincronizarSenhaDoPapelDaApi(banco(), PAPEL, SENHA);
+
+      expect(await entraComo(SENHA)).toBe(PAPEL);
+      const recusa = await entraComo(randomBytes(32).toString('base64url')).catch(
+        (e: unknown) => e,
+      );
+      expect(recusa instanceof pg.DatabaseError && recusa.code).toBe('28P01');
+    });
+
+    it('o SQL enviado ao Postgres não contém a senha (espião no cliente)', async () => {
+      const enviados: string[] = [];
+      const criarComEspiao = (conexao: ConexaoDoBanco): pg.Client => {
+        const cliente = new pg.Client(conexao);
+        const original = cliente.query.bind(cliente) as (...args: unknown[]) => unknown;
+        vi.spyOn(cliente, 'query').mockImplementation(((...args: unknown[]) => {
+          enviados.push(JSON.stringify(args));
+          return original(...args);
+        }) as typeof cliente.query);
+        return cliente;
+      };
+      // Força o ALTER ROLE: tira o LOGIN antes.
+      await comCliente(admin(), (cliente) => cliente.query(`alter role ${PAPEL} nologin`));
+
+      const resultado = await sincronizarSenhaDoPapelDaApi(banco(), PAPEL, SENHA, criarComEspiao);
+
+      expect(resultado).toBe('sincronizada');
+      expect(enviados.some((texto) => texto.includes('alter role'))).toBe(true);
+      for (const texto of enviados) {
+        expect(texto).not.toContain(SENHA);
+      }
+    });
+
+    it('o ALTER ROLE roda numa transação com o log de comandos desligado', async () => {
+      const enviados: string[] = [];
+      const criarComEspiao = (conexao: ConexaoDoBanco): pg.Client => {
+        const cliente = new pg.Client(conexao);
+        const original = cliente.query.bind(cliente) as (...args: unknown[]) => unknown;
+        vi.spyOn(cliente, 'query').mockImplementation(((...args: unknown[]) => {
+          enviados.push(
+            // Só as 5 primeiras palavras: o verificador SCRAM fica de fora da comparação.
+            typeof args[0] === 'string' ? args[0].trim().split(/\s+/).slice(0, 5).join(' ') : '',
+          );
+          return original(...args);
+        }) as typeof cliente.query);
+        return cliente;
+      };
+      await comCliente(admin(), (cliente) => cliente.query(`alter role ${PAPEL} nologin`));
+
+      await sincronizarSenhaDoPapelDaApi(banco(), PAPEL, SENHA, criarComEspiao);
+
+      const inicio = enviados.indexOf('begin');
+      expect(inicio).toBeGreaterThanOrEqual(0);
+      expect(enviados.slice(inicio)).toEqual([
+        'begin',
+        "set local log_statement = 'none'",
+        "set local log_min_error_statement = 'panic'",
+        `alter role ${pg.escapeIdentifier(PAPEL)} login password`,
+        'commit',
+      ]);
+      expect(await estadoDoPapel()).toMatchObject({ login: true });
+    });
+
+    it('papel inexistente ou com atributo de administração: erro que cita só a variável', async () => {
+      const inexistente = `t037_${randomBytes(4).toString('hex')}`;
+      const administrador = `t037_adm_${randomBytes(4).toString('hex')}`;
+      await comCliente(admin(), (cliente) =>
+        cliente.query(`create role ${administrador} nologin createdb`),
+      );
+      try {
+        for (const papel of [inexistente, administrador]) {
+          const erro = await sincronizarSenhaDoPapelDaApi(banco(), papel, SENHA).catch(
+            (e: unknown) => e,
+          );
+
+          expect(erro).toBeInstanceOf(ErroDoPapelDaApi);
+          expect(descreverFalha(erro)).toContain('POSTGRES_API_USER');
+          expect(descreverFalha(erro)).not.toContain(papel);
+          expect(descreverFalha(erro)).not.toContain(SENHA);
+        }
+        const { rows } = await comCliente(admin(), (cliente) =>
+          cliente.query('select rolcanlogin, rolpassword from pg_authid where rolname = $1', [
+            administrador,
+          ]),
+        );
+        expect(rows).toEqual([{ rolcanlogin: false, rolpassword: null }]);
+      } finally {
+        await comCliente(admin(), (cliente) =>
+          cliente.query(`drop role if exists ${administrador}`),
+        );
+      }
     });
   });
 });

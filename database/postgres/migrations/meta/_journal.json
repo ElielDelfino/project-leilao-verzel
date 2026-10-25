@@ -8,6 +8,13 @@
       "when": 1792877302279,
       "tag": "0000_base",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792923015925,
+      "tag": "0001_identidade_carteira",
+      "breakpoints": true
     }
   ]
 }
