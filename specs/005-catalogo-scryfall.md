@@ -12,6 +12,7 @@ Regras verificadas na documentação da Scryfall em 2026-10-24:
 - Um 429 bloqueia o acesso por 30 s; ignorar 429 pode causar banimento.
 - Pede cache de pelo menos 24 h; proíbe paywall e "simplesmente reempacotar" os dados.
 - Imagens: não cortar ou cobrir o crédito do artista e o copyright, não distorcer, não aplicar filtros, não pôr marca d'água.
+- Nome e logo: proíbe usar os logos da Scryfall ou o nome dela de modo que sugira endosso; não exige texto de crédito.
 
 ## Requisitos
 - RF-01 O leiloeiro busca cartas por texto (sintaxe da Scryfall) com paginação.
@@ -27,7 +28,7 @@ Regras verificadas na documentação da Scryfall em 2026-10-24:
 - Cache Redis de 24 h para busca e carta.
 - Snapshot: `GET /cards/{id}` e download da imagem `image_uris.normal` (ou `card_faces[0].image_uris.normal` em cartas dupla-face), até 1 MB, só JPEG/PNG. Falha no snapshot → a criação do lote falha com 503 (nada é criado).
 - Imagem servida por `GET /api/imagens/{snapshotId}` com `Cache-Control: public, max-age=31536000, immutable` e `ETag` = SHA-256.
-- UI: imagem com `object-fit: contain`, sem filtros nem sobreposições; rodapé com o aviso da Wizards of the Coast Fan Content Policy e crédito à Scryfall.
+- UI: imagem com `object-fit: contain`, sem filtros nem sobreposições; rodapé com o aviso da Wizards of the Coast Fan Content Policy e crédito à Scryfall, com os textos exatos de specs/012 §Rodapé.
 
 ## Interfaces e contratos
 - `GET /api/catalogo/cartas?q=&pagina=` (leiloeiro) → `{cartas: [{scryfallId, nome, colecao, raridade, tipo, artista, imagemUrl}], meta}` · 503
