@@ -52,6 +52,14 @@ const TESTES_DO_BANCO = ['test/db/', 'test/setup/'];
 const GATILHOS_DE_FRONTEIRAS = new Set(['eslint.config.mjs', 'tsconfig.base.json']);
 const TESTE_DE_FRONTEIRAS = 'test/boundaries/fronteiras.test.ts';
 
+/**
+ * Mudou o openapi.yaml: todos os testes da API rodam (tarefa 066). criarAppDeTeste valida cada
+ * resposta contra o yaml, então qualquer teste de integração pode quebrar. O asyncapi.yaml fica
+ * de fora: nenhum teste da API o lê; quem o cobre é contracts:check/lint (ver mudouContrato).
+ */
+const GATILHO_DE_RIGOR_DO_CONTRATO = 'apps/api/openapi.yaml';
+const TESTES_DA_API = ['test/'];
+
 const HOSTS_LOCAIS = new Set(['127.0.0.1', 'localhost', '::1']);
 const ESPERA_DO_POSTGRES_MS = 1000;
 
@@ -248,6 +256,11 @@ export function testesRelacionados(raiz, pacotes, alterados, existe) {
   }
   if (alterados.some((a) => GATILHOS_DE_FRONTEIRAS.has(a))) {
     adicionar(PACOTE_DO_BANCO, TESTE_DE_FRONTEIRAS);
+  }
+  if (alterados.includes(GATILHO_DE_RIGOR_DO_CONTRATO)) {
+    for (const teste of listarTestes(raiz, PACOTE_DO_BANCO, TESTES_DA_API)) {
+      adicionar(PACOTE_DO_BANCO, teste);
+    }
   }
   return porPacote;
 }
