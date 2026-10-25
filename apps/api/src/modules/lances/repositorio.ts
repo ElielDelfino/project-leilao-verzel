@@ -2,7 +2,7 @@
 // §Dados). Nenhum outro módulo lê estas tabelas. Privilégios do papel da API (ADR 0026): só SELECT
 // e INSERT nas três (append-only, com trigger). O banco não impõe a cadeia: a ordem correta é de
 // quem chama (cadeia.ts), dentro da transação com o lote travado.
-import { and, count, countDistinct, desc, eq, max } from 'drizzle-orm';
+import { and, asc, count, countDistinct, desc, eq, max } from 'drizzle-orm';
 
 import type { BancoDrizzle, Transacao } from '../../db/banco.js';
 import { bids, lotSeals, signingKeys } from './schema.js';
@@ -202,6 +202,107 @@ export async function listarLotesDoUsuario(
       meuUltimoLanceEm: linha.meuUltimoLanceEm,
     };
   });
+}
+
+/** Elo da cadeia como a auditoria o publica: sem `id` nem licitante; hex e base64url. */
+export interface LinhaDaCadeia {
+  readonly seq: number;
+  readonly pseudonimo: string;
+  readonly valorCentavos: number;
+  readonly criadoEm: Date;
+  readonly hashAnterior: string;
+  readonly hash: string;
+  readonly assinatura: string;
+  readonly keyId: string;
+}
+
+/** Selo gravado, nas codificações públicas (specs/008 §Codificações). */
+export interface SeloLido {
+  readonly status: 'encerrado' | 'cancelado';
+  readonly totalLances: number;
+  readonly hashFinal: string;
+  readonly vencedorPseudonimo: string | null;
+  readonly valorArremateCentavos: number | null;
+  readonly seladoEm: Date;
+  readonly assinatura: string;
+  readonly keyId: string;
+}
+
+/** Linha de `signing_keys` com a chave pública em bytes. */
+export interface ChaveLida {
+  readonly keyId: string;
+  readonly chavePublica: Buffer;
+  readonly ativaDesde: Date;
+}
+
+const paraHex = (bytes: Buffer): string => bytes.toString('hex');
+const paraBase64url = (bytes: Buffer): string => bytes.toString('base64url');
+
+/**
+ * Cadeia inteira do lote por `seq` crescente, sem paginação (ADR 0031 D7; índice do unique
+ * `(lote_id, seq)`). Nunca seleciona `licitante_id` nem `idempotency_key`.
+ */
+export async function listarCadeiaDoLote(db: Executor, loteId: string): Promise<LinhaDaCadeia[]> {
+  const linhas = await db
+    .select({
+      seq: bids.seq,
+      pseudonimo: bids.pseudonimo,
+      valorCentavos: bids.valorCentavos,
+      criadoEm: bids.criadoEm,
+      hashAnterior: bids.hashAnterior,
+      hash: bids.hash,
+      assinatura: bids.assinatura,
+      keyId: bids.keyId,
+    })
+    .from(bids)
+    .where(eq(bids.loteId, loteId))
+    .orderBy(asc(bids.seq));
+  return linhas.map((linha) => ({
+    ...linha,
+    hashAnterior: paraHex(linha.hashAnterior),
+    hash: paraHex(linha.hash),
+    assinatura: paraBase64url(linha.assinatura),
+  }));
+}
+
+/** Selo do lote, ou `null` enquanto não foi encerrado nem cancelado. */
+export async function lerSeloDoLote(db: Executor, loteId: string): Promise<SeloLido | null> {
+  const [linha] = await db
+    .select({
+      status: lotSeals.status,
+      totalLances: lotSeals.totalLances,
+      hashFinal: lotSeals.hashFinal,
+      vencedorPseudonimo: lotSeals.vencedorPseudonimo,
+      valorArremateCentavos: lotSeals.valorArremateCentavos,
+      seladoEm: lotSeals.seladoEm,
+      assinatura: lotSeals.assinatura,
+      keyId: lotSeals.keyId,
+    })
+    .from(lotSeals)
+    .where(eq(lotSeals.loteId, loteId));
+  if (linha === undefined) return null;
+  // O CHECK lot_seals_status_valido garante o domínio; fora dele o dado está inconsistente.
+  if (linha.status !== 'encerrado' && linha.status !== 'cancelado') {
+    throw new Error(`selo do lote ${loteId} com status desconhecido`);
+  }
+  return {
+    ...linha,
+    status: linha.status,
+    hashFinal: paraHex(linha.hashFinal),
+    assinatura: paraBase64url(linha.assinatura),
+  };
+}
+
+/** Toda chave de `signing_keys`, por `ativa_desde` crescente e desempate `key_id` (specs/008). */
+export async function listarChavesPublicas(db: Executor): Promise<ChaveLida[]> {
+  return db
+    .select({
+      keyId: signingKeys.keyId,
+      chavePublica: signingKeys.chavePublica,
+      ativaDesde: signingKeys.ativaDesde,
+    })
+    .from(signingKeys)
+    .orderBy(asc(signingKeys.ativaDesde), asc(signingKeys.keyId));
 }
 
 /** Insere o lance e devolve o `id` (UUIDv7 do default `uuidv7()`). */
