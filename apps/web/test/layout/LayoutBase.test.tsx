@@ -42,7 +42,7 @@ describe('LayoutBase', () => {
 
   it('o cabeçalho leva à vitrine e tem a alternância de tema', async () => {
     simularPreferenciaDoSistema(false);
-    renderizarApp('/carteira');
+    renderizarApp('/lotes/abc');
 
     const cabecalho = await screen.findByRole('banner');
     expect(within(cabecalho).getByRole('link', { name: 'Casa de Leilões' })).toHaveAttribute(
@@ -83,8 +83,10 @@ describe('LayoutBase', () => {
     const { router } = renderizarApp('/');
     await screen.findByRole('main');
 
-    await act(() => router.navigate('/carteira'));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Carteira' })).toBeInTheDocument();
+    await act(() => router.navigate('/lotes/abc'));
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Sala do lote' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveFocus();
   });
 
@@ -115,12 +117,12 @@ describe('LayoutBase', () => {
     simularPreferenciaDoSistema(false);
     const { router } = renderizarApp('/');
     await screen.findByRole('main');
-    await act(() => router.navigate('/carteira'));
-    await screen.findByRole('heading', { level: 1, name: 'Carteira' });
+    await act(() => router.navigate('/lotes/abc'));
+    await screen.findByRole('heading', { level: 1, name: 'Sala do lote' });
 
     const botaoTema = screen.getByRole('button', { name: 'Tema escuro' });
     act(() => botaoTema.focus());
-    await act(() => router.navigate('/carteira?pagina=2'));
+    await act(() => router.navigate('/lotes/abc?pagina=2'));
 
     expect(router.state.location.search).toBe('?pagina=2');
     expect(botaoTema).toHaveFocus();

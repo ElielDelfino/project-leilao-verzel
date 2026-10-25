@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { Link, Outlet, useLocation } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 
-import { AlternarTema } from '../tema/AlternarTema';
+import { Cabecalho } from './Cabecalho';
 import { Rodape } from './Rodape';
-import { ID_CONTEUDO, NOME_DO_SITE } from './site';
+import { ID_CONTEUDO } from './site';
 
 /**
  * Ao trocar de rota numa SPA, leva o foco ao conteúdo para teclado e leitor de tela
@@ -37,14 +37,7 @@ export function LayoutBase() {
       >
         Pular para o conteúdo
       </a>
-      <header className="border-b border-borda bg-superficie">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <Link to="/" className="text-lg font-bold text-texto no-underline">
-            {NOME_DO_SITE}
-          </Link>
-          <AlternarTema />
-        </div>
-      </header>
+      <Cabecalho />
       <main
         id={ID_CONTEUDO}
         ref={conteudo}

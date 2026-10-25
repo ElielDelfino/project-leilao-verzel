@@ -46,8 +46,8 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it('falha numa página: mostra o erro em pt-BR dentro do layout', async () => {
-    falhas.pagina = 'Carteira';
-    renderizarApp('/carteira');
+    falhas.pagina = 'Sala do lote';
+    renderizarApp('/lotes/abc');
 
     const titulo = await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
     const conteudo = screen.getByRole('main');
@@ -63,8 +63,8 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it('não mostra a tela padrão do React Router nem a mensagem interna do erro', async () => {
-    falhas.pagina = 'Carteira';
-    renderizarApp('/carteira');
+    falhas.pagina = 'Sala do lote';
+    renderizarApp('/lotes/abc');
     await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
 
     expect(screen.queryByText(/Unexpected Application Error/i)).not.toBeInTheDocument();
@@ -74,9 +74,9 @@ describe('erro ao renderizar uma rota (errorElement)', () => {
   });
 
   it('"Voltar à vitrine" sai do erro e leva o foco ao <main>', async () => {
-    falhas.pagina = 'Carteira';
+    falhas.pagina = 'Sala do lote';
     const usuario = userEvent.setup();
-    renderizarApp('/carteira');
+    renderizarApp('/lotes/abc');
     await screen.findByRole('heading', { level: 1, name: TITULO_DO_ERRO });
 
     await usuario.click(screen.getByRole('link', { name: 'Voltar à vitrine' }));

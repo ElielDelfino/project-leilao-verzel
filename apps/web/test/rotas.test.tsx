@@ -3,25 +3,27 @@ import { describe, expect, it } from 'vitest';
 
 import { simularPreferenciaDoSistema } from './apoio/matchMedia';
 import { renderizarApp } from './apoio/renderizarApp';
+import { usuarioLeiloeiro, usuarioLicitante } from './apoio/servidor';
 
 // Rotas de specs/012 §Rotas, ainda como páginas provisórias (tarefa 005).
-const ROTAS: Array<[string, string]> = [
-  ['/', 'Vitrine'],
-  ['/lotes/0192f0a0-0000-7000-8000-000000000001', 'Sala do lote'],
-  ['/entrar', 'Entrar'],
-  ['/cadastro', 'Cadastro'],
-  ['/carteira', 'Carteira'],
-  ['/meus-arremates', 'Meus arremates'],
-  ['/painel', 'Painel do leiloeiro'],
-  ['/painel/lotes/novo', 'Novo lote'],
-  ['/auditoria/0192f0a0-0000-7000-8000-000000000001', 'Auditoria do lote'],
-  ['/comprovantes/ABC123', 'Comprovante'],
+type Usuario = typeof usuarioLicitante | typeof usuarioLeiloeiro | null;
+const ROTAS: Array<[string, string, Usuario]> = [
+  ['/', 'Vitrine', null],
+  ['/lotes/0192f0a0-0000-7000-8000-000000000001', 'Sala do lote', null],
+  ['/entrar', 'Entrar', null],
+  ['/cadastro', 'Cadastro', null],
+  ['/carteira', 'Carteira', usuarioLicitante],
+  ['/meus-arremates', 'Meus arremates', usuarioLicitante],
+  ['/painel', 'Painel do leiloeiro', usuarioLeiloeiro],
+  ['/painel/lotes/novo', 'Novo lote', usuarioLeiloeiro],
+  ['/auditoria/0192f0a0-0000-7000-8000-000000000001', 'Auditoria do lote', null],
+  ['/comprovantes/ABC123', 'Comprovante', null],
 ];
 
 describe('rotas', () => {
-  it.each(ROTAS)('%s mostra a página "%s" com título e <h1>', async (url, titulo) => {
+  it.each(ROTAS)('%s mostra a página "%s" com título e <h1>', async (url, titulo, sessao) => {
     simularPreferenciaDoSistema(false);
-    renderizarApp(url);
+    renderizarApp(url, { sessao });
 
     expect(await screen.findByRole('heading', { level: 1, name: titulo })).toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe(`${titulo} · Casa de Leilões`));
