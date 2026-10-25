@@ -21,11 +21,14 @@ const MODULOS_API = [
   'liquidacao',
 ];
 
-// Ordem de dependência permitida (specs/001). Módulo ausente desta tabela não importa nenhum outro;
-// tempo-real só consome eventos de domínio. Ciclos são proibidos.
+// Arestas permitidas (specs/001 §Módulos da API). Módulo ausente desta tabela não importa nenhum
+// outro (identidade, carteira, catalogo). Além das arestas, tempo-real consome os eventos de domínio.
+// Ciclos são proibidos.
 const DEPENDENCIAS_PERMITIDAS = {
+  lotes: ['catalogo'],
   lances: ['lotes', 'carteira', 'catalogo', 'identidade'],
-  liquidacao: ['lances', 'lotes', 'carteira'],
+  liquidacao: ['lances', 'lotes', 'carteira', 'catalogo'],
+  'tempo-real': ['lotes', 'lances', 'identidade'],
 };
 
 const INTERFACE_PUBLICA = 'index.ts';
