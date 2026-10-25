@@ -6,9 +6,9 @@ import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { serializarErro } from '../logger/logger.js';
+import { type Banco, converterErroDoBanco, criarBanco, ErroDoBanco } from '../../src/db/banco.js';
+import { serializarErro } from '../../src/logger/logger.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
-import { type Banco, converterErroDoBanco, criarBanco, ErroDoBanco } from './banco.js';
 
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, estes testes são
 // pulados (ambiente-de-teste.ts).

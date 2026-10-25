@@ -9,9 +9,13 @@ import { DrizzleQueryError } from 'drizzle-orm/errors';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import {
+  type ConexaoDoBanco,
+  ErroDeConfiguracaoDoBanco,
+  trocarBanco,
+} from '../../src/db/conexao.js';
+import { aplicarMigrations, descreverFalha, PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
-import { type ConexaoDoBanco, ErroDeConfiguracaoDoBanco, trocarBanco } from './conexao.js';
-import { aplicarMigrations, descreverFalha, PASTA_DAS_MIGRATIONS } from './migrate.js';
 
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
 // são pulados (ambiente-de-teste.ts).

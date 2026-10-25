@@ -4,13 +4,13 @@ import { inspect } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
-import { ambienteDeTeste } from './ambiente-de-teste.js';
 import {
   conexaoSeCompleta,
   ErroDeConfiguracaoDoBanco,
   lerConexaoDoBanco,
   trocarBanco,
-} from './conexao.js';
+} from '../../src/db/conexao.js';
+import { ambienteDeTeste } from './ambiente-de-teste.js';
 
 const SENHA = 'senha-que-nao-pode-aparecer';
 

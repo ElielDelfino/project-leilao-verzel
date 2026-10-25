@@ -1,9 +1,12 @@
-// Só para os testes de integração de src/db (vão para apps/api/test/db/ na tarefa 025).
+// Só para os testes de integração da camada de banco (apps/api/test/db/, tarefa 025).
 // Regra (code-reviewer H1 da tarefa 003): com LEILAO_TEST_DB definido (verify e CI, specs/013),
 // o banco é obrigatório e a falta de variável derruba a coleta com os nomes delas, então nada é
 // pulado em silêncio. Sem LEILAO_TEST_DB, e faltando alguma variável, os testes de banco ficam
 // como "skipped" no resumo do Vitest e os de unidade continuam rodando.
-import { type ConexaoDoBanco, conexaoSeCompleta, lerConexaoDoBanco } from './conexao.js';
+// LEILAO_TEST_DB é só um sinalizador: aqui conta apenas se está definido e não vazio; o valor
+// (`local`, `ci`...) não escolhe banco nem muda a conexão, que vem sempre de POSTGRES_* e
+// DB_PASSWORD.
+import { type ConexaoDoBanco, conexaoSeCompleta, lerConexaoDoBanco } from '../../src/db/conexao.js';
 
 export interface AmbienteDeTeste {
   /** Há conexão: os testes de banco rodam. */

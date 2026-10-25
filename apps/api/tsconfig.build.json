@@ -1,11 +1,12 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   // Build de produção (nest build): só src/, emitido em dist/ (dist/main.js). O typecheck usa o
-  // tsconfig.json, que também cobre test/.
+  // tsconfig.json, que também cobre test/. Nenhum teste vai para dist/ (tarefa 025).
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist"
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

@@ -7,11 +7,17 @@ import { DrizzleQueryError } from 'drizzle-orm/errors';
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
-import { serializarErro } from '../logger/logger.js';
+import { ErroDeConfiguracaoDoBanco } from '../../src/db/conexao.js';
+import { ErroDoBanco } from '../../src/db/erros.js';
+import {
+  descreverFalha,
+  ErroNaEtapa,
+  ETAPAS,
+  type EtapaDoSeed,
+  semear,
+} from '../../src/db/seed.js';
+import { serializarErro } from '../../src/logger/logger.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
-import { ErroDeConfiguracaoDoBanco } from './conexao.js';
-import { ErroDoBanco } from './erros.js';
-import { descreverFalha, ErroNaEtapa, ETAPAS, type EtapaDoSeed, semear } from './seed.js';
 
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
 // são pulados (ambiente-de-teste.ts).

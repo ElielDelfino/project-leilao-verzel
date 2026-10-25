@@ -9,8 +9,8 @@ import {
   type ClienteAvulso,
   comClienteAvulso,
   SEM_CAUSA,
-} from './cliente-avulso.js';
-import { lerConexaoDoBanco } from './conexao.js';
+} from '../../src/db/cliente-avulso.js';
+import { lerConexaoDoBanco } from '../../src/db/conexao.js';
 
 const CONEXAO = lerConexaoDoBanco({
   POSTGRES_HOST: 'h',

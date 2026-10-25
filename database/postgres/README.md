@@ -76,8 +76,8 @@ copiar essa pasta mantendo a mesma posição relativa.
 
 ## Testes
 
-Os testes da camada de banco estão em `apps/api/src/db/*.test.ts` (vão para `apps/api/test/db/`
-na tarefa 025) e os de integração precisam do Postgres local (`pnpm infra:up`) e das variáveis de
+Os testes da camada de banco estão em `apps/api/test/db/` (fora de `src/`, então nada deles vai
+para `dist/`) e os de integração precisam do Postgres local (`pnpm infra:up`) e das variáveis de
 conexão. Cada execução cria um banco descartável `leilao_t003_<aleatório>`, aplica as migrations
 nele e o apaga no fim.
 
@@ -85,7 +85,9 @@ nele e o apaga no fim.
   faltar alguma, a coleta falha com os nomes delas. Nada é pulado em silêncio.
 - Sem `LEILAO_TEST_DB` e sem as variáveis, os testes de integração aparecem como `skipped` e os de
   unidade rodam.
+- `LEILAO_TEST_DB` é só um sinalizador: conta apenas se está definido e não vazio. O valor
+  (`local`, `ci`...) não escolhe banco nem muda a conexão, que vem sempre de `POSTGRES_*` e
+  `DB_PASSWORD`.
 
-Para rodar: `LEILAO_TEST_DB=local POSTGRES_HOST=127.0.0.1 pnpm --filter @leilao/api exec vitest run src/db`,
-com as demais variáveis exportadas no shell (o Vitest não lê o `.env.local`). O
-`pnpm --filter @leilao/api test` (`--dir test`) ainda não os coleta.
+Para rodar: `LEILAO_TEST_DB=local POSTGRES_HOST=127.0.0.1 pnpm --filter @leilao/api test`, com as
+demais variáveis exportadas no shell (o Vitest não lê o `.env.local`).
