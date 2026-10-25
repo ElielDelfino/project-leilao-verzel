@@ -104,7 +104,8 @@ copiar essa pasta mantendo a mesma posição relativa.
 - FKs para `users(id)` sem `CASCADE`. As de `ledger_entries` e `wallet_balances` estão só no SQL
   (escritas à mão): `users` é de identidade, e o `schema.ts` de carteira não importa outro módulo
   (specs/001 §Módulos), então o snapshot do drizzle-kit não as conhece.
-- `ledger_entries.lote_id` e `ledger_entries.lance_id` ganham FK na 0003 (D9 da ADR 0031).
+- `ledger_entries.lote_id` e `ledger_entries.lance_id` ganham FK na 0003 (D9 da ADR 0031) e,
+  na 0004, o índice único parcial `(lance_id, tipo)` de `compromisso` e `liberacao`.
 - Papel `leilao_api`, privilégios e `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (§Papéis).
 
 ## Migration 0002 (`0002_catalogo_lotes.sql`)
@@ -182,6 +183,22 @@ uma linha contra outra. O banco aceita, portanto: `seq` com buraco; `hash_anteri
   `GET /api/auditoria/chaves` e a troca de `key_id` no meio da cadeia, visíveis ao auditar.
   Contra reassinatura de cadeia já selada, a âncora é o comprovante do vencedor (specs/008
   §Limitações conhecidas).
+
+## Migration 0004 (`0004_ledger_unico_por_lance.sql`)
+
+Tarefa 092 (specs/004 §Dados e §Comportamento). Só cria um índice; não altera nem remove coluna.
+
+- Índice único parcial `ledger_entries_lance_id_tipo_unico` em `ledger_entries (lance_id, tipo)`
+  `WHERE tipo IN ('compromisso', 'liberacao') AND lance_id IS NOT NULL`: cada lance recebe no
+  máximo um `compromisso` (ao liderar) e uma `liberacao` (ao ser superado, specs/007 passo 6).
+  Um retry ou bug do chamador que repita `comprometer` ou `liberar` com o mesmo `lanceId` falha
+  com 23505 e a transação do lance desfaz o saldo. A tradução do 23505 para `ErroDeCarteira` é da
+  API (tarefa 093), que reconhece a violação pelo nome do índice.
+- Fora do índice: `deposito`, `estorno` (cancelamento, specs/010, sem `lance_id` exigido) e os
+  lançamentos da liquidação, e qualquer linha com `lance_id` nulo.
+- Declarado no `carteira/schema.ts` (`uniqueIndex(...).where(...)`), então está no snapshot e o
+  `db:generate` não gera diff. Não é restrição (`pg_constraint`): o teste de snapshot o confere
+  entre os índices.
 
 ## Papéis (D2 e D3 da tarefa 036)
 

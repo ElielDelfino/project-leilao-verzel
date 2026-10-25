@@ -10,7 +10,16 @@
 // - as FKs lote_id → lots(id) e lance_id → bids(id), imediatas e sem índice (migration
 //   0003_lances_integridade, D9 da ADR 0031): o lançamento do lance vem depois do `bids`.
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  check,
+  index,
+  pgTable,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 import { tipoLancamento } from '../../db/schema.js';
 
@@ -50,6 +59,12 @@ export const ledgerEntries = pgTable(
       t.criadoEm.desc().nullsFirst(),
       t.id.desc().nullsFirst(),
     ),
+    // No máximo um `compromisso` e uma `liberacao` por lance (tarefa 092, migration 0004): um
+    // retry ou bug do chamador não compromete nem libera o mesmo lance duas vezes. A tarefa 093
+    // identifica a violação (23505) por este nome; o `estorno` do cancelamento não entra aqui.
+    uniqueIndex('ledger_entries_lance_id_tipo_unico')
+      .on(t.lanceId, t.tipo)
+      .where(sql`${t.tipo} IN ('compromisso', 'liberacao') AND ${t.lanceId} IS NOT NULL`),
   ],
 );
 

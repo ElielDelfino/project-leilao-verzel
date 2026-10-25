@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "ledger_entries_lance_id_tipo_unico" ON "ledger_entries" USING btree ("lance_id","tipo") WHERE "ledger_entries"."tipo" IN ('compromisso', 'liberacao') AND "ledger_entries"."lance_id" IS NOT NULL;

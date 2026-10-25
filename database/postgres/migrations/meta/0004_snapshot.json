@@ -1,0 +1,1172 @@
+{
+  "id": "b9dc946e-a706-4e55-9164-9b099e49043d",
+  "prevId": "6443035e-dbe0-4cc3-bb01-ba2216140a62",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ledger_entries": {
+      "name": "ledger_entries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_lancamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_centavos": {
+          "name": "valor_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lote_id": {
+          "name": "lote_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lance_id": {
+          "name": "lance_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ledger_entries_user_id_criado_em_id_idx": {
+          "name": "ledger_entries_user_id_criado_em_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criado_em",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_entries_lance_id_tipo_unico": {
+          "name": "ledger_entries_lance_id_tipo_unico",
+          "columns": [
+            {
+              "expression": "lance_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tipo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"ledger_entries\".\"tipo\" IN ('compromisso', 'liberacao') AND \"ledger_entries\".\"lance_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "ledger_entries_user_id_idempotency_key_unique": {
+          "name": "ledger_entries_user_id_idempotency_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "ledger_entries_valor_positivo": {
+          "name": "ledger_entries_valor_positivo",
+          "value": "\"ledger_entries\".\"valor_centavos\" > 0"
+        },
+        "ledger_entries_valor_seguro": {
+          "name": "ledger_entries_valor_seguro",
+          "value": "\"ledger_entries\".\"valor_centavos\" <= 9007199254740991"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.wallet_balances": {
+      "name": "wallet_balances",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "total_centavos": {
+          "name": "total_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "comprometido_centavos": {
+          "name": "comprometido_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "wallet_balances_comprometido_valido": {
+          "name": "wallet_balances_comprometido_valido",
+          "value": "\"wallet_balances\".\"comprometido_centavos\" >= 0 AND \"wallet_balances\".\"comprometido_centavos\" <= \"wallet_balances\".\"total_centavos\""
+        },
+        "wallet_balances_total_seguro": {
+          "name": "wallet_balances_total_seguro",
+          "value": "\"wallet_balances\".\"total_centavos\" <= 9007199254740991"
+        },
+        "wallet_balances_comprometido_seguro": {
+          "name": "wallet_balances_comprometido_seguro",
+          "value": "\"wallet_balances\".\"comprometido_centavos\" <= 9007199254740991"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.card_snapshots": {
+      "name": "card_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "scryfall_id": {
+          "name": "scryfall_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "colecao": {
+          "name": "colecao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raridade": {
+          "name": "raridade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "texto_oracle": {
+          "name": "texto_oracle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "artista": {
+          "name": "artista",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dados": {
+          "name": "dados",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imagem": {
+          "name": "imagem",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imagem_mime": {
+          "name": "imagem_mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imagem_sha256": {
+          "name": "imagem_sha256",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "card_snapshots_imagem_sha256_tamanho": {
+          "name": "card_snapshots_imagem_sha256_tamanho",
+          "value": "octet_length(\"card_snapshots\".\"imagem_sha256\") = 32"
+        },
+        "card_snapshots_imagem_mime_valido": {
+          "name": "card_snapshots_imagem_mime_valido",
+          "value": "\"card_snapshots\".\"imagem_mime\" in ('image/jpeg', 'image/png')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.refresh_tokens": {
+      "name": "refresh_tokens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "familia_id": {
+          "name": "familia_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revogado_em": {
+          "name": "revogado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "substituido_por": {
+          "name": "substituido_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "refresh_tokens_familia_id_idx": {
+          "name": "refresh_tokens_familia_id_idx",
+          "columns": [
+            {
+              "expression": "familia_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "refresh_tokens_user_id_idx": {
+          "name": "refresh_tokens_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "refresh_tokens_substituido_por_idx": {
+          "name": "refresh_tokens_substituido_por_idx",
+          "columns": [
+            {
+              "expression": "substituido_por",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "refresh_tokens_user_id_users_id_fk": {
+          "name": "refresh_tokens_user_id_users_id_fk",
+          "tableFrom": "refresh_tokens",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "refresh_tokens_substituido_por_refresh_tokens_id_fk": {
+          "name": "refresh_tokens_substituido_por_refresh_tokens_id_fk",
+          "tableFrom": "refresh_tokens",
+          "tableTo": "refresh_tokens",
+          "columnsFrom": [
+            "substituido_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "refresh_tokens_token_hash_unique": {
+          "name": "refresh_tokens_token_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "refresh_tokens_token_hash_tamanho": {
+          "name": "refresh_tokens_token_hash_tamanho",
+          "value": "octet_length(\"refresh_tokens\".\"token_hash\") = 32"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "citext",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "senha_hash": {
+          "name": "senha_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "papel": {
+          "name": "papel",
+          "type": "papel_usuario",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_email_unique": {
+          "name": "users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "users_nome_tamanho": {
+          "name": "users_nome_tamanho",
+          "value": "char_length(\"users\".\"nome\") between 2 and 80"
+        },
+        "users_email_tamanho": {
+          "name": "users_email_tamanho",
+          "value": "char_length(\"users\".\"email\") <= 254"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.bids": {
+      "name": "bids",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "lote_id": {
+          "name": "lote_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "licitante_id": {
+          "name": "licitante_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pseudonimo": {
+          "name": "pseudonimo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_centavos": {
+          "name": "valor_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hash_anterior": {
+          "name": "hash_anterior",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hash": {
+          "name": "hash",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assinatura": {
+          "name": "assinatura",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "bids_licitante_id_lote_id_idx": {
+          "name": "bids_licitante_id_lote_id_idx",
+          "columns": [
+            {
+              "expression": "licitante_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lote_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bids_key_id_signing_keys_key_id_fk": {
+          "name": "bids_key_id_signing_keys_key_id_fk",
+          "tableFrom": "bids",
+          "tableTo": "signing_keys",
+          "columnsFrom": [
+            "key_id"
+          ],
+          "columnsTo": [
+            "key_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "bids_lote_id_seq_unique": {
+          "name": "bids_lote_id_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lote_id",
+            "seq"
+          ]
+        },
+        "bids_licitante_id_idempotency_key_unique": {
+          "name": "bids_licitante_id_idempotency_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "licitante_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "bids_seq_positivo": {
+          "name": "bids_seq_positivo",
+          "value": "\"bids\".\"seq\" >= 1"
+        },
+        "bids_valor_faixa": {
+          "name": "bids_valor_faixa",
+          "value": "\"bids\".\"valor_centavos\" between 100 and 9007199254740991"
+        },
+        "bids_hash_anterior_tamanho": {
+          "name": "bids_hash_anterior_tamanho",
+          "value": "octet_length(\"bids\".\"hash_anterior\") = 32"
+        },
+        "bids_hash_tamanho": {
+          "name": "bids_hash_tamanho",
+          "value": "octet_length(\"bids\".\"hash\") = 32"
+        },
+        "bids_assinatura_tamanho": {
+          "name": "bids_assinatura_tamanho",
+          "value": "octet_length(\"bids\".\"assinatura\") = 64"
+        },
+        "bids_key_id_formato": {
+          "name": "bids_key_id_formato",
+          "value": "\"bids\".\"key_id\" ~ '^[0-9a-f]{16}$'"
+        },
+        "bids_pseudonimo_formato": {
+          "name": "bids_pseudonimo_formato",
+          "value": "\"bids\".\"pseudonimo\" ~ '^Licitante #[0-9a-f]{6}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.lot_seals": {
+      "name": "lot_seals",
+      "schema": "",
+      "columns": {
+        "lote_id": {
+          "name": "lote_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_lances": {
+          "name": "total_lances",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hash_final": {
+          "name": "hash_final",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencedor_pseudonimo": {
+          "name": "vencedor_pseudonimo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_arremate_centavos": {
+          "name": "valor_arremate_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "selado_em": {
+          "name": "selado_em",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assinatura": {
+          "name": "assinatura",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "lot_seals_key_id_signing_keys_key_id_fk": {
+          "name": "lot_seals_key_id_signing_keys_key_id_fk",
+          "tableFrom": "lot_seals",
+          "tableTo": "signing_keys",
+          "columnsFrom": [
+            "key_id"
+          ],
+          "columnsTo": [
+            "key_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "lot_seals_status_valido": {
+          "name": "lot_seals_status_valido",
+          "value": "\"lot_seals\".\"status\" in ('encerrado', 'cancelado')"
+        },
+        "lot_seals_total_lances_nao_negativo": {
+          "name": "lot_seals_total_lances_nao_negativo",
+          "value": "\"lot_seals\".\"total_lances\" >= 0"
+        },
+        "lot_seals_hash_final_tamanho": {
+          "name": "lot_seals_hash_final_tamanho",
+          "value": "octet_length(\"lot_seals\".\"hash_final\") = 32"
+        },
+        "lot_seals_assinatura_tamanho": {
+          "name": "lot_seals_assinatura_tamanho",
+          "value": "octet_length(\"lot_seals\".\"assinatura\") = 64"
+        },
+        "lot_seals_key_id_formato": {
+          "name": "lot_seals_key_id_formato",
+          "value": "\"lot_seals\".\"key_id\" ~ '^[0-9a-f]{16}$'"
+        },
+        "lot_seals_vencedor_pseudonimo_formato": {
+          "name": "lot_seals_vencedor_pseudonimo_formato",
+          "value": "\"lot_seals\".\"vencedor_pseudonimo\" ~ '^Licitante #[0-9a-f]{6}$'"
+        },
+        "lot_seals_valor_arremate_faixa": {
+          "name": "lot_seals_valor_arremate_faixa",
+          "value": "\"lot_seals\".\"valor_arremate_centavos\" is null or \"lot_seals\".\"valor_arremate_centavos\" between 100 and 9007199254740991"
+        },
+        "lot_seals_vencedor_com_arremate": {
+          "name": "lot_seals_vencedor_com_arremate",
+          "value": "(\"lot_seals\".\"vencedor_pseudonimo\" is null) = (\"lot_seals\".\"valor_arremate_centavos\" is null)"
+        },
+        "lot_seals_arremate_so_se_vendido": {
+          "name": "lot_seals_arremate_so_se_vendido",
+          "value": "(\"lot_seals\".\"valor_arremate_centavos\" is not null) = (\"lot_seals\".\"status\" = 'encerrado' and \"lot_seals\".\"total_lances\" > 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.signing_keys": {
+      "name": "signing_keys",
+      "schema": "",
+      "columns": {
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "chave_publica": {
+          "name": "chave_publica",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativa_desde": {
+          "name": "ativa_desde",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "clock_timestamp()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "signing_keys_chave_publica_tamanho": {
+          "name": "signing_keys_chave_publica_tamanho",
+          "value": "octet_length(\"signing_keys\".\"chave_publica\") = 32"
+        },
+        "signing_keys_key_id_formato": {
+          "name": "signing_keys_key_id_formato",
+          "value": "\"signing_keys\".\"key_id\" ~ '^[0-9a-f]{16}$'"
+        },
+        "signing_keys_key_id_da_chave": {
+          "name": "signing_keys_key_id_da_chave",
+          "value": "\"signing_keys\".\"key_id\" = left(encode(sha256(\"signing_keys\".\"chave_publica\"), 'hex'), 16)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.lots": {
+      "name": "lots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "uuidv7()"
+        },
+        "leiloeiro_id": {
+          "name": "leiloeiro_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carta_nome": {
+          "name": "carta_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raridade": {
+          "name": "raridade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "titulo": {
+          "name": "titulo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lance_inicial_centavos": {
+          "name": "lance_inicial_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "incremento_minimo_centavos": {
+          "name": "incremento_minimo_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inicio_em": {
+          "name": "inicio_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fim_em": {
+          "name": "fim_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fim_original_em": {
+          "name": "fim_original_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_lote",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lance_atual_centavos": {
+          "name": "lance_atual_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lider_id": {
+          "name": "lider_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "total_lances": {
+          "name": "total_lances",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "vencedor_id": {
+          "name": "vencedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_arremate_centavos": {
+          "name": "valor_arremate_centavos",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "encerrado_em": {
+          "name": "encerrado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelado_em": {
+          "name": "cancelado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lots_status_fim_em_idx": {
+          "name": "lots_status_fim_em_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "fim_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lots_status_inicio_em_idx": {
+          "name": "lots_status_inicio_em_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "inicio_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lots_leiloeiro_id_criado_em_id_idx": {
+          "name": "lots_leiloeiro_id_criado_em_id_idx",
+          "columns": [
+            {
+              "expression": "leiloeiro_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criado_em",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lots_titulo_trgm_idx": {
+          "name": "lots_titulo_trgm_idx",
+          "columns": [
+            {
+              "expression": "titulo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "gin_trgm_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "lots_carta_nome_trgm_idx": {
+          "name": "lots_carta_nome_trgm_idx",
+          "columns": [
+            {
+              "expression": "carta_nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "gin_trgm_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "lots_snapshot_id_unique": {
+          "name": "lots_snapshot_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "snapshot_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "lots_lance_inicial_faixa": {
+          "name": "lots_lance_inicial_faixa",
+          "value": "\"lots\".\"lance_inicial_centavos\" between 100 and 100000000"
+        },
+        "lots_incremento_minimo_faixa": {
+          "name": "lots_incremento_minimo_faixa",
+          "value": "\"lots\".\"incremento_minimo_centavos\" between 100 and 100000000"
+        },
+        "lots_duracao_minima": {
+          "name": "lots_duracao_minima",
+          "value": "\"lots\".\"fim_original_em\" >= \"lots\".\"inicio_em\" + interval '5 minutes'"
+        },
+        "lots_duracao_maxima": {
+          "name": "lots_duracao_maxima",
+          "value": "\"lots\".\"fim_original_em\" - \"lots\".\"inicio_em\" <= interval '7 days'"
+        },
+        "lots_lance_atual_minimo": {
+          "name": "lots_lance_atual_minimo",
+          "value": "\"lots\".\"lance_atual_centavos\" is null or \"lots\".\"lance_atual_centavos\" >= \"lots\".\"lance_inicial_centavos\""
+        },
+        "lots_valor_arremate_positivo": {
+          "name": "lots_valor_arremate_positivo",
+          "value": "\"lots\".\"valor_arremate_centavos\" is null or \"lots\".\"valor_arremate_centavos\" > 0"
+        },
+        "lots_total_lances_nao_negativo": {
+          "name": "lots_total_lances_nao_negativo",
+          "value": "\"lots\".\"total_lances\" >= 0"
+        },
+        "lots_fim_nao_recua": {
+          "name": "lots_fim_nao_recua",
+          "value": "\"lots\".\"fim_em\" >= \"lots\".\"fim_original_em\""
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.papel_usuario": {
+      "name": "papel_usuario",
+      "schema": "public",
+      "values": [
+        "leiloeiro",
+        "licitante"
+      ]
+    },
+    "public.status_lote": {
+      "name": "status_lote",
+      "schema": "public",
+      "values": [
+        "agendado",
+        "ao_vivo",
+        "encerrado",
+        "cancelado"
+      ]
+    },
+    "public.tipo_lancamento": {
+      "name": "tipo_lancamento",
+      "schema": "public",
+      "values": [
+        "deposito",
+        "compromisso",
+        "liberacao",
+        "estorno",
+        "debito_arremate",
+        "credito_arremate"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
