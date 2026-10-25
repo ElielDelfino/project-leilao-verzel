@@ -317,9 +317,43 @@ describe('carregarEnv: Scryfall', () => {
     });
   });
 
-  it('prefixo Redis da Scryfall é sempre scryfall: (sem variável de env; tarefa 067)', () => {
-    const env = carregarEnv(envValido({ SCRYFALL_REDIS_PREFIX: 'outro:' }));
-    expect(env.scryfall.prefixoRedis).toBe('scryfall:');
+  it('sem SCRYFALL_REDIS_PREFIX, o prefixo Redis é scryfall: (tarefa 099)', () => {
+    expect(carregarEnv(envValido()).scryfall.prefixoRedis).toBe('scryfall:');
+    expect(carregarEnv(envValido({ NODE_ENV: 'production' })).scryfall.prefixoRedis).toBe(
+      'scryfall:',
+    );
+  });
+
+  it.each(['scryfall:e2e:', 'scryfall:e2e-run-1:', 'scryfall:t123-ab:'])(
+    'aceita SCRYFALL_REDIS_PREFIX=%j fora de produção',
+    (valor) => {
+      const env = carregarEnv(envValido({ SCRYFALL_REDIS_PREFIX: valor, NODE_ENV: 'test' }));
+      expect(env.scryfall.prefixoRedis).toBe(valor);
+    },
+  );
+
+  it.each([
+    '',
+    'outro:',
+    'scryfall:',
+    'scryfall:x1:',
+    'scryfall:e2e',
+    'scryfall:E2E:',
+    'scryfall:t_1:',
+  ])('recusa SCRYFALL_REDIS_PREFIX=%j (formato)', (valor) => {
+    const mensagem = mensagemDe(() => carregarEnv(envValido({ SCRYFALL_REDIS_PREFIX: valor })));
+    expect(mensagem).toContain('SCRYFALL_REDIS_PREFIX');
+    if (valor !== '') {
+      expect(mensagem).not.toContain(valor);
+    }
+  });
+
+  it('recusa SCRYFALL_REDIS_PREFIX em produção, mesmo no formato válido', () => {
+    const mensagem = mensagemDe(() =>
+      carregarEnv(envValido({ NODE_ENV: 'production', SCRYFALL_REDIS_PREFIX: 'scryfall:e2e:' })),
+    );
+    expect(mensagem).toContain('SCRYFALL_REDIS_PREFIX');
+    expect(mensagem).toContain('produção');
   });
 
   it('aceita SCRYFALL_BASE_URL http://127.0.0.1:porta (Scryfall falsa)', () => {

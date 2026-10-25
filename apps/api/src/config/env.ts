@@ -51,6 +51,12 @@ const userAgent = z
   .max(MAX_USER_AGENT)
   .regex(/^[\x20-\x7E]+$/);
 
+/**
+ * Prefixo Redis próprio da Scryfall, só para teste e e2e: `scryfall:` + `e2e` ou `t` + letras
+ * minúsculas, dígitos e hífen, terminando em `:` (mesma regra de test/helpers/app-de-teste.ts).
+ */
+const prefixoRedisDeTeste = z.string().regex(/^scryfall:(?:e2e|t)[a-z0-9-]*:$/);
+
 // specs/014 §Conexão: todas obrigatórias e sem default no código; não há DATABASE_URL nem REDIS_URL.
 const esquemaDoEnv = z.object({
   API_PORT: z.coerce.number().int().min(PORTA_MINIMA).max(PORTA_MAXIMA),
@@ -69,6 +75,7 @@ const esquemaDoEnv = z.object({
   WEB_ORIGIN: origemWeb,
   SCRYFALL_USER_AGENT: userAgent,
   SCRYFALL_BASE_URL: origemWeb.default(SCRYFALL_BASE_URL_PADRAO),
+  SCRYFALL_REDIS_PREFIX: prefixoRedisDeTeste.optional(),
 });
 
 type VariaveisDoEnv = z.infer<typeof esquemaDoEnv>;
@@ -105,14 +112,17 @@ export interface Env {
   readonly scryfall: ConfigDaScryfallNoEnv;
 }
 
-/** Prefixo das chaves Redis da Scryfall (cache/redis/README.md). Não vem de variável de env. */
+/**
+ * Prefixo padrão das chaves Redis da Scryfall (cache/redis/README.md). Só teste e e2e o trocam,
+ * por SCRYFALL_REDIS_PREFIX (rejeitada em produção) ou pela app de teste.
+ */
 export const PREFIXO_REDIS_DA_SCRYFALL = 'scryfall:';
 
 export interface ConfigDaScryfallNoEnv extends ConfigDaScryfall {
   /**
-   * Prefixo das chaves Redis do cliente: sempre PREFIXO_REDIS_DA_SCRYFALL em produção. Só a app de
-   * teste o troca, por um próprio por app, para que arquivos paralelos não disputem bucket,
-   * circuito e cache (tarefa 067).
+   * Prefixo das chaves Redis do cliente: PREFIXO_REDIS_DA_SCRYFALL, sempre em produção. Fora dela,
+   * SCRYFALL_REDIS_PREFIX (formato fechado) ou o da app de teste, próprio por app, para que
+   * arquivos paralelos e o e2e não disputem bucket, circuito e cache com o dev (tarefas 067, 099).
    */
   readonly prefixoRedis: string;
 }
@@ -209,7 +219,7 @@ function montarEnv(dados: VariaveisDoEnv): Env {
     scryfall: Object.freeze({
       userAgent: dados.SCRYFALL_USER_AGENT,
       baseUrl: dados.SCRYFALL_BASE_URL,
-      prefixoRedis: PREFIXO_REDIS_DA_SCRYFALL,
+      prefixoRedis: dados.SCRYFALL_REDIS_PREFIX ?? PREFIXO_REDIS_DA_SCRYFALL,
     }),
   };
 }
@@ -242,6 +252,10 @@ export function carregarEnv(origem: Readonly<Record<string, string | undefined>>
       })
       .map((problema) => descreverProblema(problema, origemDoSegredo));
     problemas.push(...novos);
+  }
+  // Em produção o prefixo nunca difere do padrão: a variável é rejeitada, qualquer que seja o valor.
+  if (origem.NODE_ENV === 'production' && origem.SCRYFALL_REDIS_PREFIX !== undefined) {
+    problemas.push('SCRYFALL_REDIS_PREFIX (proibida em produção)');
   }
   if (problemas.length > 0 || !resultado.success) {
     falhar(problemas);
