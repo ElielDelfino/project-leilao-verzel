@@ -26,6 +26,7 @@ import {
   iso,
 } from '../helpers/lotes-por-sql.js';
 import { iniciarScryfallFalsa, type ScryfallFalsa } from '../helpers/scryfall-falsa.js';
+import { semearRecibo } from '../modules/liquidacao/comprovantes/apoio-de-comprovantes.js';
 import {
   BANCO,
   cadastrar,
@@ -43,7 +44,7 @@ const TITULO_CRIADO = `matriz-${randomBytes(6).toString('hex')}`;
  * Preenchido no beforeAll: um lote e seu snapshot, para as rotas com parâmetro de caminho, e um
  * lote à parte para os lances (que ficam gravados para sempre: `bids` é append-only).
  */
-const alvo = { loteId: '', snapshotId: '', loteDeLances: '' };
+const alvo = { loteId: '', snapshotId: '', loteDeLances: '', codigoDoComprovante: '' };
 const LANCE_INICIAL_DA_MATRIZ_CENTAVOS = 100;
 const INCREMENTO_DA_MATRIZ_CENTAVOS = 100;
 const SALDO_PARA_LANCAR_CENTAVOS = 1_000_000;
@@ -262,8 +263,8 @@ const OPERACOES: readonly Operacao[] = [
   {
     metodo: 'GET',
     caminho: '/api/comprovantes/{codigo}',
+    url: () => `/api/comprovantes/${alvo.codigoDoComprovante}`,
     comCsrf: igualParaTodos({ status: 200 }),
-    pendente: { tarefa: '109', motivo: 'rota pública do comprovante ainda não existe' },
   },
   {
     metodo: 'GET',
@@ -273,7 +274,6 @@ const OPERACOES: readonly Operacao[] = [
       licitante: { status: 200 },
       leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
     },
-    pendente: { tarefa: '109', motivo: 'rota "Meus arremates" ainda não existe' },
   },
 ];
 
@@ -339,6 +339,17 @@ describe.skipIf(!INFRA_DISPONIVEL)(
           incremento_minimo_centavos: INCREMENTO_DA_MATRIZ_CENTAVOS,
         })
       ).id;
+      // Recibo (append-only: fica no banco) para a rota pública do comprovante; usuários à parte.
+      const vencedorDoRecibo = await inserirUsuario(pool, 'licitante');
+      const donoDoRecibo = await inserirUsuario(pool, 'leiloeiro');
+      alvo.codigoDoComprovante = (
+        await semearRecibo(pool, {
+          leiloeiroId: donoDoRecibo.id,
+          vencedorId: vencedorDoRecibo.id,
+          valorCentavos: 500,
+          emitidoEm: Date.now(),
+        })
+      ).codigo;
     });
 
     afterAll(async () => {
