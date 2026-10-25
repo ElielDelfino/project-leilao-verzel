@@ -12,7 +12,7 @@ import { EncerramentoModule } from './encerramento/encerramento.module.js';
  */
 @Module({
   imports: [EncerramentoModule, CancelamentoModule, ComprovantesModule, AgendadorModule],
-  exports: [EncerramentoModule],
+  exports: [EncerramentoModule, AgendadorModule],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- módulo Nest: o conteúdo vem do decorator
 export class LiquidacaoModule {}
