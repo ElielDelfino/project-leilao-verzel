@@ -1,0 +1,409 @@
+{
+  "loteId": "0198f3c0-7b1a-7c00-8000-000000000001",
+  "chaves": [
+    {
+      "keyId": "21fe31dfa154a261",
+      "chavePublica": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+    }
+  ],
+  "casos": [
+    {
+      "nome": "integro-ao-vivo",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 16500,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "assinatura": "RK6Z6YI2HbG7BDQuSctvl2AXor2Bxwyw5m-BPPTSK_bVMhNBUw9rSqJuFYrbltWJOQaZ-tMGB9U3QzvtFfiDAA",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "assinatura": "PiJuje2Qp84qplO3VMlVIlmhKr_pHsDiSzi1g1QIQxUfhuN75r22eOOvaMUKIj8-5I7nmMrnLv-z0WoWMax1Dg",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": null,
+      "servidor": {
+        "veredito": "integro",
+        "problemas": []
+      }
+    },
+    {
+      "nome": "integro-selado",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 16500,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "assinatura": "RK6Z6YI2HbG7BDQuSctvl2AXor2Bxwyw5m-BPPTSK_bVMhNBUw9rSqJuFYrbltWJOQaZ-tMGB9U3QzvtFfiDAA",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "assinatura": "PiJuje2Qp84qplO3VMlVIlmhKr_pHsDiSzi1g1QIQxUfhuN75r22eOOvaMUKIj8-5I7nmMrnLv-z0WoWMax1Dg",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 3,
+        "hashFinal": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+        "vencedorPseudonimo": "Licitante #3fa9c1",
+        "valorArremateCentavos": 18000,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "jVFKFaqkHB4w07wKMq2iLrv-cyqUr0qIOtHtDBwDwcPb_yhijGAk45rQthWYEXm3jVxPeOoOD2t9sxHN3t1VCw",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "integro",
+        "problemas": []
+      }
+    },
+    {
+      "nome": "valor-alterado",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 99999,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "assinatura": "RK6Z6YI2HbG7BDQuSctvl2AXor2Bxwyw5m-BPPTSK_bVMhNBUw9rSqJuFYrbltWJOQaZ-tMGB9U3QzvtFfiDAA",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "assinatura": "PiJuje2Qp84qplO3VMlVIlmhKr_pHsDiSzi1g1QIQxUfhuN75r22eOOvaMUKIj8-5I7nmMrnLv-z0WoWMax1Dg",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 3,
+        "hashFinal": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+        "vencedorPseudonimo": "Licitante #3fa9c1",
+        "valorArremateCentavos": 18000,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "jVFKFaqkHB4w07wKMq2iLrv-cyqUr0qIOtHtDBwDwcPb_yhijGAk45rQthWYEXm3jVxPeOoOD2t9sxHN3t1VCw",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "adulterado",
+        "problemas": [
+          {
+            "codigo": "HASH_DIVERGENTE",
+            "seq": 2,
+            "mensagem": "O hash não corresponde aos dados do lance."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "lance-do-meio-apagado",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "assinatura": "PiJuje2Qp84qplO3VMlVIlmhKr_pHsDiSzi1g1QIQxUfhuN75r22eOOvaMUKIj8-5I7nmMrnLv-z0WoWMax1Dg",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 3,
+        "hashFinal": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+        "vencedorPseudonimo": "Licitante #3fa9c1",
+        "valorArremateCentavos": 18000,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "jVFKFaqkHB4w07wKMq2iLrv-cyqUr0qIOtHtDBwDwcPb_yhijGAk45rQthWYEXm3jVxPeOoOD2t9sxHN3t1VCw",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "adulterado",
+        "problemas": [
+          {
+            "codigo": "SEQ_FORA_DE_ORDEM",
+            "seq": 3,
+            "mensagem": "A sequência dos lances não é contígua a partir de 1."
+          },
+          {
+            "codigo": "HASH_ANTERIOR_DIVERGENTE",
+            "seq": 3,
+            "mensagem": "O hash anterior não é o hash do lance anterior."
+          },
+          {
+            "codigo": "SELO_TOTAL_DIVERGENTE",
+            "seq": null,
+            "mensagem": "O total de lances do selo difere da cadeia."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "lance-inserido",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 16500,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "assinatura": "RK6Z6YI2HbG7BDQuSctvl2AXor2Bxwyw5m-BPPTSK_bVMhNBUw9rSqJuFYrbltWJOQaZ-tMGB9U3QzvtFfiDAA",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "assinatura": "PiJuje2Qp84qplO3VMlVIlmhKr_pHsDiSzi1g1QIQxUfhuN75r22eOOvaMUKIj8-5I7nmMrnLv-z0WoWMax1Dg",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 4,
+          "hashAnterior": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 20000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "05b3ed4a53d810acd1680748ff3eb184cc4b1deee4b9ac26faa83c8d41b0f231",
+          "assinatura": "tfhP8eHINv-yoWprtVkh9S7OgrUQvG9znBY5oMTNLZQeIGrmfZjhKG7Sbc1PzkiqWTYI69tWLECHRbEeryy1Cg",
+          "keyId": "39f713d0a644253f"
+        }
+      ],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 3,
+        "hashFinal": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+        "vencedorPseudonimo": "Licitante #3fa9c1",
+        "valorArremateCentavos": 18000,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "jVFKFaqkHB4w07wKMq2iLrv-cyqUr0qIOtHtDBwDwcPb_yhijGAk45rQthWYEXm3jVxPeOoOD2t9sxHN3t1VCw",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "adulterado",
+        "problemas": [
+          {
+            "codigo": "CHAVE_DESCONHECIDA",
+            "seq": 4,
+            "mensagem": "O lance foi assinado com uma chave que não está publicada."
+          },
+          {
+            "codigo": "SELO_TOTAL_DIVERGENTE",
+            "seq": null,
+            "mensagem": "O total de lances do selo difere da cadeia."
+          },
+          {
+            "codigo": "SELO_HASH_FINAL_DIVERGENTE",
+            "seq": null,
+            "mensagem": "O hash final do selo difere do último lance."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "cadeia-recalculada-sem-a-chave",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "f49o2NprZVOTCJRAX8X2OFdWN3hC9FrA-k_8IprMxWB95WYveH50Pw3z5i3kLju1bZmPN14ciOnvf-AOD6ANDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 99999,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "62bf6c2ac6da158f936d65a15173bb0ce6a45976397e1487043095fcf2645aa7",
+          "assinatura": "gWQ0jXs_il_KY9irUkN7V2jf1H6HK0spu66i3X42xkiDlfCOJrgyYlJ0kjtdUHhhN1MAwBTleQdkmM_kWgK6Aw",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 3,
+          "hashAnterior": "62bf6c2ac6da158f936d65a15173bb0ce6a45976397e1487043095fcf2645aa7",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 18000,
+          "criadoEm": "2026-10-27T14:04:12.450Z",
+          "hash": "d069b94fbccd19a7a78b5217fa10c461cafc5a47161a688fe72c91f67dafbe2d",
+          "assinatura": "C2VTh7HWX75VIpyNdsxtCxNtlLjQfSLe3GoFFNZzDsht8EOb2pKxNX7N-izJ0glj1C9qxggqSGEecU8wG_YXAA",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": null,
+      "servidor": {
+        "veredito": "adulterado",
+        "problemas": [
+          {
+            "codigo": "ASSINATURA_INVALIDA",
+            "seq": 1,
+            "mensagem": "A assinatura do lance não confere com a chave publicada."
+          },
+          {
+            "codigo": "ASSINATURA_INVALIDA",
+            "seq": 2,
+            "mensagem": "A assinatura do lance não confere com a chave publicada."
+          },
+          {
+            "codigo": "ASSINATURA_INVALIDA",
+            "seq": 3,
+            "mensagem": "A assinatura do lance não confere com a chave publicada."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "fim-truncado-em-lote-selado",
+      "lances": [
+        {
+          "seq": 1,
+          "hashAnterior": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+          "pseudonimo": "Licitante #3fa9c1",
+          "valorCentavos": 15000,
+          "criadoEm": "2026-10-27T14:03:07.120Z",
+          "hash": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "assinatura": "MOumYMXLSRf1yq3BzD9MT4kPV0kMPUFw4cUEvbCd-u90psSijUKdOoE4nO9hy__a9mAzFP3ygg-RNp5DNRDyDQ",
+          "keyId": "21fe31dfa154a261"
+        },
+        {
+          "seq": 2,
+          "hashAnterior": "af1bac38780142da599db0996414d71a5a5b98ad198b2c0c8f7a1bf55abdd8cb",
+          "pseudonimo": "Licitante #b04e7d",
+          "valorCentavos": 16500,
+          "criadoEm": "2026-10-27T14:03:41.907Z",
+          "hash": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+          "assinatura": "RK6Z6YI2HbG7BDQuSctvl2AXor2Bxwyw5m-BPPTSK_bVMhNBUw9rSqJuFYrbltWJOQaZ-tMGB9U3QzvtFfiDAA",
+          "keyId": "21fe31dfa154a261"
+        }
+      ],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 3,
+        "hashFinal": "499efe2b129c941b29467eb1183f2c1569148766da79cf641b3c603f60c1497b",
+        "vencedorPseudonimo": "Licitante #3fa9c1",
+        "valorArremateCentavos": 18000,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "jVFKFaqkHB4w07wKMq2iLrv-cyqUr0qIOtHtDBwDwcPb_yhijGAk45rQthWYEXm3jVxPeOoOD2t9sxHN3t1VCw",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "adulterado",
+        "problemas": [
+          {
+            "codigo": "SELO_TOTAL_DIVERGENTE",
+            "seq": null,
+            "mensagem": "O total de lances do selo difere da cadeia."
+          },
+          {
+            "codigo": "SELO_HASH_FINAL_DIVERGENTE",
+            "seq": null,
+            "mensagem": "O hash final do selo difere do último lance."
+          }
+        ]
+      }
+    },
+    {
+      "nome": "selado-sem-lances",
+      "lances": [],
+      "selo": {
+        "status": "encerrado",
+        "totalLances": 0,
+        "hashFinal": "82842ba46c36a8e7ea4d91bab2695ec3281f83824f6b9c91af66cbaef0423585",
+        "vencedorPseudonimo": null,
+        "valorArremateCentavos": null,
+        "seladoEm": "2026-10-27T14:10:00.000Z",
+        "assinatura": "hioggLBSlpryeThFGvylWyOReUNcm5Lxdxdr8srDQk-AhvN0vlK4roBCibWC2Jpgg2LI1fSDhAHGuBPThDGfDg",
+        "keyId": "21fe31dfa154a261"
+      },
+      "servidor": {
+        "veredito": "integro",
+        "problemas": []
+      }
+    }
+  ]
+}
