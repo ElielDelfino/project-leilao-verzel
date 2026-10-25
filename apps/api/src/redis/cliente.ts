@@ -6,6 +6,7 @@
 import { createClient } from 'redis';
 
 import { codigoDoErro } from '../logger/falha-sem-detalhes.js';
+import { type ClientesPubSub, criarClientesPubSub } from './clientes-pubsub.js';
 import type { ConexaoDoRedis } from './conexao.js';
 
 /**
@@ -110,8 +111,19 @@ export interface ComandosDoCatalogoNoRedis {
   ): Promise<unknown>;
 }
 
+/** Clientes de publicação e assinatura do adapter do Socket.IO (tarefa 082). */
+export interface ComandosDePubSub {
+  /**
+   * Duplica a conexão duas vezes (pub e sub) e começa a conectar. Os clientes devolvidos nunca
+   * rejeitam: com o Redis fora, publish e subscribe falham em silêncio (só o aviso no log).
+   * Quem chama é dono dos clientes e os encerra com `encerrar`.
+   */
+  duplicarParaPubSub(): ClientesPubSub;
+}
+
 /** O que `criarClienteRedis` devolve e o RedisModule injeta em CLIENTE_REDIS. */
-export interface ClienteRedisComCatalogo extends ClienteRedisDaApi, ComandosDoCatalogoNoRedis {}
+export interface ClienteRedisComCatalogo
+  extends ClienteRedisDaApi, ComandosDoCatalogoNoRedis, ComandosDePubSub {}
 
 function comoInteiro(valor: unknown): number {
   if (typeof valor !== 'number' || !Number.isInteger(valor)) {
@@ -157,15 +169,9 @@ function criarAviso(aoErro: (erro: ErroDoRedis) => void): {
   };
 }
 
-/**
- * Cria o cliente e já começa a conectar, sem esperar: a API sobe com o Redis fora e o
- * /api/health/ready responde 503 até ele voltar (specs/014). Sem fila offline
- * (`disableOfflineQueue`): um comando feito sem conexão pronta rejeita na hora, em vez de esperar
- * na fila; o RedisModule chama `aguardarConexao` no boot para os primeiros comandos não caírem aí.
- */
-export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisComCatalogo {
+function abrirClienteNode(opcoes: OpcoesDoClienteRedis) {
   const { conexao } = opcoes;
-  const cliente = createClient({
+  return createClient({
     socket: {
       host: conexao.host,
       port: conexao.port,
@@ -175,6 +181,19 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisCom
     disableOfflineQueue: true,
     ...(opcoes.nome === undefined ? {} : { name: opcoes.nome }),
   });
+}
+
+/** Cliente node-redis exato que a API cria; o `duplicate()` dele alimenta o adapter do Socket.IO. */
+export type ClienteNodeRedis = ReturnType<typeof abrirClienteNode>;
+
+/**
+ * Cria o cliente e já começa a conectar, sem esperar: a API sobe com o Redis fora e o
+ * /api/health/ready responde 503 até ele voltar (specs/014). Sem fila offline
+ * (`disableOfflineQueue`): um comando feito sem conexão pronta rejeita na hora, em vez de esperar
+ * na fila; o RedisModule chama `aguardarConexao` no boot para os primeiros comandos não caírem aí.
+ */
+export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisComCatalogo {
+  const cliente = abrirClienteNode(opcoes);
   const { avisar, conectou } = criarAviso(opcoes.aoErro);
   let encerrado = false;
   // Sem listener de 'error', o EventEmitter derrubaria o processo.
@@ -242,6 +261,7 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisCom
     ttlRestanteMs: async (chave) => comoInteiro(await convertido(() => cliente.pTTL(chave))),
     executarLua: (script, chaves, argumentos) =>
       convertido(() => cliente.eval(script, { keys: [...chaves], arguments: [...argumentos] })),
+    duplicarParaPubSub: () => criarClientesPubSub(cliente, () => criarAviso(opcoes.aoErro)),
     encerrar: () => {
       encerrado = true;
       cliente.destroy();
