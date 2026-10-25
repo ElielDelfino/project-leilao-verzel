@@ -1,4 +1,4 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, type KeyboardEvent } from 'react';
 import { useSearchParams } from 'react-router';
 
@@ -21,6 +21,8 @@ import {
 } from '../lotes/estadoDaVitrine';
 import { FormularioDeBusca } from '../lotes/FormularioDeBusca';
 import { Paginacao } from '../lotes/Paginacao';
+import { CHAVE_DA_VITRINE } from '../tempo-real/cacheDaVitrine';
+import { useVitrineAoVivo } from '../tempo-real/useVitrineAoVivo';
 
 const TITULO = 'Vitrine';
 const ID_PAINEL = 'painel-da-vitrine';
@@ -55,10 +57,14 @@ export function PaginaVitrine() {
   }
   const mudar = (parcial: Partial<FiltrosDaVitrine>) => ir({ ...filtros, ...parcial, pagina: 1 });
 
+  useVitrineAoVivo();
+
   const consulta = useQuery({
-    queryKey: ['lotes', 'vitrine', escreverFiltros(filtros).toString()],
+    queryKey: [...CHAVE_DA_VITRINE, escreverFiltros(filtros).toString()],
     queryFn: () => listarLotes(filtros),
     retry: false,
+    // Troca de filtro, página ou refetch do tempo real mantém a lista anterior na tela.
+    placeholderData: keepPreviousData,
   });
 
   const total = consulta.data?.meta.total ?? 0;
@@ -231,7 +237,10 @@ function ConteudoDaLista({
       <p aria-live="polite" className="mb-4 text-texto-suave">
         {textoDoTotal(meta.total)}
       </p>
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <ul
+        aria-busy={consulta.isPlaceholderData}
+        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      >
         {lotes.map((lote) => (
           <CartaoDoLote key={lote.id} lote={lote} />
         ))}
