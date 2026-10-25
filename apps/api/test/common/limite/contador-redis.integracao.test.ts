@@ -3,7 +3,7 @@
 // Usa um prefixo próprio sob ratelimit: e apaga só as próprias chaves (SCAN + DEL), nunca FLUSHDB.
 import { randomUUID } from 'node:crypto';
 
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { criarContadorRedis } from '../../../src/common/limite/contador-redis.js';
 import type { ContadorDeJanela } from '../../../src/common/limite/limite-de-tentativas.js';
@@ -58,6 +58,30 @@ describe.skipIf(!redis.disponivel)('criarContadorRedis com Redis real', () => {
     const depois = await contador.incrementar(chave, 60);
 
     expect(depois.ttlS).toBeLessThanOrEqual(5);
+  });
+
+  it('depois de uma queda da conexão, o cliente reconecta e volta a contar', async () => {
+    const nome = `leilao-teste-${randomUUID()}`;
+    const proprio = criarClienteRedis({ conexao: redis.conexao(), aoErro: () => undefined, nome });
+    try {
+      await proprio.aguardarConexao(AbortSignal.timeout(5_000));
+      const chave = `${prefixo}reconexao`;
+      await expect(proprio.incrementarNaJanela(chave, 60)).resolves.toMatchObject({ contagem: 1 });
+
+      // Derruba só a conexão deste cliente (o Redis de dev é compartilhado entre worktrees).
+      const lista = await auxiliar.clientList();
+      const alvo = lista.find((info) => info.name === nome);
+      expect(alvo).toBeDefined();
+      await auxiliar.clientKill({ filter: 'ID', id: Number(alvo?.id) });
+
+      const voltou = await vi.waitFor(() => proprio.incrementarNaJanela(chave, 60), {
+        timeout: 5_000,
+        interval: 50,
+      });
+      expect(voltou.contagem).toBe(2);
+    } finally {
+      await proprio.encerrar();
+    }
   });
 
   it('o reset apaga só as chaves do prefixo do teste', async () => {

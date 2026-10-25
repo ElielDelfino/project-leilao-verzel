@@ -55,6 +55,8 @@ export interface OpcoesDoClienteRedis {
    * última conexão bem-sucedida, para não inundar o log enquanto o Redis está fora.
    */
   readonly aoErro: (erro: ErroDoRedis) => void;
+  /** Nome da conexão no Redis (CLIENT SETNAME); os testes o usam para achar a própria conexão. */
+  readonly nome?: string;
 }
 
 export interface ClienteRedis {
@@ -140,6 +142,7 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaA
     },
     password: conexao.password,
     disableOfflineQueue: true,
+    ...(opcoes.nome === undefined ? {} : { name: opcoes.nome }),
   });
   const { avisar, conectou } = criarAviso(opcoes.aoErro);
   let encerrado = false;
@@ -182,7 +185,7 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaA
       });
     },
     incrementarNaJanela: async (chave, janelaS) => {
-      let respostas: unknown[];
+      let respostas: unknown;
       try {
         respostas = await cliente
           .multi()
@@ -192,6 +195,10 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaA
           .exec();
       } catch (erro: unknown) {
         throw paraErroDoRedis(erro);
+      }
+      // Sem esta conferência, `contagem` poderia virar NaN e `NaN > 5` liberaria a tentativa.
+      if (!Array.isArray(respostas)) {
+        throw new ErroDoRedis('RespostaInesperada', undefined);
       }
       return { contagem: comoInteiro(respostas[0]), ttlS: comoInteiro(respostas[2]) };
     },
