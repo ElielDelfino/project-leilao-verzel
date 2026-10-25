@@ -15,6 +15,7 @@ import {
   formatarTempo,
   lerArgumentos,
   lerPacotes,
+  mudouContrato,
   pacotesAfetados,
   pacotesSemTypecheck,
   testesExplicitos,
@@ -659,4 +660,42 @@ describe('baseDaComparacao', () => {
       assert.match(base.aviso, /main .* e origin\/main .* divergem; usando o mais antigo/);
     });
   }
+});
+
+// ---------------------------------------------------------------- contratos no quick (tarefa 046)
+describe('mudouContrato', () => {
+  for (const arquivo of [
+    'apps/api/openapi.yaml',
+    'eventbus/socketio/asyncapi.yaml',
+    'eventbus/x/y/z.json',
+    'packages/contracts/src/gerado/openapi.ts',
+    'packages/contracts/package.json',
+    'redocly.yaml',
+    '.redocly.lint-ignore.yaml',
+    'scripts/contracts-gen.mjs',
+    'scripts/contracts-lint.mjs',
+  ]) {
+    it(`${arquivo} liga contracts:lint e contracts:check`, () => {
+      assert.equal(mudouContrato(['README.md', arquivo]), true);
+    });
+  }
+
+  for (const arquivo of [
+    'apps/api/src/app.ts',
+    'apps/api/openapi.yaml.bak',
+    'eventbus-x/a.yaml',
+    'packages/contracts-extra/a.ts',
+    'scripts/verify.mjs',
+    'scripts/contracts.md',
+    'docs/redocly.yaml',
+    'sub/scripts/contracts-gen.mjs',
+  ]) {
+    it(`${arquivo} não liga os contratos`, () => {
+      assert.equal(mudouContrato([arquivo]), false);
+    });
+  }
+
+  it('sem alterações, não liga', () => {
+    assert.equal(mudouContrato([]), false);
+  });
 });

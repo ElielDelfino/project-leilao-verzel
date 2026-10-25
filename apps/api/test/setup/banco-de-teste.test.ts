@@ -2,7 +2,7 @@
 // recebe as migrations e só é refeito quando o hash da pasta muda (hash no COMMENT ON DATABASE);
 // o banco de cada worktree é recriado a cada execução com CREATE DATABASE ... TEMPLATE.
 //
-// Os testes usam nomes próprios (leilao_t011_<hex>) e uma cópia da pasta de migrations, então não
+// Os testes usam nomes próprios (leilao_test_t011_<hex>) e uma cópia da pasta de migrations, então não
 // mexem no leilao_test_tpl nem no leilao_test_<sufixo> de quem estiver rodando o verify. O banco
 // de administração é o `postgres`: dentro do verify, POSTGRES_DB já aponta para o banco do
 // worktree, que a guarda do preparo recusa.
@@ -22,6 +22,7 @@ import {
   BANCO_MODELO,
   CHAVE_DO_LOCK,
   caminhoDoWorktree,
+  clonarDoModelo,
   hashDasMigrations,
   nomeDoBancoDoWorktree,
   prepararBancoDeTeste,
@@ -31,12 +32,12 @@ import {
 
 const AMBIENTE = ambienteDeTeste(process.env);
 const SUFIXO = randomBytes(5).toString('hex');
-const MODELO = `leilao_t011_${SUFIXO}_tpl`;
-const TESTE = `leilao_t011_${SUFIXO}`;
+const MODELO = `leilao_test_t011_${SUFIXO}_tpl`;
+const TESTE = `leilao_test_t011_${SUFIXO}`;
 /** Banco de outro "worktree" (nome próprio), que o preparo de TESTE nunca pode apagar. */
-const OUTRO = `leilao_t011_${SUFIXO}_b`;
+const OUTRO = `leilao_test_t011_${SUFIXO}_b`;
 /** Banco descartável só para segurar o advisory lock "em outro banco". */
-const BANCO_DO_LOCK = `leilao_t011_${SUFIXO}_lk`;
+const BANCO_DO_LOCK = `leilao_test_t011_${SUFIXO}_lk`;
 const BANCO_DE_ADMINISTRACAO = 'postgres';
 const HASH_SHA256 = /^[0-9a-f]{64}$/;
 
@@ -266,6 +267,104 @@ describe('prepararBancoDeTeste (sem banco)', () => {
       'POSTGRES_DB não pode ser um banco de teste',
     );
   });
+
+  describe('opções que levariam a um DROP perigoso (recusadas antes de conectar)', () => {
+    it.each(['leilao', 'postgres', 'leilao_testado', 'outro_leilao_test_x'])(
+      'recusa teste=%s (precisa começar com leilao_test_)',
+      async (teste) => {
+        await expect(
+          prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'), { teste }),
+        ).rejects.toThrow('banco de teste: "teste" precisa começar com leilao_test_');
+      },
+    );
+
+    it.each(['leilao', 'postgres', 'template1', 'leilao_testado'])(
+      'recusa modelo=%s (precisa começar com leilao_test_)',
+      async (modelo) => {
+        await expect(
+          prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'), { modelo }),
+        ).rejects.toThrow('banco de teste: "modelo" precisa começar com leilao_test_');
+      },
+    );
+
+    it('recusa teste igual ao modelo (apagaria o próprio modelo)', async () => {
+      await expect(
+        prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'), {
+          teste: 'leilao_test_igual',
+          modelo: 'leilao_test_igual',
+        }),
+      ).rejects.toThrow('banco de teste: "teste" e "modelo" precisam ser diferentes');
+    });
+
+    it('o padrão (modelo leilao_test_tpl e banco do worktree) passa pela validação', async () => {
+      await expect(prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'))).rejects.not.toThrow(
+        /precisa começar|precisam ser diferentes/,
+      );
+    });
+
+    it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])(
+      'recusa esperaDoLockMs=%s (0 viraria espera infinita)',
+      async (esperaDoLockMs) => {
+        await expect(
+          prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'), { esperaDoLockMs }),
+        ).rejects.toThrow('banco de teste: esperaDoLockMs precisa ser um inteiro >= 1');
+      },
+    );
+  });
+
+  describe('clonarDoModelo (retry do 55006 por autovacuum)', () => {
+    const erro55006 = Object.assign(new Error('source database is being accessed'), {
+      code: '55006',
+    });
+
+    function clienteFalso(falhas: readonly unknown[]): {
+      readonly query: (texto: string) => Promise<unknown>;
+      readonly chamadas: string[];
+    } {
+      const chamadas: string[] = [];
+      const restantes = [...falhas];
+      return {
+        chamadas,
+        query: async (texto: string) => {
+          chamadas.push(texto);
+          // Só o CREATE falha: o DROP e os REVOKE/GRANT passam.
+          const falha = texto.startsWith('create database') ? restantes.shift() : undefined;
+          if (falha !== undefined) {
+            throw falha;
+          }
+          return { rows: [] };
+        },
+      };
+    }
+
+    it('repete só o CREATE DATABASE ... TEMPLATE enquanto der 55006 e termina quando passa', async () => {
+      const cliente = clienteFalso([erro55006, erro55006]);
+
+      await clonarDoModelo(cliente, 'leilao_test_a', 'leilao_test_m', 5_000);
+
+      const creates = cliente.chamadas.filter((c) => c.startsWith('create database'));
+      expect(creates).toHaveLength(3);
+      expect(cliente.chamadas.filter((c) => c.startsWith('drop database'))).toHaveLength(1);
+    });
+
+    it('depois do prazo desiste com o 55006 como causa e a mensagem do modelo', async () => {
+      const cliente = clienteFalso(Array.from({ length: 10_000 }, () => erro55006));
+
+      await expect(clonarDoModelo(cliente, 'leilao_test_a', 'leilao_test_m', 100)).rejects.toThrow(
+        'leilao_test_m ainda tem conexões',
+      );
+    });
+
+    it('outro erro não é repetido', async () => {
+      const outro = Object.assign(new Error('boom'), { code: '42501' });
+      const cliente = clienteFalso([outro]);
+
+      await expect(clonarDoModelo(cliente, 'leilao_test_a', 'leilao_test_m', 5_000)).rejects.toBe(
+        outro,
+      );
+      expect(cliente.chamadas.filter((c) => c.startsWith('create database'))).toHaveLength(1);
+    });
+  });
 });
 
 describe.skipIf(!AMBIENTE.disponivel)(
@@ -329,6 +428,26 @@ describe.skipIf(!AMBIENTE.disponivel)(
       }
 
       expect(Math.min(...medidas)).toBeLessThan(LIMITE_PARA_RECRIAR_MS);
+    });
+
+    it('o clone repete os privilégios do banco: sem CONNECT/TEMP para PUBLIC, CONNECT para leilao_api', async () => {
+      // O papel leilao_api vem da migration 0001, aplicada no modelo.
+      await prepararBancoDeTeste(admin(), opcoes);
+
+      const privilegios = await comCliente(admin(), async (c) => {
+        const { rows } = await c.query<{ grantee: string; privilegio: string }>(
+          `select case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+                  a.privilege_type as privilegio
+             from pg_database d, aclexplode(d.datacl) a
+            where d.datname = $1
+              and a.grantee in (0, (select oid from pg_roles where rolname = 'leilao_api'))
+            order by 1, 2`,
+          [TESTE],
+        );
+        return rows;
+      });
+
+      expect(privilegios).toEqual([{ grantee: 'leilao_api', privilegio: 'CONNECT' }]);
     });
 
     it('com uma migration nova: refaz o modelo, aplica a nova e troca o hash', async () => {

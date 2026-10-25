@@ -30,6 +30,11 @@ export const ESPERA_PADRAO_DO_LOCK_MS = 60_000;
 export const ESPERA_PADRAO_DO_MODELO_MS = 15_000;
 const INTERVALO_DO_MODELO_MS = 50;
 const LOCK_INDISPONIVEL = '55P03';
+/** SQLSTATE de CREATE DATABASE ... TEMPLATE com o modelo em uso ("being accessed by other users"). */
+const MODELO_EM_USO = '55006';
+/** Papel da API (migration 0001): ganha CONNECT nos bancos de teste, como em dev e produção. */
+const PAPEL_DA_API = 'leilao_api';
+const PREFIXO_COM_SEPARADOR = `${PREFIXO_DOS_BANCOS_DE_TESTE}_`;
 /** Nomes que dispensam aspas no Postgres (até 63 bytes). */
 const NOME_DE_BANCO = /^[a-z_][a-z0-9_]{0,62}$/;
 
@@ -105,6 +110,23 @@ function validarNome(nome: string): string {
   return nome;
 }
 
+/** Os dois nomes são apagados/recriados: precisam ser de teste e distintos (antes de qualquer DROP). */
+function validarNomesDeTeste(modelo: string, teste: string): void {
+  for (const [opcao, nome] of [
+    ['modelo', modelo],
+    ['teste', teste],
+  ] as const) {
+    if (!nome.startsWith(PREFIXO_COM_SEPARADOR)) {
+      throw new Error(
+        `banco de teste: "${opcao}" precisa começar com ${PREFIXO_COM_SEPARADOR} (recebi ${JSON.stringify(nome)})`,
+      );
+    }
+  }
+  if (modelo === teste) {
+    throw new Error('banco de teste: "teste" e "modelo" precisam ser diferentes');
+  }
+}
+
 function esperaEmTexto(ms: number): string {
   return ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`;
 }
@@ -167,6 +189,47 @@ async function esperarModeloSemConexoes(
   }
 }
 
+/**
+ * Recria `teste` a partir de `modelo`. O autovacuum ignora `datallowconn` e pode entrar no modelo
+ * entre a contagem de conexões e o CREATE: só o CREATE é repetido em 55006, até `esperaMs`.
+ * O `cliente` só precisa de `query`.
+ */
+export async function clonarDoModelo(
+  cliente: { query: (texto: string) => Promise<unknown> },
+  teste: string,
+  modelo: string,
+  esperaMs: number,
+): Promise<void> {
+  const nomeTeste = pg.escapeIdentifier(teste);
+  const nomeModelo = pg.escapeIdentifier(modelo);
+  await cliente.query(`drop database if exists ${nomeTeste} with (force)`);
+  const limite = performance.now() + esperaMs;
+  for (;;) {
+    try {
+      await cliente.query(`create database ${nomeTeste} template ${nomeModelo}`);
+      break;
+    } catch (erro) {
+      if ((erro as { code?: unknown }).code !== MODELO_EM_USO) {
+        throw erro;
+      }
+      if (performance.now() >= limite) {
+        throw new Error(
+          `banco de teste: ${modelo} ainda tem conexões depois de ${esperaEmTexto(esperaMs)} ` +
+            '(autovacuum, psql?); tente de novo',
+          { cause: erro },
+        );
+      }
+      await dormir(INTERVALO_DO_MODELO_MS);
+    }
+  }
+  // O CREATE ... TEMPLATE não copia o datacl: repete os privilégios da migration 0001.
+  await cliente.query(`revoke temporary on database ${nomeTeste} from public`);
+  await cliente.query(`revoke connect on database ${nomeTeste} from public`);
+  await cliente.query(
+    `grant connect on database ${nomeTeste} to ${pg.escapeIdentifier(PAPEL_DA_API)}`,
+  );
+}
+
 async function tomarOLock(cliente: pg.Client, esperaMs: number, modelo: string): Promise<void> {
   await cliente.query("select set_config('lock_timeout', $1, false)", [
     String(Math.trunc(esperaMs)),
@@ -204,7 +267,12 @@ export async function prepararBancoDeTeste(
   const pasta = opcoes.pasta ?? PASTA_DAS_MIGRATIONS;
   const modelo = validarNome(opcoes.modelo ?? BANCO_MODELO);
   const teste = validarNome(opcoes.teste ?? nomeDoBancoDoWorktree());
+  validarNomesDeTeste(modelo, teste);
   const esperaDoLock = opcoes.esperaDoLockMs ?? ESPERA_PADRAO_DO_LOCK_MS;
+  // lock_timeout = 0 desliga o timeout: o preparo esperaria para sempre.
+  if (!Number.isInteger(esperaDoLock) || esperaDoLock < 1) {
+    throw new Error('banco de teste: esperaDoLockMs precisa ser um inteiro >= 1');
+  }
   const esperaDoModelo = opcoes.esperaDoModeloMs ?? ESPERA_PADRAO_DO_MODELO_MS;
 
   const cliente = new pg.Client(admin);
@@ -214,7 +282,8 @@ export async function prepararBancoDeTeste(
   });
   await cliente.connect();
   try {
-    // Fechar a sessão libera o lock, inclusive se algo abaixo falhar.
+    // Sem pg_advisory_unlock: o lock é de sessão e o cliente.end() do finally o libera, inclusive
+    // se algo abaixo falhar.
     await tomarOLock(cliente, esperaDoLock, modelo);
     // O hash depois do lock: quem esperava pode ter outra visão da pasta de migrations.
     const hash = hashDasMigrations(pasta);
@@ -224,16 +293,14 @@ export async function prepararBancoDeTeste(
     }
     await esperarModeloSemConexoes(cliente, modelo, esperaDoModelo);
     const inicio = performance.now();
-    await cliente.query(`drop database if exists ${pg.escapeIdentifier(teste)} with (force)`);
-    await cliente.query(
-      `create database ${pg.escapeIdentifier(teste)} template ${pg.escapeIdentifier(modelo)}`,
-    );
+    await clonarDoModelo(cliente, teste, modelo, esperaDoModelo);
     const msParaRecriar = performance.now() - inicio;
     if (erroDaConexao !== undefined) {
       throw erroDaConexao;
     }
     return { modeloRefeito, hash, banco: teste, msParaRecriar };
   } finally {
-    await cliente.end();
+    // Um erro ao fechar não pode mascarar o erro original (conexão já caída, por exemplo).
+    await cliente.end().catch(() => undefined);
   }
 }
