@@ -48,6 +48,47 @@ describe('ServicoDeProntidao', () => {
     expect(avisos).toHaveBeenCalledWith(expect.stringContaining('redis'));
   });
 
+  // specs/014 §Observabilidade: o motivo vai ao log "sem host nem senha" (revisão da 018, MEDIUM).
+  it('o aviso traz o nome da dependência e o código do erro, nunca a mensagem do driver', async () => {
+    const recusada = Object.assign(new Error('connect ECONNREFUSED 10.1.2.3:5432 senha=abc'), {
+      code: 'ECONNREFUSED',
+    });
+    const servico = new ServicoDeProntidao([
+      { nome: 'postgres', verificar: () => Promise.reject(recusada) },
+    ]);
+
+    await servico.verificar();
+
+    const aviso = String(avisos.mock.calls[0]?.[0]);
+    expect(aviso).toContain('postgres');
+    expect(aviso).toContain('ECONNREFUSED');
+    expect(aviso).not.toContain('10.1.2.3');
+    expect(aviso).not.toContain('5432');
+    expect(aviso).not.toContain('senha');
+  });
+
+  it('o aviso usa o `codigo` dos erros convertidos (ErroDoBanco) e ignora códigos fora do formato', async () => {
+    const convertido = Object.assign(new Error('Erro do banco de dados (código 28P01)'), {
+      name: 'ErroDoBanco',
+      codigo: '28P01',
+    });
+    const codigoEstranho = Object.assign(new Error('x'), { code: 'host 10.1.2.3' });
+    const servico = new ServicoDeProntidao([
+      { nome: 'postgres', verificar: () => Promise.reject(convertido) },
+      { nome: 'redis', verificar: () => Promise.reject(codigoEstranho) },
+      { nome: 'outra', verificar: () => Promise.reject('texto com senha') },
+    ]);
+
+    await servico.verificar();
+
+    const avisosEmTexto = avisos.mock.calls.map((chamada) => String(chamada[0]));
+    expect(avisosEmTexto[0]).toContain('ErroDoBanco');
+    expect(avisosEmTexto[0]).toContain('28P01');
+    expect(avisosEmTexto[1]).toContain('redis');
+    expect(avisosEmTexto[1]).not.toContain('10.1.2.3');
+    expect(avisosEmTexto[2]).not.toContain('senha');
+  });
+
   it('lista todas as verificações que falharam', async () => {
     const servico = new ServicoDeProntidao([falha('postgres'), falha('redis')]);
 

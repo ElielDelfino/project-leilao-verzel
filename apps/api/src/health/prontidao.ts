@@ -1,6 +1,8 @@
 // Prontidão (GET /api/health/ready): Postgres e Redis respondendo (specs/014 §Observabilidade).
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { descreverFalhaSemDetalhes } from '../logger/falha-sem-detalhes.js';
+
 /** Uma dependência que precisa responder para a API estar pronta (ex.: postgres, redis). */
 export interface VerificacaoDeProntidao {
   readonly nome: string;
@@ -25,10 +27,6 @@ export interface ResultadoDaProntidao {
 
 class TempoEsgotado extends Error {
   override readonly name = 'TempoEsgotado';
-}
-
-function descreverMotivo(motivo: unknown): string {
-  return motivo instanceof Error ? `${motivo.name}: ${motivo.message}` : 'motivo desconhecido';
 }
 
 /** Chama a verificação já com o sinal; um `throw` síncrono vira promessa rejeitada. */
@@ -94,7 +92,7 @@ export class ServicoDeProntidao {
         return [];
       }
       this.logger.warn(
-        `verificação de prontidão falhou: ${verificacao.nome} (${descreverMotivo(resultado.reason)})`,
+        `verificação de prontidão falhou: ${verificacao.nome} (${descreverFalhaSemDetalhes(resultado.reason)})`,
       );
       return [verificacao.nome];
     });

@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { ErroDeConfiguracao } from '../src/config/env.js';
 import { criarApi, descreverFalhaNoBoot } from '../src/servidor.js';
+import { ENV_DE_TESTE } from './helpers/app-de-teste.js';
 import { capturarLogs, UUID } from './helpers/captura-de-logs.js';
+
+const ENV_INFO = { ...ENV_DE_TESTE, LOG_LEVEL: 'info' } as const;
 
 // Caminho de produção (o mesmo de main.ts): NestFactory + adaptador Fastify + LoggerNestPino.
 describe('criarApi (caminho de produção do main.ts)', () => {
@@ -18,7 +21,7 @@ describe('criarApi (caminho de produção do main.ts)', () => {
   it('os logs de boot do Nest saem em JSON pelo Pino, com contexto', async () => {
     const { destino, linhas } = capturarLogs();
 
-    app = await criarApi({ API_PORT: 13000, LOG_LEVEL: 'info' }, destino);
+    app = await criarApi(ENV_INFO, destino);
     await app.init();
 
     expect(linhas).toContainEqual(
@@ -34,7 +37,7 @@ describe('criarApi (caminho de produção do main.ts)', () => {
 
   it('um Logger do Nest criado por um módulo escreve JSON no mesmo destino', async () => {
     const { destino, linhas } = capturarLogs();
-    app = await criarApi({ API_PORT: 13000, LOG_LEVEL: 'info' }, destino);
+    app = await criarApi(ENV_INFO, destino);
     await app.init();
 
     new Logger('ModuloQualquer').warn('aviso de um módulo');
@@ -46,7 +49,7 @@ describe('criarApi (caminho de produção do main.ts)', () => {
 
   it('serve as rotas sob /api com o filtro global e requestId nos logs', async () => {
     const { destino, linhas } = capturarLogs();
-    app = await criarApi({ API_PORT: 13000, LOG_LEVEL: 'info' }, destino);
+    app = await criarApi(ENV_INFO, destino);
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
 
@@ -54,8 +57,17 @@ describe('criarApi (caminho de produção do main.ts)', () => {
     const pronta = await app.inject({ method: 'GET', url: '/api/health/ready' });
 
     expect(viva.statusCode).toBe(200);
+    // ENV_DE_TESTE aponta Postgres e Redis para a porta 1: os clientes reais recebem ECONNREFUSED.
     expect(pronta.statusCode).toBe(503);
     expect(pronta.json()).toMatchObject({ sucesso: false, erro: { codigo: 'INDISPONIVEL' } });
+    const avisos = linhas.filter((linha) => String(linha.msg).includes('prontidão falhou'));
+    expect(avisos.map((linha) => linha.msg)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('postgres'),
+        expect.stringContaining('redis'),
+      ]),
+    );
+    expect(JSON.stringify(linhas)).not.toContain('127.0.0.1');
     expect(
       linhas.filter((linha) => 'requestId' in linha).every((l) => UUID.test(String(l.requestId))),
     ).toBe(true);

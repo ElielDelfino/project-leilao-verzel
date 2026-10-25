@@ -335,4 +335,117 @@ describe('serializador err (sem PII de drivers)', () => {
     expect(serializarErro({ detail: PII, code: 'X' })).toEqual({ code: 'X' });
     expect(serializarErro('texto')).toBe('texto');
   });
+
+  // Revisão de segurança do ciclo 1 da tarefa 022 (LOW), pedida na tarefa 017.
+  it('descarta where e internalQuery (pg), que podem repetir valores da consulta', () => {
+    const erro = Object.assign(erroDeDriver(), {
+      where: `SQL statement "insert into users values ('${PII}')"`,
+      internalQuery: `select '${PII}'`,
+      severity: 'ERROR',
+      table: 'users',
+    });
+
+    const serializado = serializarErro(erro);
+
+    expect(serializado).toMatchObject({ code: '23505', severity: 'ERROR', table: 'users' });
+    expect(serializado).not.toHaveProperty('where');
+    expect(serializado).not.toHaveProperty('internalQuery');
+    expect(JSON.stringify(serializado)).not.toContain(PII);
+  });
+
+  it('TypedArray com chave própria extra passa pelo filtro (o JSON serializaria a chave)', () => {
+    const numeros = Object.assign(new Uint8Array([1, 2]), { detail: PII, rotulo: 'ok' });
+
+    const serializado = JSON.stringify(serializarErro(Object.assign(new Error('x'), { numeros })));
+
+    expect(serializado).not.toContain(PII);
+    expect(serializado).toContain('"numeros":{"0":1,"1":2,"rotulo":"ok"}');
+  });
+
+  it('Date e Buffer com toJSON próprio passam pelo filtro', () => {
+    const quando = Object.assign(new Date('2026-10-24T20:00:00.000Z'), {
+      toJSON: () => ({ detail: PII, quando: 'ontem' }),
+    });
+    const bytes = Object.assign(Buffer.from('ab'), { toJSON: () => ({ params: [PII], n: 2 }) });
+
+    const serializado = JSON.stringify(
+      serializarErro(Object.assign(new Error('x'), { quando, bytes })),
+    );
+
+    expect(serializado).not.toContain(PII);
+    expect(serializado).toContain('"quando":{"quando":"ontem"}');
+    expect(serializado).toContain('"bytes":{"n":2}');
+  });
+
+  it('subclasse de Date com chave própria não é tratada como Date nativa', () => {
+    class Momento extends Date {
+      override toJSON(): string {
+        return 'momento';
+      }
+    }
+    const quando = Object.assign(new Momento(0), { detail: PII });
+
+    const serializado = JSON.stringify(serializarErro(Object.assign(new Error('x'), { quando })));
+
+    expect(serializado).not.toContain(PII);
+    expect(serializado).toContain('"quando":"momento"');
+  });
+
+  it('getter que lança vira "[erro ao ler]" sem perder os outros campos', () => {
+    const contexto = { tabela: 'users' };
+    Object.defineProperty(contexto, 'quebrado', {
+      enumerable: true,
+      get: () => {
+        throw new Error('getter quebrado');
+      },
+    });
+    const lista = [1];
+    Object.defineProperty(lista, 1, {
+      enumerable: true,
+      get: () => {
+        throw new Error('getter quebrado');
+      },
+    });
+
+    const serializado = serializarErro(Object.assign(new Error('x'), { contexto, lista }));
+
+    expect(serializado).toMatchObject({
+      message: 'x',
+      contexto: { tabela: 'users', quebrado: '[erro ao ler]' },
+      lista: [1, '[erro ao ler]'],
+    });
+  });
+
+  it('getter que lança no próprio erro não derruba o log', () => {
+    const { destino, linhas } = capturarLogs();
+    const erro = Object.assign(new Error('mensagem do erro'), { code: 'X' });
+    Object.defineProperty(erro, 'quebrado', {
+      enumerable: true,
+      get: () => {
+        throw new Error('getter quebrado');
+      },
+    });
+
+    expect(() => criarLogger('info', destino).error({ err: erro }, 'falhou')).not.toThrow();
+    expect(linhas[0]?.err).toMatchObject({
+      type: 'Error',
+      message: 'mensagem do erro',
+      code: 'X',
+      quebrado: '[erro ao ler]',
+    });
+  });
+
+  it('toJSON acessado por getter que lança não derruba o log', () => {
+    const objeto = {};
+    Object.defineProperty(objeto, 'toJSON', {
+      enumerable: false,
+      get: () => {
+        throw new Error('getter quebrado');
+      },
+    });
+
+    expect(serializarErro(Object.assign(new Error('x'), { objeto }))).toMatchObject({
+      objeto: '[erro ao ler]',
+    });
+  });
 });
