@@ -40,6 +40,9 @@ const TAMANHO_MAXIMO_DO_PACOTE_B = 4_096;
 interface DadosDoSocket {
   usuario?: UsuarioDaSessao;
   limiteDeEventos?: LimiteDeEventos;
+  limiteDeEntradas?: LimiteDeEventos;
+  /** Cauda da fila de `entrar_lote`/`sair_lote` de cada lote deste socket. */
+  filasPorSala?: Map<string, Promise<unknown>>;
 }
 
 type SocketDoLeilao = Socket<never, never, never, DadosDoSocket>;
@@ -87,6 +90,10 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       // Reinicializa o adapter de todos os namespaces já criados.
       namespace.server.adapter(this.adapterRedis.fabrica);
     }
+    // Origem checada pelo engine, antes de aceitar a conexão (o middleware abaixo fica de reforço).
+    namespace.server.engine.opts.allowRequest = (requisicao, resposta) => {
+      resposta(null, requisicao.headers.origin === this.env.WEB_ORIGIN);
+    };
     this.difusao.iniciar(namespace);
     namespace.use((socket, proximo) => {
       void this.admitir(socket as SocketDoLeilao, proximo);
@@ -114,7 +121,11 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
     @ConnectedSocket() socket: SocketDoLeilao,
     @MessageBody() payload: unknown,
   ): Promise<AckDeEntrada> {
-    if (!this.eventoPermitido(socket, 'entrar_lote')) {
+    const entradas = socket.data.limiteDeEntradas;
+    const dentroDoLimite =
+      this.eventoPermitido(socket, 'entrar_lote') &&
+      (entradas === undefined || entradas.permitir(performance.now()));
+    if (!dentroDoLimite) {
       return erroDeAck('INDISPONIVEL', 'Muitas solicitações em pouco tempo. Aguarde um instante.');
     }
     const loteId = lerLoteRef(payload);
@@ -122,6 +133,37 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       return erroDeAck('DADOS_INVALIDOS', 'Informe o loteId (UUID) e nenhum outro campo.');
     }
     const sala = salaDoLote(loteId);
+    return this.naFila(socket, sala, () => this.entrarNaSala(socket, loteId, sala));
+  }
+
+  /**
+   * Serializa as operações de um socket sobre o mesmo lote (entrar e sair não se intercalam). A
+   * fila nunca rejeita: o erro da operação vai para quem a chamou, não para a próxima da fila.
+   */
+  private naFila<T>(socket: SocketDoLeilao, sala: string, operacao: () => Promise<T>): Promise<T> {
+    const filas = socket.data.filasPorSala ?? new Map<string, Promise<unknown>>();
+    socket.data.filasPorSala = filas;
+    const anterior = filas.get(sala) ?? Promise.resolve();
+    const atual = anterior.then(operacao);
+    const cauda = atual.then(
+      () => undefined,
+      () => undefined,
+    );
+    filas.set(sala, cauda);
+    void cauda.then(() => {
+      if (filas.get(sala) === cauda) filas.delete(sala);
+    });
+    return atual;
+  }
+
+  private async entrarNaSala(
+    socket: SocketDoLeilao,
+    loteId: string,
+    sala: string,
+  ): Promise<AckDeEntrada> {
+    if (!socket.connected) {
+      return erroDeAck('INDISPONIVEL', 'Não foi possível entrar na sala agora. Tente novamente.');
+    }
     const jaEstaNaSala = socket.rooms.has(sala);
     try {
       // Sem `await` entre as contagens e o join: entradas simultâneas não furam os limites.
@@ -139,6 +181,11 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       if (estado === null) {
         await this.desfazerEntrada(socket, sala, jaEstaNaSala);
         return erroDeAck('NAO_ENCONTRADO', 'Lote não encontrado.');
+      }
+      // O cliente pode ter saído (ou desconectado) durante o `await`: sucesso só com o socket no room.
+      if (!socket.connected || !socket.rooms.has(sala)) {
+        await this.desfazerEntrada(socket, sala, jaEstaNaSala);
+        return erroDeAck('INDISPONIVEL', 'Não foi possível entrar na sala agora. Tente novamente.');
       }
       return { sucesso: true, estado };
     } catch (erro: unknown) {
@@ -171,7 +218,8 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       this.logger.warn('sair_lote ignorado: payload inválido');
       return;
     }
-    await this.sairDaSala(socket, salaDoLote(loteId), 'sair_lote');
+    const sala = salaDoLote(loteId);
+    await this.naFila(socket, sala, () => this.sairDaSala(socket, sala, 'sair_lote'));
   }
 
   @SubscribeMessage('entrar_vitrine')
@@ -269,6 +317,7 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       return;
     }
     socket.data.limiteDeEventos = new LimiteDeEventos(this.limites.eventosPorJanela);
+    socket.data.limiteDeEntradas = new LimiteDeEventos(this.limites.entradasPorJanela);
     try {
       const usuario = await this.autenticacao.autenticarCookie(socket.handshake.headers.cookie);
       if (usuario !== undefined) {

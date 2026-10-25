@@ -111,6 +111,31 @@ describe('PublicadorDeEventos', () => {
     );
   });
 
+  it('evento privado sem destinatário não compila; público com destinatário também não', () => {
+    const saldo = { totalCentavos: 1, comprometidoCentavos: 0, disponivelCentavos: 1 };
+    // @ts-expect-error saldo_atualizado é privado: exige usuarioId
+    const semDestinatario: EventoDeDominio = { tipo: 'saldo_atualizado', payload: saldo };
+    // @ts-expect-error lote_iniciado é público: não tem destinatário
+    const publicoComDestinatario: EventoDeDominio = {
+      tipo: 'lote_iniciado',
+      payload: { loteId: LOTE_ID },
+      usuarioId: USUARIO_ID,
+    };
+    const valido: EventoDeDominio = {
+      tipo: 'saldo_atualizado',
+      payload: saldo,
+      usuarioId: USUARIO_ID,
+    };
+
+    // O teste é de tipo: quem protege são os `@ts-expect-error` acima (o typecheck falha se algum
+    // deixar de ser erro). Em runtime só confirmamos os tipos dos objetos construídos.
+    expect([semDestinatario.tipo, publicoComDestinatario.tipo, valido.tipo]).toEqual([
+      'saldo_atualizado',
+      'lote_iniciado',
+      'saldo_atualizado',
+    ]);
+  });
+
   it('assinante de um argumento só continua recebendo o payload', () => {
     const { publicador } = criar();
     const recebidos: unknown[] = [];

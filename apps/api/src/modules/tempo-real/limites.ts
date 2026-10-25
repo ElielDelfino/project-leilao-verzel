@@ -5,6 +5,8 @@
 export const MAXIMO_DE_SALAS_DE_LOTE_POR_SOCKET = 10;
 /** Quantos eventos do cliente um socket pode mandar por janela. */
 export const MAXIMO_DE_EVENTOS_POR_JANELA = 20;
+/** Quantos `entrar_lote` (cada um monta o estado no banco) um socket pode mandar por janela. */
+export const MAXIMO_DE_ENTRADAS_NO_LOTE_POR_JANELA = 5;
 /** Tamanho da janela do limite de eventos. */
 export const JANELA_DE_EVENTOS_MS = 1_000;
 
@@ -13,6 +15,8 @@ export interface LimitesDoTempoReal {
   readonly total: number;
   readonly salasDeLotePorSocket: number;
   readonly eventosPorJanela: number;
+  /** `entrar_lote` por janela e por socket (os testes ajustam por spread de `LIMITES_PADRAO`). */
+  readonly entradasPorJanela: number;
 }
 
 export const LIMITES_PADRAO: LimitesDoTempoReal = Object.freeze({
@@ -20,6 +24,7 @@ export const LIMITES_PADRAO: LimitesDoTempoReal = Object.freeze({
   total: 200,
   salasDeLotePorSocket: MAXIMO_DE_SALAS_DE_LOTE_POR_SOCKET,
   eventosPorJanela: MAXIMO_DE_EVENTOS_POR_JANELA,
+  entradasPorJanela: MAXIMO_DE_ENTRADAS_NO_LOTE_POR_JANELA,
 });
 
 /** Token de injeção dos limites (os testes trocam por valores pequenos). */
