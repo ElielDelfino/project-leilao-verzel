@@ -21,6 +21,7 @@
     "db:generate": "node --env-file-if-exists=.env --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs generate --config apps/api/drizzle.config.ts",
     "db:migrate": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import ./apps/api/src/db/resolver-ts.mjs apps/api/src/db/migrate.ts",
     "db:seed": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import ./apps/api/src/db/resolver-ts.mjs apps/api/src/db/seed.ts",
+    "db:sync-password": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/db-sync-password.mjs",
     "infra:up": "docker compose --env-file .env --env-file .env.local up -d",
     "keys:generate": "node scripts/keys-generate.mjs",
     "test:scripts": "node --test \"scripts/*.test.mjs\""

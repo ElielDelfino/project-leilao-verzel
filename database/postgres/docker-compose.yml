@@ -21,14 +21,18 @@ services:
       - /run:size=8m
       - /var/run/postgresql:size=8m
       - /tmp:size=16m
-    # Root só no entrypoint: ler o segredo (dono no host, 600: DAC_OVERRIDE), dar o PGDATA ao
-    # usuário postgres (CHOWN) e trocar de usuário com gosu (SETUID, SETGID). Sem FOWNER e sem KILL:
-    # init, reinício e parada testados sem eles. O postgres roda sem capabilities.
+    # Root só no entrypoint: ler o segredo (dono no host, 600) e percorrer o PGDATA (700, dono
+    # postgres) só para leitura (DAC_READ_SEARCH, como no Redis; sem DAC_OVERRIDE, que também daria
+    # escrita), dar o PGDATA ao usuário postgres (CHOWN) e trocar de usuário com gosu (SETUID,
+    # SETGID). Sem FOWNER e sem KILL. Init de volume novo, reinício, parada e login por senha testados
+    # com este conjunto (task 023). O postgres roda sem capabilities.
+    # Não acrescente `user:`: o entrypoint precisa começar como root para ler o segredo e fazer o
+    # chown, e o healthcheck (pg_isready) roda como root. Um `user:` exige rever os dois e este cap_add.
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
-      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
       - SETUID
       - SETGID
     security_opt:
