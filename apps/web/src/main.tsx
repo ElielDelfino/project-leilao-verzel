@@ -8,6 +8,7 @@ import { RouterProvider } from 'react-router/dom';
 
 import { criarQueryClient } from './consultas/queryClient';
 import { rotas } from './rotas';
+import { ProvedorDeTempoReal } from './tempo-real/ProvedorDeTempoReal';
 
 const elementoRaiz = document.getElementById('root');
 if (!elementoRaiz) {
@@ -21,7 +22,9 @@ const queryClient = criarQueryClient();
 createRoot(elementoRaiz).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ProvedorDeTempoReal>
+        <RouterProvider router={router} />
+      </ProvedorDeTempoReal>
     </QueryClientProvider>
   </StrictMode>,
 );
