@@ -223,6 +223,155 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/catalogo/cartas': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Busca de cartas na Scryfall, só leiloeiro (specs/005 RF-01)
+     * @description `q` de 1 a 200 caracteres (sintaxe da Scryfall) e `pagina` de 1 a 500; 25 cartas por página
+     *     (`meta.limite` = 25), mapeadas sobre as páginas de 175 da Scryfall (specs/005 §Busca). Nenhuma
+     *     carta, ou página além da última, é 200 com lista vazia e `total` 0. Sintaxe recusada pela
+     *     Scryfall é 422 com `detalhes.campo` `q`. Ordem: validação, cache (responde mesmo com o
+     *     circuito aberto), circuito, ficha do bucket, chamada à Scryfall. Todo 503 de catálogo leva
+     *     `detalhes.tenteNovamenteEm` e o header `Retry-After` com o mesmo valor. `imagemUrl` é a
+     *     miniatura da própria Scryfall (ADR 0029), sem passar pelo servidor.
+     */
+    get: operations['catalogoBuscarCartas'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/imagens/{snapshotId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Imagem `normal` do snapshot da carta, pública (specs/005)
+     * @description Bytes do JPEG ou PNG gravado no snapshot, sem o envelope. Imutável: `Cache-Control: public,
+     *     max-age=31536000, immutable`; `ETag` é o SHA-256 dos bytes em hexadecimal minúsculo entre
+     *     aspas. `If-None-Match` igual ao `ETag` responde 304 sem corpo. Id inexistente, ou que não é
+     *     UUID, responde 404 `NAO_ENCONTRADO`. Nunca chama a Scryfall.
+     */
+    get: operations['imagemDoSnapshot'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/lotes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Vitrine pública de lotes, com busca, filtros e ordenação (specs/006 RF-02, RF-03)
+     * @description 24 lotes por página (`meta.limite` = 24); `pagina` além da última é 200 com lista vazia. O
+     *     `status` é derivado dos horários (specs/006 §Estados e status derivado); sem `status`, vêm
+     *     os três; cancelados nunca aparecem. `q` busca `ILIKE %q%` em título e nome da carta, com `%`,
+     *     `_` e `\` literais. A faixa de preço usa `coalesce(lance atual, lance inicial)`, em centavos,
+     *     fechada nas duas pontas. Desempate de toda ordenação: `id` decrescente. Nenhum nome nem
+     *     e-mail de usuário na resposta.
+     */
+    get: operations['lotesListar'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/lotes/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Detalhe do lote, público com sessão opcional (specs/006 §Detalhe)
+     * @description Sessão opcional (`@SessaoOpcional()`, specs/003): sem cookie, ou com cookie inválido ou
+     *     expirado, responde 200 como anônimo; nunca 401. Lote `cancelado` é 200 com `status`
+     *     `cancelado`. Id inexistente, ou que não é UUID, é 404 `NAO_ENCONTRADO`. `suaPosicao` é
+     *     `ganhando` (lote ao vivo e o usuário lidera), `venceu` (lote encerrado e o usuário venceu) ou
+     *     `null`. Sem nome nem e-mail de usuário.
+     */
+    get: operations['lotesDetalhar'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/painel/lotes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Lotes do próprio leiloeiro, inclusive cancelados (specs/006 RF-05)
+     * @description Do mais recente para o mais antigo (`criado_em` decrescente, desempate `id` decrescente);
+     *     24 por página (`meta.limite` = 24); `pagina` de 1 a 500; além da última, 200 com lista vazia.
+     */
+    get: operations['painelListarLotes'];
+    put?: never;
+    /**
+     * Cria um lote a partir de uma carta, só leiloeiro (specs/006 RF-01)
+     * @description Validação (422, `detalhes.campo` com o primeiro campo inválido) antes de qualquer chamada
+     *     externa; depois o snapshot é preparado fora da transação e gravado junto com o lote, tudo
+     *     ou nada (specs/005 §Snapshot). Falha no snapshot: 503 (`CATALOGO_OCUPADO` |
+     *     `CATALOGO_INDISPONIVEL`, com `tenteNovamenteEm` e `Retry-After`) ou 422 com
+     *     `detalhes.campo` `scryfallId` (carta inexistente ou sem imagem). Status gravado: `ao_vivo`
+     *     se `inicioEm` ≤ agora, senão `agendado`. Sem `Idempotency-Key` na F2.
+     */
+    post: operations['painelCriarLote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/painel/resumo': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Total recebido e contagens dos lotes encerrados do leiloeiro (specs/006 RF-05)
+     * @description Conta só lotes do usuário com status gravado `encerrado`. Sem lote encerrado, os três
+     *     valores são 0.
+     */
+    get: operations['painelResumo'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -297,6 +446,122 @@ export interface components {
       total: number;
       pagina: number;
       limite: number;
+    };
+    /**
+     * @description Raridades da Scryfall (specs/006).
+     * @enum {string}
+     */
+    Raridade: 'common' | 'uncommon' | 'rare' | 'mythic' | 'special' | 'bonus';
+    /**
+     * @description Status derivado dos horários (specs/006 §Estados e status derivado); `cancelado` só aparece
+     *     no painel e no detalhe, nunca na vitrine.
+     * @enum {string}
+     */
+    StatusLote: 'agendado' | 'ao_vivo' | 'encerrado' | 'cancelado';
+    /** @description Carta do resultado da busca (specs/005). Ainda sem snapshot. */
+    CartaDaBusca: {
+      scryfallId: components['schemas']['Uuid'];
+      nome: string;
+      colecao: string;
+      raridade: components['schemas']['Raridade'];
+      tipo: string;
+      artista: string | null;
+      /**
+       * @description Miniatura `small` na Scryfall (`https://cards.scryfall.io/...`; ADR 0029); null se a
+       *     carta não tiver imagem.
+       */
+      imagemUrl: string | null;
+    };
+    /** @description Campos do snapshot da carta, sem a imagem (`catalogo.obterSnapshot`, specs/005). */
+    Carta: {
+      scryfallId: components['schemas']['Uuid'];
+      nome: string;
+      colecao: string;
+      raridade: components['schemas']['Raridade'];
+      tipo: string;
+      textoOracle: string | null;
+      artista: string | null;
+    };
+    /**
+     * @description Resumo do lote (vitrine, painel e criação; specs/006). Nunca leva nome nem e-mail de
+     *     usuário.
+     */
+    Lote: {
+      id: components['schemas']['Uuid'];
+      titulo: string;
+      status: components['schemas']['StatusLote'];
+      cartaNome: string;
+      raridade: components['schemas']['Raridade'];
+      /** @description `/api/imagens/{snapshotId}`. */
+      imagemUrl: string;
+      inicioEm: components['schemas']['Instante'];
+      fimEm: components['schemas']['Instante'];
+      lanceInicialCentavos: components['schemas']['Centavos'];
+      incrementoMinimoCentavos: components['schemas']['Centavos'];
+      /** @description Null enquanto não há lance. */
+      lanceAtualCentavos: components['schemas']['Centavos'] | null;
+      /** @description `coalesce(lanceAtualCentavos, lanceInicialCentavos)`, o preço da faixa e da ordem `maior_lance`. */
+      precoAtualCentavos: components['schemas']['Centavos'];
+      totalLances: number;
+      /** @description Valor do arremate do lote encerrado com vencedor; null nos demais casos. */
+      valorArremateCentavos: components['schemas']['Centavos'] | null;
+      criadoEm: components['schemas']['Instante'];
+    };
+    /**
+     * @description Detalhe do lote (specs/006 §Detalhe): os campos de `Lote` mais descrição, fim original, o
+     *     snapshot da carta sem a imagem e a posição do usuário. Mude os campos de `Lote` junto.
+     */
+    LoteDetalhe: {
+      id: components['schemas']['Uuid'];
+      titulo: string;
+      descricao: string | null;
+      status: components['schemas']['StatusLote'];
+      cartaNome: string;
+      raridade: components['schemas']['Raridade'];
+      carta: components['schemas']['Carta'];
+      /** @description `/api/imagens/{snapshotId}`. */
+      imagemUrl: string;
+      inicioEm: components['schemas']['Instante'];
+      fimEm: components['schemas']['Instante'];
+      fimOriginalEm: components['schemas']['Instante'];
+      lanceInicialCentavos: components['schemas']['Centavos'];
+      incrementoMinimoCentavos: components['schemas']['Centavos'];
+      lanceAtualCentavos: components['schemas']['Centavos'] | null;
+      precoAtualCentavos: components['schemas']['Centavos'];
+      totalLances: number;
+      valorArremateCentavos: components['schemas']['Centavos'] | null;
+      /**
+       * @description `ganhando` (lote ao vivo e o usuário lidera), `venceu` (lote encerrado e o usuário
+       *     venceu); null nos demais casos e para anônimos. Só as colunas de `lots` (specs/006).
+       */
+      suaPosicao: ('ganhando' | 'venceu') | null;
+      criadoEm: components['schemas']['Instante'];
+    };
+    /** @description Corpo da criação do lote; limites e regras em specs/006 §Criação. */
+    LoteEntrada: {
+      scryfallId: components['schemas']['Uuid'];
+      /** @description Opcional; ausente, null ou só espaços → o nome da carta, truncado em 120 caracteres. */
+      titulo?: string | null;
+      /** @description Opcional; vazia ou só espaços → sem descrição. */
+      descricao?: string | null;
+      lanceInicialCentavos: number;
+      incrementoMinimoCentavos: number;
+      /** @description Instante com fuso; não pode ser mais de 1 minuto no passado. */
+      inicioEm: components['schemas']['Instante'];
+      /** @description Pelo menos 5 minutos depois de `inicioEm` e no máximo 7 dias depois. */
+      fimEm: components['schemas']['Instante'];
+    };
+    RespostaListaDeLotes: {
+      /** @constant */
+      sucesso: true;
+      dados: components['schemas']['Lote'][];
+      meta: components['schemas']['MetaPaginacao'];
+    };
+    /** @description Só lotes do usuário com status gravado `encerrado` (specs/006 §Painel). */
+    ResumoDoPainel: {
+      totalRecebidoCentavos: components['schemas']['Centavos'];
+      lotesArrematados: number;
+      lotesSemLance: number;
     };
     Erro: {
       /** @constant */
@@ -386,6 +651,77 @@ export interface components {
           erro: {
             /** @constant */
             codigo: 'DADOS_INVALIDOS';
+          };
+        };
+      };
+    };
+    /**
+     * @description Parâmetro ou corpo fora do contrato (DADOS_INVALIDOS), com `detalhes.campo` = nome do
+     *     primeiro campo inválido (specs/006 §Criação, specs/005).
+     */
+    ErroDadosInvalidosComCampo: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'DADOS_INVALIDOS';
+            detalhes: {
+              campo: string;
+            };
+          };
+        };
+      };
+    };
+    /** @description Rota restrita a outro papel (PAPEL_NAO_PERMITIDO). */
+    ErroPapelNaoPermitido: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'PAPEL_NAO_PERMITIDO';
+          };
+        };
+      };
+    };
+    /** @description Recurso inexistente, ou id que não é UUID (NAO_ENCONTRADO). */
+    ErroNaoEncontrado: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'NAO_ENCONTRADO';
+          };
+        };
+      };
+    };
+    /**
+     * @description Catálogo sem condição de chamar a Scryfall (specs/005): `CATALOGO_OCUPADO` (sem ficha do
+     *     bucket em 1 s; `tenteNovamenteEm` 1) ou `CATALOGO_INDISPONIVEL` (circuito aberto, Redis fora
+     *     ou falha do upstream). `detalhes.tenteNovamenteEm` (segundos inteiros ≥ 1) é igual ao
+     *     header `Retry-After`.
+     */
+    ErroCatalogo: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @enum {unknown} */
+            codigo: 'CATALOGO_OCUPADO' | 'CATALOGO_INDISPONIVEL';
+            detalhes: {
+              tenteNovamenteEm: number;
+            };
           };
         };
       };
@@ -494,6 +830,8 @@ export interface components {
     /** @description UUID gerado pelo cliente por operação. */
     IdempotencyKey: string;
     Pagina: number;
+    /** @description Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006). */
+    PaginaLimitada: number;
   };
   requestBodies: never;
   headers: {
@@ -513,6 +851,10 @@ export interface components {
     CookiesExpirados: string;
     /** @description Segundos até a próxima tentativa ser aceita. */
     RetryAfter: number;
+    /** @description Sempre `public, max-age=31536000, immutable` (specs/005). */
+    CacheControlImagem: 'public, max-age=31536000, immutable';
+    /** @description SHA-256 dos bytes da imagem, em hexadecimal minúsculo, entre aspas (specs/005). */
+    ETagImagem: string;
   };
   pathItems: never;
 }
@@ -787,6 +1129,230 @@ export interface operations {
       };
       401: components['responses']['ErroNaoAutenticado'];
       422: components['responses']['ErroDadosInvalidos'];
+      default: components['responses']['Erro'];
+    };
+  };
+  catalogoBuscarCartas: {
+    parameters: {
+      query: {
+        /** @description Busca em texto, sem espaços nas pontas. */
+        q: string;
+        /** @description Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006). */
+        pagina?: components['parameters']['PaginaLimitada'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Página de cartas. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @constant */
+            sucesso: true;
+            dados: components['schemas']['CartaDaBusca'][];
+            meta: components['schemas']['MetaPaginacao'];
+          };
+        };
+      };
+      401: components['responses']['ErroNaoAutenticado'];
+      403: components['responses']['ErroPapelNaoPermitido'];
+      422: components['responses']['ErroDadosInvalidosComCampo'];
+      503: components['responses']['ErroCatalogo'];
+      default: components['responses']['Erro'];
+    };
+  };
+  imagemDoSnapshot: {
+    parameters: {
+      query?: never;
+      header?: {
+        'If-None-Match'?: string;
+      };
+      path: {
+        snapshotId: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Imagem do snapshot. */
+      200: {
+        headers: {
+          'Cache-Control': components['headers']['CacheControlImagem'];
+          ETag: components['headers']['ETagImagem'];
+          [name: string]: unknown;
+        };
+        content: {
+          'image/jpeg': string;
+          'image/png': string;
+        };
+      };
+      /** @description O `If-None-Match` casa com o `ETag`; sem corpo. */
+      304: {
+        headers: {
+          'Cache-Control': components['headers']['CacheControlImagem'];
+          ETag: components['headers']['ETagImagem'];
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      404: components['responses']['ErroNaoEncontrado'];
+      default: components['responses']['Erro'];
+    };
+  };
+  lotesListar: {
+    parameters: {
+      query?: {
+        status?: 'ao_vivo' | 'agendado' | 'encerrado';
+        q?: string;
+        precoMin?: number;
+        /** @description Maior ou igual a `precoMin`; senão, 422 com `detalhes.campo` `precoMax`. */
+        precoMax?: number;
+        raridade?: components['schemas']['Raridade'];
+        /**
+         * @description `termina_antes` (`fim_em` crescente), `mais_recente` (`criado_em` decrescente) ou
+         *     `maior_lance` (preço decrescente).
+         */
+        ordem?: 'termina_antes' | 'mais_recente' | 'maior_lance';
+        /** @description Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006). */
+        pagina?: components['parameters']['PaginaLimitada'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Página de lotes. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RespostaListaDeLotes'];
+        };
+      };
+      422: components['responses']['ErroDadosInvalidosComCampo'];
+      default: components['responses']['Erro'];
+    };
+  };
+  lotesDetalhar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Lote com o snapshot da carta, sem a imagem. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @constant */
+            sucesso: true;
+            dados: components['schemas']['LoteDetalhe'];
+          };
+        };
+      };
+      404: components['responses']['ErroNaoEncontrado'];
+      default: components['responses']['Erro'];
+    };
+  };
+  painelListarLotes: {
+    parameters: {
+      query?: {
+        /** @description Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006). */
+        pagina?: components['parameters']['PaginaLimitada'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Página dos lotes do usuário. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RespostaListaDeLotes'];
+        };
+      };
+      401: components['responses']['ErroNaoAutenticado'];
+      403: components['responses']['ErroPapelNaoPermitido'];
+      422: components['responses']['ErroDadosInvalidosComCampo'];
+      default: components['responses']['Erro'];
+    };
+  };
+  painelCriarLote: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LoteEntrada'];
+      };
+    };
+    responses: {
+      /** @description Lote criado. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @constant */
+            sucesso: true;
+            dados: components['schemas']['Lote'];
+          };
+        };
+      };
+      401: components['responses']['ErroNaoAutenticado'];
+      403: components['responses']['ErroCsrfOuPapel'];
+      422: components['responses']['ErroDadosInvalidosComCampo'];
+      503: components['responses']['ErroCatalogo'];
+      default: components['responses']['Erro'];
+    };
+  };
+  painelResumo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Resumo do painel. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** @constant */
+            sucesso: true;
+            dados: components['schemas']['ResumoDoPainel'];
+          };
+        };
+      };
+      401: components['responses']['ErroNaoAutenticado'];
+      403: components['responses']['ErroPapelNaoPermitido'];
       default: components['responses']['Erro'];
     };
   };
