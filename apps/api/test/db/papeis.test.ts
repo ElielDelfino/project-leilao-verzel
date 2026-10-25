@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
+import { COLUNAS_ATUALIZAVEIS } from '../../src/modules/lotes/schema.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
 
 const AMBIENTE = ambienteDeTeste(process.env);
@@ -29,6 +30,18 @@ const MATRIZ: Readonly<Record<string, readonly string[]>> = {
   refresh_tokens: ['DELETE', 'INSERT', 'SELECT', 'UPDATE'],
   wallet_balances: ['INSERT', 'SELECT', 'UPDATE'],
   ledger_entries: ['INSERT', 'SELECT'],
+  // Tarefa 051 (ADR 0026): o snapshot é imutável; lote sem DELETE (cancelar muda o status) e
+  // com UPDATE só por coluna (COLUNAS_COM_UPDATE).
+  card_snapshots: ['INSERT', 'SELECT'],
+  lots: ['INSERT', 'SELECT'],
+};
+
+/**
+ * Privilégios de coluna de leilao_api: as únicas colunas de public com ACL própria, todas só com
+ * UPDATE. lots: as que mudam depois da criação (tarefa 051, COLUNAS_ATUALIZAVEIS).
+ */
+const COLUNAS_COM_UPDATE: Readonly<Record<string, readonly string[]>> = {
+  lots: COLUNAS_ATUALIZAVEIS,
 };
 
 /** Todos os privilégios de tabela do Postgres 18. */
@@ -152,14 +165,31 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0001: papel da API', () => {
     });
   });
 
-  it('sem privilégio de coluna, sem default privileges e sem acesso ao schema drizzle', async () => {
+  it('privilégio de coluna só o UPDATE de COLUNAS_COM_UPDATE', async () => {
+    await emTransacao(async (cliente) => {
+      const { rows } = await cliente.query<{ tabela: string; coluna: string; acl: string[] }>(
+        `select c.relname as tabela, a.attname as coluna,
+                array(select r.rolname || ':' || x.privilege_type
+                        from aclexplode(a.attacl) x join pg_roles r on r.oid = x.grantee
+                       order by 1) as acl
+           from pg_attribute a
+           join pg_class c on c.oid = a.attrelid
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public' and a.attacl is not null
+          order by c.relname, a.attname`,
+      );
+      const esperado = Object.entries(COLUNAS_COM_UPDATE).flatMap(([tabela, colunas]) =>
+        [...colunas].sort().map((coluna) => ({ tabela, coluna, acl: [`${PAPEL_DA_API}:UPDATE`] })),
+      );
+
+      expect(rows).toEqual(esperado);
+    });
+  });
+
+  it('sem default privileges e sem acesso ao schema drizzle', async () => {
     await emTransacao(async (cliente) => {
       const { rows } = await cliente.query(
         `select
-           (select count(*)::int from pg_attribute a
-              join pg_class c on c.oid = a.attrelid
-              join pg_namespace n on n.oid = c.relnamespace
-             where n.nspname = 'public' and a.attacl is not null) as colunas,
            (select count(*)::int from pg_default_acl) as padroes,
            has_schema_privilege($1, 'public', 'USAGE') as usa_public,
            has_schema_privilege($1, 'public', 'CREATE') as cria_em_public,
@@ -168,7 +198,7 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0001: papel da API', () => {
       );
 
       expect(rows).toEqual([
-        { colunas: 0, padroes: 0, usa_public: true, cria_em_public: false, usa_drizzle: false },
+        { padroes: 0, usa_public: true, cria_em_public: false, usa_drizzle: false },
       ]);
     });
   });

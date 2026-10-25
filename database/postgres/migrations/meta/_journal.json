@@ -15,6 +15,13 @@
       "when": 1792923015925,
       "tag": "0001_identidade_carteira",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792938118271,
+      "tag": "0002_catalogo_lotes",
+      "breakpoints": true
     }
   ]
 }
