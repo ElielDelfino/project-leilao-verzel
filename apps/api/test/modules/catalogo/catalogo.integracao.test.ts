@@ -14,7 +14,11 @@ import type { BancoVerificavel } from '../../../src/db/banco.js';
 import { ServicoDeCatalogo } from '../../../src/modules/catalogo/index.js';
 import { emitirAccessToken } from '../../../src/modules/identidade/tokens.js';
 import { apagarChavesDoPrefixo, clienteDeTeste } from '../../common/limite/redis-de-teste.js';
-import { criarAppDeTeste } from '../../helpers/app-de-teste.js';
+import {
+  apagarChavesDaScryfall,
+  criarAppDeTeste,
+  novoPrefixoDaScryfall,
+} from '../../helpers/app-de-teste.js';
 import {
   ID_CARTA_DUPLA_FACE,
   ID_CARTA_HOST_ESTRANHO,
@@ -37,39 +41,6 @@ type Papel = 'leiloeiro' | 'licitante';
 type Cabecalhos = Readonly<Record<string, string>>;
 
 const ID_INEXISTENTE = '99999999-9999-4999-8999-999999999999';
-/** Buscas que os testes fazem (o cache delas é apagado entre os testes). */
-const BUSCAS = [
-  'bolt',
-  'sintetica',
-  'lightning',
-  'delver',
-  'host estranho',
-  'carta sem imagem',
-  'inexistente',
-];
-const CARTAS = [
-  ID_CARTA_SIMPLES,
-  ID_CARTA_DUPLA_FACE,
-  ID_CARTA_SEM_IMAGEM,
-  ID_CARTA_HOST_ESTRANHO,
-  ID_INEXISTENTE,
-];
-const PAGINAS_SCRYFALL = [1, 2];
-
-/**
- * Chaves `scryfall:*` que estes testes tocam (cache/redis/README.md). O provider usa o prefixo
- * fixo, então o reset apaga só essas chaves pelo nome, sem SCAN no prefixo inteiro.
- */
-function chavesDoCatalogo(): string[] {
-  const sha1 = (q: string): string => createHash('sha1').update(q).digest('hex');
-  return [
-    'scryfall:circuito',
-    'scryfall:bucket:search',
-    'scryfall:bucket:default',
-    ...CARTAS.map((id) => `scryfall:carta:${id}`),
-    ...BUSCAS.flatMap((q) => PAGINAS_SCRYFALL.map((n) => `scryfall:busca:${sha1(q)}:${n}`)),
-  ];
-}
 
 describe.skipIf(!INFRA_DISPONIVEL)('catálogo com Postgres, Redis e Scryfall falsa', () => {
   let app: NestFastifyApplication;
@@ -79,6 +50,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('catálogo com Postgres, Redis e Scryfall fal
   let catalogo: ServicoDeCatalogo;
   let banco: BancoVerificavel;
   const prefixoDoLimite = `ratelimit:teste-${randomUUID()}:`;
+  /** Bucket, circuito e cache deste arquivo, isolados dos outros arquivos paralelos (tarefa 067). */
+  const prefixoDaScryfall = novoPrefixoDaScryfall();
   const usuarios: string[] = [];
   const snapshots: string[] = [];
 
@@ -89,6 +62,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('catálogo com Postgres, Redis e Scryfall fal
       env: { ...base, scryfall: { ...base.scryfall, baseUrl: scryfall.url } },
       clientesReais: true,
       prefixoDoLimite,
+      prefixoDaScryfall,
     });
     pool = new pg.Pool(BANCO.conexao());
     redis = await clienteDeTeste(REDIS.conexao());
@@ -100,14 +74,14 @@ describe.skipIf(!INFRA_DISPONIVEL)('catálogo com Postgres, Redis e Scryfall fal
     scryfall.definirModo('ok');
     scryfall.zerar();
     // Cache, bucket e circuito do catálogo começam vazios em cada teste.
-    await redis.del(chavesDoCatalogo());
+    await apagarChavesDaScryfall(redis, prefixoDaScryfall);
   });
 
   afterAll(async () => {
     await pool.query('delete from card_snapshots where id = any($1::uuid[])', [snapshots]);
     await pool.query('delete from users where id = any($1::uuid[])', [usuarios]);
     await pool.end();
-    await redis.del(chavesDoCatalogo());
+    await apagarChavesDaScryfall(redis, prefixoDaScryfall);
     await apagarChavesDoPrefixo(redis, prefixoDoLimite);
     redis.destroy();
     await app.close();

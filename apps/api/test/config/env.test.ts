@@ -313,7 +313,13 @@ describe('carregarEnv: Scryfall', () => {
     expect(carregarEnv(envValido()).scryfall).toEqual({
       userAgent: 'LeilaoVerzel/0.1',
       baseUrl: 'https://api.scryfall.com',
+      prefixoRedis: 'scryfall:',
     });
+  });
+
+  it('prefixo Redis da Scryfall é sempre scryfall: (sem variável de env; tarefa 067)', () => {
+    const env = carregarEnv(envValido({ SCRYFALL_REDIS_PREFIX: 'outro:' }));
+    expect(env.scryfall.prefixoRedis).toBe('scryfall:');
   });
 
   it('aceita SCRYFALL_BASE_URL http://127.0.0.1:porta (Scryfall falsa)', () => {

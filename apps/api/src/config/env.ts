@@ -102,7 +102,19 @@ export interface Env {
   readonly cookiesSeguros: boolean;
   readonly segredos: SegredosDaApi;
   /** Cliente da Scryfall (specs/005 §Cliente HTTP). */
-  readonly scryfall: ConfigDaScryfall;
+  readonly scryfall: ConfigDaScryfallNoEnv;
+}
+
+/** Prefixo das chaves Redis da Scryfall (cache/redis/README.md). Não vem de variável de env. */
+export const PREFIXO_REDIS_DA_SCRYFALL = 'scryfall:';
+
+export interface ConfigDaScryfallNoEnv extends ConfigDaScryfall {
+  /**
+   * Prefixo das chaves Redis do cliente: sempre PREFIXO_REDIS_DA_SCRYFALL em produção. Só a app de
+   * teste o troca, por um próprio por app, para que arquivos paralelos não disputem bucket,
+   * circuito e cache (tarefa 067).
+   */
+  readonly prefixoRedis: string;
 }
 
 export interface ConfigDaScryfall {
@@ -197,6 +209,7 @@ function montarEnv(dados: VariaveisDoEnv): Env {
     scryfall: Object.freeze({
       userAgent: dados.SCRYFALL_USER_AGENT,
       baseUrl: dados.SCRYFALL_BASE_URL,
+      prefixoRedis: PREFIXO_REDIS_DA_SCRYFALL,
     }),
   };
 }

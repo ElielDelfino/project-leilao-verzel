@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto';
+
 import type { Type } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
@@ -9,7 +11,7 @@ import { configurarApp, criarAdaptadorFastify } from '../../src/app.js';
 import type { ContadorDeJanela } from '../../src/common/limite/limite-de-tentativas.js';
 import { CONTADOR_DE_JANELA, PREFIXO_DO_LIMITE } from '../../src/common/limite/limite.module.js';
 import { BANCO } from '../../src/config/banco.module.js';
-import { criarSegredosDaApi, type Env } from '../../src/config/env.js';
+import { criarSegredosDaApi, type Env, PREFIXO_REDIS_DA_SCRYFALL } from '../../src/config/env.js';
 import type { BancoVerificavel } from '../../src/db/banco.js';
 import { lerConexaoDoBanco, VARIAVEIS_DA_API } from '../../src/db/conexao.js';
 import {
@@ -56,8 +58,43 @@ export const ENV_DE_TESTE: Env = {
     sementeEd25519: CHAVE_FALSA,
   }),
   // Porta 1 do loopback: nenhum teste sem Scryfall falsa chega a uma Scryfall de verdade.
-  scryfall: { userAgent: 'LeilaoVerzel/teste', baseUrl: 'http://127.0.0.1:1' },
+  scryfall: {
+    userAgent: 'LeilaoVerzel/teste',
+    baseUrl: 'http://127.0.0.1:1',
+    // criarAppDeTeste troca por um prefixo próprio por app (novoPrefixoDaScryfall).
+    prefixoRedis: PREFIXO_REDIS_DA_SCRYFALL,
+  },
 };
+
+/**
+ * Prefixo Redis da Scryfall próprio de uma app de teste, sob `scryfall:t`. Arquivos que rodam em
+ * paralelo contra o mesmo Redis não disputam bucket, circuito nem cache (tarefa 067).
+ */
+export function novoPrefixoDaScryfall(): string {
+  return `${PREFIXO_REDIS_DA_SCRYFALL}t${String(process.pid)}-${randomBytes(6).toString('hex')}:`;
+}
+
+/** Cliente Redis com o que o reset precisa (o cliente `redis` de redis-de-teste.ts atende). */
+interface RedisComScan {
+  scanIterator(opcoes: { MATCH: string; COUNT: number }): AsyncIterable<string[]>;
+  del(chaves: string[]): Promise<unknown>;
+}
+
+/**
+ * Apaga só as chaves de um prefixo de teste da Scryfall (SCAN + DEL; FLUSHDB é proibido, specs/013).
+ * Recusa o prefixo de produção e qualquer prefixo fora de `scryfall:t`.
+ */
+export async function apagarChavesDaScryfall(
+  cliente: RedisComScan,
+  prefixo: string,
+): Promise<void> {
+  if (!prefixo.startsWith(`${PREFIXO_REDIS_DA_SCRYFALL}t`) || !prefixo.endsWith(':')) {
+    throw new Error('o reset dos testes só apaga um prefixo próprio sob scryfall:t');
+  }
+  for await (const chaves of cliente.scanIterator({ MATCH: `${prefixo}*`, COUNT: 100 })) {
+    if (chaves.length > 0) await cliente.del(chaves);
+  }
+}
 
 const SEM_INFRA =
   'cliente falso do app de teste: use clientesReais para falar com a infraestrutura';
@@ -117,6 +154,8 @@ export interface OpcoesDoAppDeTeste {
   readonly contador?: ContadorDeJanela;
   /** Prefixo próprio das chaves de rate limit (sob `ratelimit:`; specs/013). */
   readonly prefixoDoLimite?: string;
+  /** Prefixo Redis da Scryfall (sob `scryfall:t`); sem ele, cada app recebe um novo. */
+  readonly prefixoDaScryfall?: string;
   /** Módulos só de teste (por exemplo, rotas que lançam erros). */
   readonly modulosExtras?: readonly Type[];
   /** Captura os logs JSON; quando presente, o nível passa a ser "info". */
@@ -127,7 +166,12 @@ export interface OpcoesDoAppDeTeste {
 export async function criarAppDeTeste(
   opcoes: OpcoesDoAppDeTeste = {},
 ): Promise<NestFastifyApplication> {
-  const base = opcoes.env ?? ENV_DE_TESTE;
+  const informado = opcoes.env ?? ENV_DE_TESTE;
+  const prefixoRedis = opcoes.prefixoDaScryfall ?? novoPrefixoDaScryfall();
+  if (!prefixoRedis.startsWith(`${PREFIXO_REDIS_DA_SCRYFALL}t`)) {
+    throw new Error('prefixoDaScryfall da app de teste precisa ficar sob scryfall:t');
+  }
+  const base: Env = { ...informado, scryfall: { ...informado.scryfall, prefixoRedis } };
   const env: Env = opcoes.destinoDosLogs ? { ...base, LOG_LEVEL: 'info' } : base;
   const logger = criarLogger(env.LOG_LEVEL, opcoes.destinoDosLogs);
 

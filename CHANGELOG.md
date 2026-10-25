@@ -5,6 +5,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), versionamen
 ## [Não lançado]
 
 ### Adicionado
+- Chaves Redis da Scryfall isoladas por app de teste (task 067): `env.scryfall.prefixoRedis` (sempre `scryfall:` em produção, sem variável de env) chega ao provider; `criarAppDeTeste` usa um prefixo próprio `scryfall:t<pid>-<aleatório>:`, e os testes do catálogo e dos lotes limpam só o seu (SCAN + DEL). Corrige o 503 intermitente do painel no `verify:full`: o circuito aberto pelo teste de 429 do catálogo em `scryfall:circuito` vazava para o arquivo paralelo. O `loteDireto` do teste do painel usa um só `Date.now()` (com dois, `fim_em` podia ficar 1 ms antes de `fim_original_em` e violar `lots_fim_nao_recua`).
 - CSP do Caddy com `img-src 'self' data: https://cards.scryfall.io` (ADR 0029) e teste `scripts/caddy-csp.test.mjs` que trava as diretivas; sem outra origem nova (task 064).
 - Specs 000–014, PLAN, INDEX e ADRs 0001–0019 (entrevista de início).
 - Compose de Postgres 18.6 e Redis 8.8; esqueleto AsyncAPI.
