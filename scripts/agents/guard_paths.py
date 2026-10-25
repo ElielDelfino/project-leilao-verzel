@@ -51,7 +51,7 @@ REGRAS = {
                      ".prettierrc", ".prettierignore", "lefthook.yml", "commitlint.config.mjs", ".editorconfig",
                      "LICENSE", "apps/*/package.json", "packages/*/package.json", "apps/*/tsconfig.json",
                      "packages/*/tsconfig.json", "docs/dev-setup.md", "docs/deploy.md",
-                     "docs/variaveis-de-ambiente.md"] + COMUNS,
+                     "docs/variaveis-de-ambiente.md", "redocly.yaml", ".redocly.lint-ignore.yaml", "packages/contracts/*"] + COMUNS,
         "negar": ["scripts/verify.mjs", "scripts/agents/*"],
     },
 }
