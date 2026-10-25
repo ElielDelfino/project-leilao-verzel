@@ -5,6 +5,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), versionamen
 ## [Não lançado]
 
 ### Adicionado
+- CSP do Caddy com `img-src 'self' data: https://cards.scryfall.io` (ADR 0029) e teste `scripts/caddy-csp.test.mjs` que trava as diretivas; sem outra origem nova (task 064).
 - Specs 000–014, PLAN, INDEX e ADRs 0001–0019 (entrevista de início).
 - Compose de Postgres 18.6 e Redis 8.8; esqueleto AsyncAPI.
 - Monorepo pnpm 12 (Node 24), tsconfig estrito, ESLint flat + typescript-eslint strict + boundaries entre os 7 módulos da API, Prettier, Lefthook e commitlint (task 001).
