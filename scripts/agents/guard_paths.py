@@ -36,7 +36,7 @@ REGRAS = {
         "negar": ["database/*/docker-compose.yml", "cache/*/docker-compose.yml"],
     },
     "qa": {
-        "permitir": ["apps/*/test/*", "e2e/*", "load/*", "scripts/verify.mjs", "vitest.workspace.ts",
+        "permitir": ["apps/*/test/*", "e2e/*", "load/*", "scripts/verify.mjs", "scripts/verify.test.mjs", "vitest.workspace.ts",
                      "vitest.config.*", "playwright.config.*"] + COMUNS,
         "negar": [],
     },
@@ -52,7 +52,7 @@ REGRAS = {
                      "LICENSE", "apps/*/package.json", "packages/*/package.json", "apps/*/tsconfig.json",
                      "packages/*/tsconfig.json", "docs/dev-setup.md", "docs/deploy.md",
                      "docs/variaveis-de-ambiente.md", "redocly.yaml", ".redocly.lint-ignore.yaml", "packages/contracts/*"] + COMUNS,
-        "negar": ["scripts/verify.mjs", "scripts/agents/*"],
+        "negar": ["scripts/verify.mjs", "scripts/verify.test.mjs", "scripts/agents/*"],
     },
 }
 
