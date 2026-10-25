@@ -215,7 +215,11 @@ describe.skipIf(!INFRA_DISPONIVEL)('tempo real: estado e eventos (Postgres e Red
     const deA = gravar(socketA);
     const deB = gravar(socketB);
     const doAnonimo = gravar(anonimo);
-    const daVitrine = gravar(naVitrine);
+    const daVitrineBruta = gravar(naVitrine);
+    // A vitrine é global: com arquivos de teste em paralelo ela também recebe os lances de outros
+    // lotes. Só o que é deste lote entra nas esperas e nas asserções.
+    const daVitrine = (): Recebido[] =>
+      daVitrineBruta.filter((e) => (e.payload as { loteId?: unknown } | null)?.loteId === loteId);
     // No instante da publicação, outra conexão já enxerga o lance: a transação confirmou.
     const visivelNaPublicacao: boolean[] = [];
     const cancelar = ctx.app.get(PublicadorDeEventos).aoOcorrer('lance_aceito', async (p) => {
@@ -234,7 +238,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('tempo real: estado e eventos (Postgres e Red
           deA.length >= 3 &&
           deB.length >= 2 &&
           doAnonimo.length >= 1 &&
-          daVitrine.length >= 1,
+          daVitrine().length >= 1,
       );
       await new Promise((resolver) => setTimeout(resolver, SILENCIO_MS));
     } finally {
@@ -246,13 +250,15 @@ describe.skipIf(!INFRA_DISPONIVEL)('tempo real: estado e eventos (Postgres e Red
     expect(nomes(deA)).toEqual(['lance_aceito', 'saldo_atualizado', 'voce_foi_superado']);
     expect(nomes(deB)).toEqual(['lance_aceito', 'saldo_atualizado']);
     expect(nomes(doAnonimo)).toEqual(['lance_aceito']);
-    expect(nomes(daVitrine)).toEqual(['lance_aceito']);
+    const vitrineDoLote = daVitrine();
+    expect(nomes(vitrineDoLote)).toEqual(['lance_aceito']);
+    for (const { evento, payload } of vitrineDoLote) validarEvento(evento, payload);
     for (const { evento, payload } of [...deA, ...deB]) validarEvento(evento, payload);
     expect(deA.find((e) => e.evento === 'voce_foi_superado')?.payload).toEqual({
       loteId,
       valorCentavos: LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS,
     });
-    await semDadosDeUsuario([...doAnonimo, ...daVitrine], [a, b]);
+    await semDadosDeUsuario([...doAnonimo, ...vitrineDoLote], [a, b]);
   });
 
   it('lance recusado (rollback) não publica nenhum evento', async () => {
