@@ -76,11 +76,16 @@ test('sessão expirada (cookies apagados, refresh recusado) → /entrar com a me
   await entrarPelaInterface(page, LICITANTE_DO_SEED, senhaDoSeed());
   await page.getByRole('link', { name: 'Carteira' }).click();
   await aguardarEstadoEstavel(page);
+  // Sem consulta em voo: uma requisição tardia depois do clearCookies cairia sozinha no 401 e
+  // faria o teste passar sem o gatilho abaixo.
+  await expect(page.getByRole('heading', { level: 2, name: 'Extrato' })).toBeVisible();
+  await page.waitForLoadState('networkidle');
 
   await context.clearCookies();
-  // Gatilho determinístico: o TanStack Query refaz as consultas ao voltar a visibilidade da aba;
-  // sem cookies a consulta recebe 401, o refresh é recusado e a sessão expira.
-  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  // Gatilho determinístico: uma ação da interface (depósito) sem cookies recebe 401, o refresh é
+  // recusado e a sessão expira durante o uso.
+  await page.getByLabel('Valor do depósito (R$)').fill('10,00');
+  await page.getByRole('button', { name: 'Depositar' }).click();
 
   await expect(page).toHaveURL(/\/entrar\?retorno=%2Fcarteira/);
   await expect(page.getByText('Sua sessão expirou. Entre novamente.')).toBeVisible();
