@@ -11,7 +11,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ServicoDeCatalogo } from '../../../src/modules/catalogo/index.js';
 import { emitirAccessToken } from '../../../src/modules/identidade/tokens.js';
 import { apagarChavesDoPrefixo, clienteDeTeste } from '../../common/limite/redis-de-teste.js';
-import { criarAppDeTeste } from '../../helpers/app-de-teste.js';
+import {
+  apagarChavesDaScryfall,
+  criarAppDeTeste,
+  novoPrefixoDaScryfall,
+} from '../../helpers/app-de-teste.js';
 import { ID_CARTA_SEM_IMAGEM, ID_CARTA_SIMPLES } from '../../helpers/fixtures-scryfall/cartas.js';
 import { iniciarScryfallFalsa, type ScryfallFalsa } from '../../helpers/scryfall-falsa.js';
 import {
@@ -38,18 +42,11 @@ const SEGUNDO = 1000;
 const MINUTO = 60 * SEGUNDO;
 const DIA = 24 * 60 * MINUTO;
 const ID_INEXISTENTE = '99999999-9999-4999-8999-999999999999';
-const CARTAS = [ID_CARTA_SIMPLES, ID_CARTA_SEM_IMAGEM, ID_INEXISTENTE];
+
+/** Chave do circuito com o prefixo de produção; nenhuma app de teste deve lê-la (tarefa 067). */
+const CIRCUITO_DE_PRODUCAO = 'scryfall:circuito';
 
 const iso = (ms: number): string => new Date(ms).toISOString();
-
-function chavesDoCatalogo(): string[] {
-  return [
-    'scryfall:circuito',
-    'scryfall:bucket:search',
-    'scryfall:bucket:default',
-    ...CARTAS.map((id) => `scryfall:carta:${id}`),
-  ];
-}
 
 /** Chaves do JSON em qualquer profundidade. */
 function chavesDe(valor: unknown): string[] {
@@ -66,6 +63,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
   let pool: pg.Pool;
   let redis: Awaited<ReturnType<typeof clienteDeTeste>>;
   const prefixoDoLimite = `ratelimit:teste-${randomUUID()}:`;
+  /** Bucket, circuito e cache deste arquivo, isolados dos outros arquivos paralelos (tarefa 067). */
+  const prefixoDaScryfall = novoPrefixoDaScryfall();
   const usuarios: string[] = [];
 
   beforeAll(async () => {
@@ -75,6 +74,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
       env: { ...base, scryfall: { ...base.scryfall, baseUrl: scryfall.url } },
       clientesReais: true,
       prefixoDoLimite,
+      prefixoDaScryfall,
     });
     pool = new pg.Pool(BANCO.conexao());
     redis = await clienteDeTeste(REDIS.conexao());
@@ -83,7 +83,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
   beforeEach(async () => {
     scryfall.definirModo('ok');
     scryfall.zerar();
-    await redis.del(chavesDoCatalogo());
+    await apagarChavesDaScryfall(redis, prefixoDaScryfall);
   });
 
   afterEach(() => {
@@ -100,7 +100,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
     ]);
     await pool.query('delete from users where id = any($1::uuid[])', [usuarios]);
     await pool.end();
-    await redis.del(chavesDoCatalogo());
+    await apagarChavesDaScryfall(redis, prefixoDaScryfall);
     await apagarChavesDoPrefixo(redis, prefixoDoLimite);
     redis.destroy();
     await app.close();
@@ -180,6 +180,9 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
        returning id`,
       [snapshotBase],
     );
+    // Um só instante: com dois Date.now(), fim_em podia ficar 1 ms antes de fim_original_em e
+    // violar lots_fim_nao_recua (intermitente no verify:full; tarefa 067).
+    const agora = Date.now();
     const colunas = {
       leiloeiro_id: leiloeiroId,
       snapshot_id: snap[0]?.id ?? null,
@@ -188,9 +191,9 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
       titulo: 'Lote direto',
       lance_inicial_centavos: 100,
       incremento_minimo_centavos: 100,
-      inicio_em: iso(Date.now() - DIA),
-      fim_em: iso(Date.now() - DIA + 10 * MINUTO),
-      fim_original_em: iso(Date.now() - DIA + 10 * MINUTO),
+      inicio_em: iso(agora - DIA),
+      fim_em: iso(agora - DIA + 10 * MINUTO),
+      fim_original_em: iso(agora - DIA + 10 * MINUTO),
       status: 'ao_vivo',
       ...extra,
     };
@@ -214,6 +217,20 @@ describe.skipIf(!INFRA_DISPONIVEL)('lotes: criação e painel com Postgres e Scr
     if (id === undefined) throw new Error('lote sem snapshot');
     return id;
   }
+
+  describe('isolamento das chaves Redis da Scryfall (tarefa 067)', () => {
+    it('circuito aberto no prefixo de produção não afeta a app de teste → 201', async () => {
+      // Simula outro arquivo de teste (ou processo) com o circuito `scryfall:` aberto.
+      const leiloeiro = await conta('leiloeiro');
+      await redis.set(CIRCUITO_DE_PRODUCAO, '1', { PX: 5 * SEGUNDO, NX: true });
+      try {
+        const r = await criar(corpo(), leiloeiro.cabecalhos);
+        expect(r.statusCode).toBe(201);
+      } finally {
+        await redis.del(CIRCUITO_DE_PRODUCAO);
+      }
+    });
+  });
 
   describe('acesso às rotas do painel', () => {
     it('anônimo → 401 e licitante → 403 PAPEL_NAO_PERMITIDO, sem chamar a Scryfall', async () => {
