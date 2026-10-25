@@ -17,6 +17,7 @@ import {
   ID_CARTA_DUPLA_FACE,
   ID_CARTA_SEM_IMAGEM,
   ID_CARTA_SIMPLES,
+  miniaturaDaScryfall,
 } from '../../../helpers/fixtures-scryfall/cartas.js';
 import { portaFechada } from '../../../helpers/porta-fechada.js';
 import { iniciarScryfallFalsa, type ScryfallFalsa } from '../../../helpers/scryfall-falsa.js';
@@ -98,7 +99,6 @@ describe.skipIf(!ambiente.disponivel)('cliente da Scryfall (Redis real, Scryfall
         order: 'name',
       });
       expect(pagina.total).toBe(1);
-      // A fixture da 052 só tem image_uris.normal; a projeção do `small` está em projecao.test.ts.
       expect(pagina.cartas).toEqual([
         {
           scryfallId: ID_CARTA_SIMPLES,
@@ -107,7 +107,7 @@ describe.skipIf(!ambiente.disponivel)('cliente da Scryfall (Redis real, Scryfall
           raridade: 'common',
           tipo: 'Instant',
           artista: 'Artista de Teste',
-          imagemUrl: null,
+          imagemUrl: miniaturaDaScryfall(ID_CARTA_SIMPLES),
         },
       ]);
     });
