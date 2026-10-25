@@ -187,3 +187,51 @@ export function validarContrato(resposta: RespostaObservada): void {
   validarHeaders(declarada, resposta.headers, resposta.status);
   validarCorpo(declarada, resposta.corpo, rotulo);
 }
+
+/** Rotas do contrato como expressões regulares: `/api/lotes/{id}` casa `/api/lotes/abc`. */
+const padroesDeCaminho: readonly { readonly caminho: string; readonly padrao: RegExp }[] =
+  Object.keys(ehObjeto(contrato['paths']) ? contrato['paths'] : {}).map((caminho) => ({
+    caminho,
+    padrao: new RegExp(
+      `^${caminho
+        .split(/\{[^}]+\}/)
+        .map((trecho) => trecho.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`))
+        .join('[^/]+')}$`,
+    ),
+  }));
+
+/** Caminho do `paths` que casa com a URL (sem query), ou undefined se o contrato não o declara. */
+export function caminhoDoContrato(url: string): string | undefined {
+  const semQuery = url.split('?')[0] ?? url;
+  return padroesDeCaminho.find((p) => p.padrao.test(semQuery))?.caminho;
+}
+
+/** Operações (método + caminho) declaradas no contrato, opcionalmente só de uma tag. */
+export function operacoesDoContrato(tag?: string): { metodo: string; caminho: string }[] {
+  const paths = ehObjeto(contrato['paths']) ? contrato['paths'] : {};
+  const operacoes: { metodo: string; caminho: string }[] = [];
+  for (const [caminho, rota] of Object.entries(paths)) {
+    if (!ehObjeto(rota)) continue;
+    for (const [metodo, operacao] of Object.entries(rota)) {
+      if (!METODOS.has(metodo) || !ehObjeto(operacao)) continue;
+      const tags = Array.isArray(operacao['tags']) ? operacao['tags'] : [];
+      if (tag === undefined || tags.includes(tag)) operacoes.push({ metodo, caminho });
+    }
+  }
+  return operacoes;
+}
+
+/** Todo schema `type: object` do contrato sem `additionalProperties` explícito (JSON pointer). */
+export function objetosSemAdditionalProperties(): string[] {
+  const achados: string[] = [];
+  const percorrer = (no: unknown, ponteiro: string): void => {
+    if (Array.isArray(no)) {
+      no.forEach((item, i) => percorrer(item, `${ponteiro}/${i}`));
+    } else if (ehObjeto(no)) {
+      if (no['type'] === 'object' && !('additionalProperties' in no)) achados.push(ponteiro);
+      for (const [chave, valor] of Object.entries(no)) percorrer(valor, `${ponteiro}/${chave}`);
+    }
+  };
+  percorrer(contrato, '#');
+  return achados;
+}

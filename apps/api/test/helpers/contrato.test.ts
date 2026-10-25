@@ -2,7 +2,7 @@
 // resposta fiel ao openapi.yaml e falha em cada desvio que o critério de aceite lista.
 import { describe, expect, it } from 'vitest';
 
-import { validarContrato } from './contrato.js';
+import { caminhoDoContrato, objetosSemAdditionalProperties, validarContrato } from './contrato.js';
 
 const USUARIO = {
   id: '3f0c1d9e-2b7a-4c55-9d1e-0a1b2c3d4e5f',
@@ -83,5 +83,42 @@ describe('validarContrato', () => {
   it('falha quando o corpo do default não é o envelope de erro', () => {
     const entrada = cadastro({ status: 500, corpo: { sucesso: false } });
     expect(() => validarContrato(entrada)).toThrow(/erro/);
+  });
+});
+
+describe('status que passam pelo default', () => {
+  const saldo = (sobrescrita: { status: number; headers?: Record<string, string> }) => ({
+    metodo: 'get',
+    caminho: '/api/carteira',
+    headers: {},
+    corpo: ERRO_429,
+    ...sobrescrita,
+  });
+
+  it('429 vindo do default (rota sem 429 declarado) exige Retry-After', () => {
+    expect(() => validarContrato(saldo({ status: 429 }))).toThrow(/Retry-After/);
+    expect(() =>
+      validarContrato(saldo({ status: 429, headers: { 'Retry-After': '12' } })),
+    ).not.toThrow();
+  });
+
+  it('502 é recusado: não está declarado nem entre os status do default', () => {
+    expect(() => validarContrato(saldo({ status: 502 }))).toThrow(/não declara o status 502/);
+  });
+});
+
+describe('caminhoDoContrato', () => {
+  it.each([
+    ['/api/auth/login', '/api/auth/login'],
+    ['/api/carteira/extrato?pagina=2', '/api/carteira/extrato'],
+    ['/api/nao-existe', undefined],
+  ])('%s → %s', (url, esperado) => {
+    expect(caminhoDoContrato(url)).toBe(esperado);
+  });
+});
+
+describe('rigor do contrato', () => {
+  it('todo schema type: object declara additionalProperties (o validador só é estrito aí)', () => {
+    expect(objetosSemAdditionalProperties()).toEqual([]);
   });
 });

@@ -585,6 +585,14 @@ async function passosDeContratos(v, rodar, env) {
 
 // ---------------------------------------------------------------- full
 
+/** O e2e conecta a API como leilao_api: sem estas duas variáveis ela nem sobe. */
+const VARIAVEIS_DO_E2E = ['POSTGRES_API_USER', 'DB_API_PASSWORD'];
+
+/** Nomes (nunca valores) das variáveis do e2e ausentes ou vazias. */
+export function variaveisFaltandoParaOE2e(env) {
+  return VARIAVEIS_DO_E2E.filter((nome) => env[nome] === undefined || env[nome] === '');
+}
+
 async function full(opcoes, env) {
   const v = new Verificacao('full', true);
   const pacotes = lerPacotes(RAIZ);
@@ -606,6 +614,12 @@ async function full(opcoes, env) {
       const config = readdirSync(RAIZ).find((nome) => nome.startsWith('playwright.config.'));
       if (!config) {
         process.stderr.write('--e2e pedido, mas não há playwright.config.* na raiz.\n');
+        return false;
+      }
+      const faltando = variaveisFaltandoParaOE2e(env);
+      if (faltando.length > 0) {
+        // Só os nomes: o valor de uma variável nunca é impresso.
+        process.stderr.write(`e2e: variável(is) ausente(s): ${faltando.join(', ')}\n`);
         return false;
       }
       return executar('pnpm', ['exec', 'playwright', 'test'], { env });

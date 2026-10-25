@@ -3,11 +3,18 @@
 // são proibidos.
 import { createRequire } from 'node:module';
 
-import type { createClient as CriarCliente } from 'redis';
-
 // `redis` é dependência da API, não da raiz: resolve a partir do pacote dela.
 const daApi = createRequire(new URL('../../apps/api/package.json', import.meta.url));
-const { createClient } = daApi('redis') as { createClient: typeof CriarCliente };
+// Só o que este arquivo usa do cliente (o tipo do pacote não resolve a partir de e2e/).
+interface ClienteRedis {
+  connect(): Promise<unknown>;
+  scanIterator(opcoes: { MATCH: string; COUNT: number }): AsyncIterable<string[]>;
+  del(chaves: string[]): Promise<unknown>;
+  destroy(): void;
+}
+const { createClient } = daApi('redis') as {
+  createClient(opcoes: { socket: { host: string; port: number }; password: string }): ClienteRedis;
+};
 
 const PADRAO = 'ratelimit:*';
 const LOTE_DO_SCAN = 200;
