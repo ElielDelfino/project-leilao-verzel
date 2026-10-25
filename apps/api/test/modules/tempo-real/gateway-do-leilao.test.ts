@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { request } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import type { Namespace } from 'socket.io';
+import type { Namespace, Socket as ServerSocket } from 'socket.io';
 import { io, Manager, type Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,7 +12,10 @@ import {
   type EstadoDaSala,
   MontadorDoEstado,
 } from '../../../src/modules/tempo-real/estado-da-sala.js';
-import { GatewayDoLeilao } from '../../../src/modules/tempo-real/gateway-do-leilao.js';
+import {
+  GatewayDoLeilao,
+  MENSAGEM_ORIGEM_RECUSADA,
+} from '../../../src/modules/tempo-real/gateway-do-leilao.js';
 import { criarAppDeTeste, ENV_DE_TESTE } from '../../helpers/app-de-teste.js';
 
 // Servidor Nest real na porta 0 + socket.io-client (tarefa 082, specs/009). O Redis é o falso do
@@ -109,6 +113,55 @@ async function recusado(url: string, opcoes: OpcoesDoCliente = {}): Promise<stri
   const socket = conectar(url, opcoes);
   const erro = await aguardar(socket, 'connect_error');
   return erro?.message ?? '';
+}
+
+/**
+ * Handshake HTTP cru do upgrade para websocket, sem cliente socket.io: devolve o status que o
+ * engine respondeu. 101 = aceito. Num upgrade recusado pelo `allowRequest` o engine.io sempre
+ * escreve "400 Bad Request" com a mensagem do motivo no corpo ("Forbidden"; o 403 só existe no
+ * polling, que aqui nem chega lá). `origem: null` omite o Origin.
+ */
+interface RespostaDoUpgrade {
+  readonly status: number;
+  readonly corpo: string;
+}
+
+function handshakeDoUpgrade(url: string, origem: string | null): Promise<RespostaDoUpgrade> {
+  const { hostname, port } = new URL(url);
+  return new Promise((resolver, rejeitar) => {
+    const requisicao = request({
+      hostname,
+      port,
+      path: '/socket.io/?EIO=4&transport=websocket',
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': randomBytes(16).toString('base64'),
+        ...(origem === null ? {} : { Origin: origem }),
+      },
+      timeout: ESPERA_MAXIMA_MS,
+    });
+    requisicao.once('upgrade', (resposta, conexao) => {
+      conexao.destroy();
+      resolver({ status: resposta.statusCode ?? 0, corpo: '' });
+    });
+    requisicao.once('response', (resposta) => {
+      let corpo = '';
+      resposta.setEncoding('utf8');
+      resposta.on('data', (pedaco: string) => {
+        corpo += pedaco;
+      });
+      resposta.on('end', () => {
+        resolver({ status: resposta.statusCode ?? 0, corpo });
+      });
+    });
+    requisicao.once('timeout', () => {
+      requisicao.destroy(new Error('sem resposta ao upgrade'));
+    });
+    requisicao.once('error', rejeitar);
+    requisicao.end();
+  });
 }
 
 async function enviar(socket: Socket, evento: string, payload?: unknown): Promise<Ack> {
@@ -218,20 +271,47 @@ describe('gateway do leilão: transporte e origem', () => {
     expect(socket.connected).toBe(false);
   });
 
-  it('recusa origem diferente de WEB_ORIGIN', async () => {
+  // A recusa é do engine (allowRequest): o handshake HTTP do upgrade recebe 403 antes de qualquer
+  // socket existir. O polling não serve de prova: o engine o recusa antes (400, transporte
+  // desconhecido, pois só há websocket).
+  it('o engine recusa o upgrade com origem diferente de WEB_ORIGIN (Forbidden)', async () => {
+    const { app, url } = await subirApp();
+
+    const resposta = await handshakeDoUpgrade(url, 'http://malicioso.example');
+
+    expect(resposta).toEqual({ status: 400, corpo: 'Forbidden' });
+    expect(namespaceDe(app).sockets.size).toBe(0);
+  });
+
+  it('o engine recusa o upgrade sem o cabeçalho Origin (Forbidden)', async () => {
+    const { app, url } = await subirApp();
+
+    const resposta = await handshakeDoUpgrade(url, null);
+
+    expect(resposta).toEqual({ status: 400, corpo: 'Forbidden' });
+    expect(namespaceDe(app).sockets.size).toBe(0);
+  });
+
+  it('o engine aceita o upgrade (101) com a origem permitida', async () => {
     const { url } = await subirApp();
+
+    const resposta = await handshakeDoUpgrade(url, ORIGEM);
+
+    expect(resposta.status).toBe(101);
+  });
+
+  // O middleware do namespace é reforço: só é alcançável se o engine deixar passar. Troca-se o
+  // `allowRequest` por um permissivo para provar que, sem ele, a origem ainda é recusada.
+  it('o middleware do namespace recusa a origem inválida mesmo se o engine a deixar passar', async () => {
+    const { app, url } = await subirApp();
+    namespaceDe(app).server.engine.opts.allowRequest = (_requisicao, resposta) => {
+      resposta(null, true);
+    };
 
     const mensagem = await recusado(url, { origem: 'http://malicioso.example' });
 
-    expect(mensagem).toBe('ORIGEM_NAO_PERMITIDA');
-  });
-
-  it('recusa a conexão sem o cabeçalho Origin', async () => {
-    const { url } = await subirApp();
-
-    const mensagem = await recusado(url, { origem: null });
-
-    expect(mensagem).toBe('ORIGEM_NAO_PERMITIDA');
+    expect(mensagem).toBe(MENSAGEM_ORIGEM_RECUSADA);
+    expect(namespaceDe(app).sockets.size).toBe(0);
   });
 });
 
@@ -396,6 +476,108 @@ describe('gateway do leilão: limites', () => {
   });
 });
 
+/** Promessa que o teste resolve na hora que quiser (sem tempo fixo). */
+function adiavel<T>(): { promessa: Promise<T>; resolver: (valor: T) => void } {
+  let resolver!: (valor: T) => void;
+  const promessa = new Promise<T>((aceitar) => {
+    resolver = aceitar;
+  });
+  return { promessa, resolver };
+}
+
+function socketDoServidor(app: NestFastifyApplication): ServerSocket {
+  const socket = [...namespaceDe(app).sockets.values()][0];
+  if (socket === undefined) throw new Error('nenhum socket conectado no servidor');
+  return socket;
+}
+
+describe('gateway do leilão: serialização de entrar_lote e sair_lote por socket', () => {
+  it('sair_lote enviado sem esperar o ack só roda depois do entrar_lote (nada de sucesso fora da sala)', async () => {
+    const { app, url } = await subirApp();
+    const loteId = randomUUID();
+    const sala = `lote:${loteId}`;
+    const leitura = adiavel<EstadoDaSala>();
+    const montar = vi.spyOn(app.get(MontadorDoEstado), 'montar');
+    montar.mockImplementationOnce(() => leitura.promessa);
+    const socket = await conectado(url);
+    const noServidor = socketDoServidor(app);
+    const sair = vi.spyOn(noServidor, 'leave');
+
+    const ack = enviar(socket, 'entrar_lote', { loteId });
+    await aguardarServidor(() => montar.mock.calls.length === 1, 'começar a montar o estado');
+    emitir(socket, 'sair_lote', { loteId });
+    await sincronizar(socket); // o ack garante que o servidor já tratou o sair_lote
+    // O sair_lote está na fila atrás do entrar_lote: o socket segue no room enquanto o estado não vem.
+    expect(sair).not.toHaveBeenCalled();
+    expect(noServidor.rooms.has(sala)).toBe(true);
+
+    leitura.resolver(estadoSimulado(loteId, undefined));
+
+    expect((await ack).sucesso).toBe(true);
+    await aguardarServidor(() => !noServidor.rooms.has(sala), 'processar o sair_lote');
+    expect(sair).toHaveBeenCalledExactlyOnceWith(sala);
+  });
+
+  it('uma operação que rejeita não trava a fila: a seguinte executa', async () => {
+    const { app, url } = await subirApp();
+    await conectado(url);
+    const gateway = app.get(GatewayDoLeilao) as unknown as {
+      naFila: <T>(socket: ServerSocket, sala: string, operacao: () => Promise<T>) => Promise<T>;
+    };
+    const noServidor = socketDoServidor(app);
+    const executadas: string[] = [];
+
+    const primeira = gateway.naFila(noServidor, 'lote:x', () => {
+      executadas.push('primeira');
+      return Promise.reject(new Error('falha simulada'));
+    });
+    const segunda = gateway.naFila(noServidor, 'lote:x', () => {
+      executadas.push('segunda');
+      return Promise.resolve('ok');
+    });
+
+    await expect(primeira).rejects.toThrow('falha simulada');
+    await expect(segunda).resolves.toBe('ok');
+    expect(executadas).toEqual(['primeira', 'segunda']);
+  });
+
+  it('se o socket saiu do room durante a montagem, responde INDISPONIVEL e não deixa sala', async () => {
+    const { app, url } = await subirApp();
+    const loteId = randomUUID();
+    const sala = `lote:${loteId}`;
+    const leitura = adiavel<EstadoDaSala>();
+    const montar = vi.spyOn(app.get(MontadorDoEstado), 'montar');
+    montar.mockImplementationOnce(() => leitura.promessa);
+    const socket = await conectado(url);
+    const noServidor = socketDoServidor(app);
+
+    const ack = enviar(socket, 'entrar_lote', { loteId });
+    await aguardarServidor(() => montar.mock.calls.length === 1, 'começar a montar o estado');
+    await noServidor.leave(sala); // saída fora da fila, durante o await do gateway
+    leitura.resolver(estadoSimulado(loteId, undefined));
+
+    expect(await ack).toMatchObject({ sucesso: false, erro: { codigo: 'INDISPONIVEL' } });
+    expect(salas(app).has(sala)).toBe(false);
+  });
+
+  it('se o socket desconectou durante a montagem, a entrada é desfeita (nada fica no room)', async () => {
+    const { app, url } = await subirApp();
+    const loteId = randomUUID();
+    const leitura = adiavel<EstadoDaSala>();
+    const montar = vi.spyOn(app.get(MontadorDoEstado), 'montar');
+    montar.mockImplementationOnce(() => leitura.promessa);
+    const socket = await conectado(url);
+
+    void enviar(socket, 'entrar_lote', { loteId }).catch(() => undefined);
+    await aguardarServidor(() => montar.mock.calls.length === 1, 'começar a montar o estado');
+    socket.disconnect();
+    await aguardarServidor(() => namespaceDe(app).sockets.size === 0, 'fechar o socket');
+    leitura.resolver(estadoSimulado(loteId, undefined));
+
+    await aguardarServidor(() => !salas(app).has(`lote:${loteId}`), 'esvaziar o room do lote');
+  });
+});
+
 describe('gateway do leilão: vaga entre as 200 e reconexão do namespace', () => {
   it('reconectar o namespace N vezes na mesma conexão não consome vagas além da ativa', async () => {
     const { app, url } = await subirApp({ limitesDoTempoReal: { porLote: 5, total: 2 } });
@@ -437,7 +619,7 @@ describe('gateway do leilão: tetos por socket', () => {
   });
 
   it('com o teto padrão, o 11º lote distinto é recusado', async () => {
-    const { url } = await subirApp();
+    const { url } = await subirApp({ limitesDoTempoReal: { entradasPorJanela: 100 } });
     const socket = await conectado(url);
 
     for (let i = 0; i < 10; i += 1) {
@@ -449,7 +631,9 @@ describe('gateway do leilão: tetos por socket', () => {
   });
 
   it('entrar de novo em lote já presente não conta, e sair libera uma vaga no teto', async () => {
-    const { url } = await subirApp({ limitesDoTempoReal: { salasDeLotePorSocket: 2 } });
+    const { url } = await subirApp({
+      limitesDoTempoReal: { salasDeLotePorSocket: 2, entradasPorJanela: 100 },
+    });
     const socket = await conectado(url);
     const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()];
     await enviar(socket, 'entrar_lote', { loteId: a });
@@ -488,6 +672,27 @@ describe('gateway do leilão: tetos por socket', () => {
         erro: { codigo: 'INDISPONIVEL', mensagem: expect.any(String) as string },
       })),
     );
+  });
+
+  it('entradasPorJanela baixo com eventosPorJanela alto: a 3ª entrada da janela é INDISPONIVEL', async () => {
+    const { url } = await subirApp({
+      limitesDoTempoReal: {
+        eventosPorJanela: 100,
+        entradasPorJanela: 2,
+        salasDeLotePorSocket: 100,
+      },
+    });
+    const socket = await conectado(url);
+
+    const primeira = await enviar(socket, 'entrar_lote', { loteId: randomUUID() });
+    const segunda = await enviar(socket, 'entrar_lote', { loteId: randomUUID() });
+    const terceira = await enviar(socket, 'entrar_lote', { loteId: randomUUID() });
+
+    expect([primeira.sucesso, segunda.sucesso]).toEqual([true, true]);
+    expect(terceira).toEqual({
+      sucesso: false,
+      erro: { codigo: 'INDISPONIVEL', mensagem: expect.any(String) as string },
+    });
   });
 
   it('eventos sem ack acima do limite são ignorados e a conexão continua', async () => {

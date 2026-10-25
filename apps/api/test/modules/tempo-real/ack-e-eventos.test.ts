@@ -296,6 +296,7 @@ describe('difusão dos eventos por room', () => {
     });
     publicador.publicar({ tipo: 'saldo_atualizado', payload: saldo, usuarioId: destinatario });
     // Privado sem destinatário: descartado, não difundido a ninguém.
+    // @ts-expect-error o tipo já impede; aqui se simula um chamador sem tipagem (defesa em runtime)
     publicador.publicar({ tipo: 'saldo_atualizado', payload: saldo });
     await ate(() => doDestinatario?.length === 2);
     await silencio();

@@ -13,13 +13,28 @@ export type TipoDeEvento = keyof EventosDoServidor;
  * `usuarioId` é o destinatário dos eventos privados (room `usuario:{id}`, specs/009); fica fora
  * do payload, que não leva dado de usuário (D8). Eventos públicos não têm destinatário.
  */
-export type EventoDeDominio = {
-  [Tipo in TipoDeEvento]: {
+export type TipoDeEventoPrivado = 'voce_foi_superado' | 'saldo_atualizado' | 'lote_arrematado';
+export type TipoDeEventoPublico = Exclude<TipoDeEvento, TipoDeEventoPrivado>;
+
+/** Evento privado: o destinatário é obrigatório (sem `usuarioId` não compila). */
+export type EventoPrivadoDeDominio = {
+  [Tipo in TipoDeEventoPrivado]: {
     readonly tipo: Tipo;
     readonly payload: EventosDoServidor[Tipo];
-    readonly usuarioId?: string;
+    readonly usuarioId: string;
   };
-}[TipoDeEvento];
+}[TipoDeEventoPrivado];
+
+/** Evento público: sem destinatário (um `usuarioId` aqui também não compila). */
+export type EventoPublicoDeDominio = {
+  [Tipo in TipoDeEventoPublico]: {
+    readonly tipo: Tipo;
+    readonly payload: EventosDoServidor[Tipo];
+    readonly usuarioId?: never;
+  };
+}[TipoDeEventoPublico];
+
+export type EventoDeDominio = EventoPrivadoDeDominio | EventoPublicoDeDominio;
 
 /** Para quem o evento vai: vazio nos públicos; `usuarioId` nos privados. */
 export interface DestinoDoEvento {
