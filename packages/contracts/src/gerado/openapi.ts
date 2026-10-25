@@ -399,7 +399,14 @@ export interface paths {
      *     veredito `integro`). `selo` é null enquanto o lote não foi encerrado nem cancelado. O veredito
      *     reflete o banco no momento da consulta, por isso a resposta nunca é cacheada
      *     (`Cache-Control: no-store`). Lote inexistente, ou id que não é UUID, é 404 `NAO_ENCONTRADO`.
-     *     Só pseudônimos: nenhum nome, e-mail nem id de usuário.
+     *     Só pseudônimos: nenhum nome, e-mail nem id de usuário. Rate limit (specs/011 §Rate limit),
+     *     contado junto com `GET /api/auditoria/chaves`: **até a tarefa 020 (`trustProxy`, F5), só um
+     *     teto global de 600 requisições por minuto** (sem limite fino por IP: atrás do Caddy todos os
+     *     clientes teriam o mesmo IP; risco aceito, como em specs/003); **a partir da 020, 60 por minuto
+     *     por IP** (IPv6 agrupado por /64). Acima do limite, 429 `MUITAS_TENTATIVAS` com `Retry-After`.
+     *     O contador conta depois da validação de formato (id que não é UUID é 404 e não o consome).
+     *     Janela fixa: rajada de até 2 vezes o limite na virada. Redis fora: falha **aberta** (a
+     *     requisição passa, com aviso de log). Todas as respostas, inclusive os erros, são `no-store`.
      */
     get: operations['auditoriaDoLote'];
     put?: never;
@@ -422,6 +429,10 @@ export interface paths {
      * @description Lê `signing_keys`, ordenada por `ativaDesde` crescente (desempate `keyId`); a chave antiga
      *     continua publicada depois de uma rotação. `Cache-Control: public, max-age=60`. O navegador que
      *     encontrar um `keyId` ausente da lista refaz a consulta uma vez antes de acusar problema.
+     *     Mesmo contador e mesmo regime de rate limit de `GET /api/auditoria/lotes/{id}` (teto global de
+     *     600 por minuto até a tarefa 020, 60 por minuto por IP depois; falha aberta se o Redis cair;
+     *     specs/011 §Rate limit). O 429 e o 503 saem com `Cache-Control: no-store`; só o 200 é
+     *     `public, max-age=60`.
      */
     get: operations['auditoriaChaves'];
     put?: never;
@@ -475,6 +486,93 @@ export interface paths {
      *     valores são 0.
      */
     get: operations['painelResumo'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/painel/lotes/{id}/cancelamento': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancela o lote do próprio leiloeiro, com estorno do líder (specs/006 RF-04, specs/010)
+     * @description Só enquanto o lote está `agendado` ou `ao_vivo`; sem corpo. Antes da transação, nesta ordem:
+     *     CSRF (403 `CSRF_INVALIDO`), sessão (401), papel (403 `PAPEL_NAO_PERMITIDO`) e `id` que não é
+     *     UUID (404 `NAO_ENCONTRADO`). Uma transação, com o lote travado por `FOR UPDATE` antes das
+     *     carteiras (specs/010 §Cancelamento): lote inexistente ou de outro leiloeiro → 404
+     *     `NAO_ENCONTRADO` (os dois casos são indistinguíveis); status gravado `encerrado` ou
+     *     `cancelado`, ou horário do Postgres ≥ `fimEm` (o job ainda não encerrou o lote) → 409
+     *     `LOTE_ENCERRADO`. Com líder, estorna o comprometido dele e sela o histórico com status
+     *     `cancelado`; tudo ou nada. A resposta é o `Lote` lido depois do COMMIT (status `cancelado`).
+     *     O valor estornado é o `compromisso` lido sob o lock do lote, nunca um valor do cliente.
+     *     Repetir o pedido depois do sucesso → 409 `LOTE_ENCERRADO`. Contenção de lock além de 5 s
+     *     (`lock_timeout`) ou consulta além de 10 s (`statement_timeout`) → rollback e 503
+     *     `INDISPONIVEL` sem `detalhes`. Depois do COMMIT saem os eventos `lote_cancelado` e, se havia líder,
+     *     `saldo_atualizado` para ele (specs/009).
+     */
+    post: operations['painelCancelarLote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/comprovantes/{codigo}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Comprovante de arremate pelo código público, sem login (specs/011)
+     * @description O acesso público é só pelo `codigo` (16 caracteres base62 aleatórios, cerca de 95 bits;
+     *     anti-IDOR). Código fora do formato `^[0-9A-Za-z]{16}$` e código inexistente respondem o mesmo
+     *     404 `NAO_ENCONTRADO`, sem pista de qual foi o caso. Nunca chama a Scryfall: a imagem é
+     *     `/api/imagens/{snapshotId}`. Só pseudônimo: nenhum nome, e-mail nem id de usuário. Nunca
+     *     cacheada: o 200 e os erros (404, 429, 503) saem com `Cache-Control: no-store`. Rate limit com
+     *     contador próprio, separado do da auditoria (specs/011 §Rate limit): **até a tarefa 020
+     *     (`trustProxy`, F5), só um teto global de 600 requisições por minuto** (sem limite fino por IP;
+     *     risco aceito, como em specs/003); **a partir da 020, 60 por minuto por IP** (IPv6 agrupado por
+     *     /64). Acima do limite, 429 `MUITAS_TENTATIVAS` com `Retry-After`. O contador conta depois da
+     *     validação de formato (código malformado é 404 e não o consome). Janela fixa: rajada de até 2
+     *     vezes o limite na virada. Redis fora: falha **aberta** (a requisição passa, com aviso de log).
+     */
+    get: operations['comprovanteObter'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/me/arremates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Lotes arrematados pelo licitante, com o comprovante (specs/011 RF-03)
+     * @description Só os recibos do próprio usuário (nunca de outro), por `emitidoEm` decrescente (desempate
+     *     `id` do recibo decrescente); **24 por página** (`meta.limite` = 24); `pagina` de 1 a 500;
+     *     além da última, 200 com lista vazia e o `total` real. Só licitante: leiloeiro recebe 403
+     *     `PAPEL_NAO_PERMITIDO`. Sem nome, e-mail nem id de usuário. Nunca cacheada
+     *     (`Cache-Control: no-store`, também nos erros 401, 403, 422 e 503). A aba "Meus lances" usa
+     *     `GET /api/me/lances`. Sem rate limit (rota autenticada).
+     */
+    get: operations['meArrematesListar'];
     put?: never;
     post?: never;
     delete?: never;
@@ -817,6 +915,57 @@ export interface components {
       sucesso: true;
       dados: components['schemas']['ChavePublica'][];
     };
+    /**
+     * @description Código público do comprovante: 16 caracteres base62 aleatórios, cerca de 95 bits (specs/010
+     *     §Dados). É a única chave de acesso público ao comprovante.
+     */
+    CodigoDoComprovante: string;
+    /** @description Nome e imagem da carta; a imagem é sempre `/api/imagens/{snapshotId}`, nunca a Scryfall. */
+    CartaDoComprovante: {
+      nome: string;
+      imagemUrl: string;
+    };
+    /**
+     * @description Comprovante de arremate (specs/011), sem dados pessoais: nenhum nome, e-mail nem id de
+     *     usuário. `hashFinal`, `assinaturaSelo`, `keyId` e `seladoEm` são os do selo do lote
+     *     (specs/008) gravados no recibo; `valorCentavos` e `vencedorPseudonimo` são os do selo.
+     *     `auditoriaUrl` é a rota da SPA, `/auditoria/{loteId}`.
+     */
+    Comprovante: {
+      codigo: components['schemas']['CodigoDoComprovante'];
+      vencedorPseudonimo: components['schemas']['Pseudonimo'];
+      valorCentavos: components['schemas']['Centavos'];
+      carta: components['schemas']['CartaDoComprovante'];
+      hashFinal: components['schemas']['HashHex'];
+      assinaturaSelo: components['schemas']['AssinaturaBase64Url'];
+      keyId: components['schemas']['KeyId'];
+      seladoEm: components['schemas']['Instante'];
+      emitidoEm: components['schemas']['Instante'];
+      auditoriaUrl: string;
+    };
+    RespostaComprovante: {
+      /** @constant */
+      sucesso: true;
+      dados: components['schemas']['Comprovante'];
+    };
+    /**
+     * @description Item de "Meus arremates" (specs/011): o resumo do comprovante do próprio usuário. O comprovante
+     *     completo está em `GET /api/comprovantes/{codigo}` e a rota da SPA é `/comprovantes/{codigo}`.
+     *     Sem nome, e-mail nem id de usuário.
+     */
+    Arremate: {
+      codigo: components['schemas']['CodigoDoComprovante'];
+      valorCentavos: components['schemas']['Centavos'];
+      carta: components['schemas']['CartaDoComprovante'];
+      emitidoEm: components['schemas']['Instante'];
+      auditoriaUrl: string;
+    };
+    RespostaMeusArremates: {
+      /** @constant */
+      sucesso: true;
+      dados: components['schemas']['Arremate'][];
+      meta: components['schemas']['MetaPaginacao'];
+    };
     Erro: {
       /** @constant */
       sucesso: false;
@@ -1128,6 +1277,130 @@ export interface components {
                   disponivelCentavos: components['schemas']['Centavos'];
                 };
               };
+        };
+      };
+    };
+    /**
+     * @description O lote não pode mais ser cancelado (409 `LOTE_ENCERRADO`, specs/010 §Cancelamento): já está
+     *     `encerrado` ou `cancelado`, ou o horário do Postgres chegou ao `fimEm` e o job ainda não o
+     *     encerrou. Sem `detalhes`.
+     */
+    ErroLoteEncerradoNoCancelamento: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'LOTE_ENCERRADO';
+          };
+        };
+      };
+    };
+    /** @description Recurso inexistente, ou id/código malformado, com o mesmo corpo (NAO_ENCONTRADO). Nunca cacheado. */
+    ErroNaoEncontradoNoStore: {
+      headers: {
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'NAO_ENCONTRADO';
+          };
+        };
+      };
+    };
+    /**
+     * @description Limite das rotas públicas de leitura excedido (MUITAS_TENTATIVAS, specs/011 §Rate limit):
+     *     teto global de 600 requisições por minuto por contador até a tarefa 020 (`trustProxy`, F5) e
+     *     60 por minuto por IP depois. Nunca cacheado.
+     */
+    ErroMuitasTentativasNoStore: {
+      headers: {
+        'Retry-After': components['headers']['RetryAfter'];
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'MUITAS_TENTATIVAS';
+          };
+        };
+      };
+    };
+    /** @description Sem cookie `access_token` válido (NAO_AUTENTICADO). Nunca cacheado. */
+    ErroNaoAutenticadoNoStore: {
+      headers: {
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'NAO_AUTENTICADO';
+          };
+        };
+      };
+    };
+    /** @description Rota restrita a outro papel (PAPEL_NAO_PERMITIDO). Nunca cacheado. */
+    ErroPapelNaoPermitidoNoStore: {
+      headers: {
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'PAPEL_NAO_PERMITIDO';
+          };
+        };
+      };
+    };
+    /**
+     * @description Parâmetro fora do contrato (DADOS_INVALIDOS), com `detalhes.campo` = nome do primeiro campo
+     *     inválido. Nunca cacheado.
+     */
+    ErroDadosInvalidosComCampoNoStore: {
+      headers: {
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'DADOS_INVALIDOS';
+            detalhes: {
+              campo: string;
+            };
+          };
+        };
+      };
+    };
+    /**
+     * @description Dependência fora (banco; INDISPONIVEL), com mensagem fixa e sem `detalhes`. Nunca cacheado.
+     *     O Redis fora **não** causa este erro nas rotas públicas de leitura: o rate limit delas falha
+     *     aberto (specs/011 §Rate limit).
+     */
+    ErroIndisponivelNoStore: {
+      headers: {
+        'Cache-Control': components['headers']['CacheControlNoStore'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['Erro'] & {
+          erro: {
+            /** @constant */
+            codigo: 'INDISPONIVEL';
+            detalhes?: never;
+          };
         };
       };
     };
@@ -1783,7 +2056,9 @@ export interface operations {
           'application/json': components['schemas']['RespostaAuditoria'];
         };
       };
-      404: components['responses']['ErroNaoEncontrado'];
+      404: components['responses']['ErroNaoEncontradoNoStore'];
+      429: components['responses']['ErroMuitasTentativasNoStore'];
+      503: components['responses']['ErroIndisponivelNoStore'];
       default: components['responses']['Erro'];
     };
   };
@@ -1819,6 +2094,8 @@ export interface operations {
           'application/json': components['schemas']['RespostaChaves'];
         };
       };
+      429: components['responses']['ErroMuitasTentativasNoStore'];
+      503: components['responses']['ErroIndisponivelNoStore'];
       default: components['responses']['Erro'];
     };
   };
@@ -1906,6 +2183,159 @@ export interface operations {
       };
       401: components['responses']['ErroNaoAutenticado'];
       403: components['responses']['ErroPapelNaoPermitido'];
+      default: components['responses']['Erro'];
+    };
+  };
+  painelCancelarLote: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: components['schemas']['Uuid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Lote cancelado. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "sucesso": true,
+           *       "dados": {
+           *         "id": "0198f3c0-7b1a-7c00-8000-000000000001",
+           *         "titulo": "Black Lotus",
+           *         "status": "cancelado",
+           *         "cartaNome": "Black Lotus",
+           *         "raridade": "rare",
+           *         "imagemUrl": "/api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1",
+           *         "inicioEm": "2026-10-27T14:00:00.000Z",
+           *         "fimEm": "2026-10-27T14:30:00.000Z",
+           *         "lanceInicialCentavos": 10000,
+           *         "incrementoMinimoCentavos": 1500,
+           *         "lanceAtualCentavos": 16500,
+           *         "precoAtualCentavos": 16500,
+           *         "totalLances": 2,
+           *         "valorArremateCentavos": null,
+           *         "criadoEm": "2026-10-27T13:50:00.000Z"
+           *       }
+           *     }
+           */
+          'application/json': {
+            /** @constant */
+            sucesso: true;
+            dados: components['schemas']['Lote'];
+          };
+        };
+      };
+      401: components['responses']['ErroNaoAutenticado'];
+      403: components['responses']['ErroCsrfOuPapel'];
+      404: components['responses']['ErroNaoEncontrado'];
+      409: components['responses']['ErroLoteEncerradoNoCancelamento'];
+      503: components['responses']['ErroIndisponivel'];
+      default: components['responses']['Erro'];
+    };
+  };
+  comprovanteObter: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description `codigo` do comprovante; o formato é validado pelo servidor (malformado → 404). */
+        codigo: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Comprovante. */
+      200: {
+        headers: {
+          'Cache-Control': components['headers']['CacheControlNoStore'];
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "sucesso": true,
+           *       "dados": {
+           *         "codigo": "k3Zt9QmW2xVbN7aD",
+           *         "vencedorPseudonimo": "Licitante #b04e7d",
+           *         "valorCentavos": 16500,
+           *         "carta": {
+           *           "nome": "Black Lotus",
+           *           "imagemUrl": "/api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1"
+           *         },
+           *         "hashFinal": "70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93",
+           *         "assinaturaSelo": "LBufCwppRc8LYu11Cam_IkR9Wu1cx-63pBnrnGYbHfy8MExN_wQR-cuvTM6KAtVsrAFCfWnaHX2sWNb2zXKvCA",
+           *         "keyId": "21fe31dfa154a261",
+           *         "seladoEm": "2026-10-27T14:30:00.412Z",
+           *         "emitidoEm": "2026-10-27T14:30:00.431Z",
+           *         "auditoriaUrl": "/auditoria/0198f3c0-7b1a-7c00-8000-000000000001"
+           *       }
+           *     }
+           */
+          'application/json': components['schemas']['RespostaComprovante'];
+        };
+      };
+      404: components['responses']['ErroNaoEncontradoNoStore'];
+      429: components['responses']['ErroMuitasTentativasNoStore'];
+      503: components['responses']['ErroIndisponivelNoStore'];
+      default: components['responses']['Erro'];
+    };
+  };
+  meArrematesListar: {
+    parameters: {
+      query?: {
+        /** @description Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006). */
+        pagina?: components['parameters']['PaginaLimitada'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Página dos arremates do usuário. */
+      200: {
+        headers: {
+          'Cache-Control': components['headers']['CacheControlNoStore'];
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "sucesso": true,
+           *       "dados": [
+           *         {
+           *           "codigo": "k3Zt9QmW2xVbN7aD",
+           *           "valorCentavos": 16500,
+           *           "carta": {
+           *             "nome": "Black Lotus",
+           *             "imagemUrl": "/api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1"
+           *           },
+           *           "emitidoEm": "2026-10-27T14:30:00.431Z",
+           *           "auditoriaUrl": "/auditoria/0198f3c0-7b1a-7c00-8000-000000000001"
+           *         }
+           *       ],
+           *       "meta": {
+           *         "total": 1,
+           *         "pagina": 1,
+           *         "limite": 24
+           *       }
+           *     }
+           */
+          'application/json': components['schemas']['RespostaMeusArremates'];
+        };
+      };
+      401: components['responses']['ErroNaoAutenticadoNoStore'];
+      403: components['responses']['ErroPapelNaoPermitidoNoStore'];
+      422: components['responses']['ErroDadosInvalidosComCampoNoStore'];
+      503: components['responses']['ErroIndisponivelNoStore'];
       default: components['responses']['Erro'];
     };
   };
