@@ -193,13 +193,22 @@ describe.skipIf(!BANCO.disponivel)('cadeia persistida do lote (Postgres real)', 
   it('sela o lote encerrado com o último lance como vencedor, e a verificação aceita', async () => {
     const loteId = await novoLote();
     await anexar(loteId, await licitante(), 15_000);
-    const ultimo = await anexar(loteId, await licitante(), 20_000);
+    const liderId = await licitante();
+    const ultimo = await anexar(loteId, liderId, 20_000);
+    const lote = {
+      id: loteId,
+      status: 'ao_vivo' as const,
+      totalLances: 2,
+      lanceAtualCentavos: 20_000,
+      liderId,
+    };
 
     const selo = await banco.transaction(async (tx) =>
-      cadeia.selar(tx, { loteId, status: 'encerrado', seladoEm: await agora(tx) }),
+      cadeia.selar(tx, { loteId, status: 'encerrado', seladoEm: await agora(tx), lote }),
     );
 
     expect(selo).toMatchObject({
+      ultimoLanceId: ultimo.id,
       totalLances: 2,
       hashFinal: ultimo.hash,
       vencedorPseudonimo: ultimo.pseudonimo,
@@ -217,10 +226,22 @@ describe.skipIf(!BANCO.disponivel)('cadeia persistida do lote (Postgres real)', 
     const loteId = await novoLote();
 
     const selo = await banco.transaction(async (tx) =>
-      cadeia.selar(tx, { loteId, status: 'cancelado', seladoEm: await agora(tx) }),
+      cadeia.selar(tx, {
+        loteId,
+        status: 'cancelado',
+        seladoEm: await agora(tx),
+        lote: {
+          id: loteId,
+          status: 'agendado',
+          totalLances: 0,
+          lanceAtualCentavos: null,
+          liderId: null,
+        },
+      }),
     );
 
     expect(selo).toMatchObject({
+      ultimoLanceId: null,
       totalLances: 0,
       hashFinal: hashGenese(loteId),
       vencedorPseudonimo: null,

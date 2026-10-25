@@ -14,6 +14,7 @@ import type { Banco } from '../../../src/db/banco.js';
 import { CadeiaDeLances, registrarChaveDeAssinatura } from '../../../src/modules/lances/index.js';
 import { derivarChaves } from '../../../src/modules/lances/integridade/assinatura.js';
 import { hashGenese } from '../../../src/modules/lances/integridade/hash.js';
+import { estadoDoLote } from '../../helpers/lances-por-sql.js';
 import { inserirLote, inserirUsuario } from '../../helpers/lotes-por-sql.js';
 import {
   type AppDeIdentidade,
@@ -113,6 +114,18 @@ describe.skipIf(!INFRA_DISPONIVEL)('auditoria pública (Postgres e Redis reais)'
     status: 'encerrado' | 'cancelado',
     vencedorId?: string,
   ): Promise<void> {
+    // Ordem do encerramento (D7): o selo confere o lote ainda aberto, depois o status muda.
+    const estado = await estadoDoLote(pool, loteId);
+    const lote = {
+      id: loteId,
+      status: 'ao_vivo' as const,
+      totalLances: estado.total,
+      lanceAtualCentavos: estado.lanceAtualCentavos,
+      liderId: estado.liderId,
+    };
+    await banco.transaction((tx) =>
+      cadeia.selar(tx, { loteId, status, seladoEm: new Date(), lote }),
+    );
     await pool.query(
       `update lots
           set inicio_em = now() - interval '2 hours',
@@ -125,7 +138,6 @@ describe.skipIf(!INFRA_DISPONIVEL)('auditoria pública (Postgres e Redis reais)'
         where id = $1`,
       [loteId, status, vencedorId ?? null],
     );
-    await banco.transaction((tx) => cadeia.selar(tx, { loteId, status, seladoEm: new Date() }));
   }
 
   /** SQL direto com o trigger desligado só nesta transação; rollback em qualquer falha. */
