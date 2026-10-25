@@ -1,0 +1,306 @@
+# Compose de produção (specs/014 §Produção, ADR 0013, 0023 e 0024): Postgres, Redis, API e Caddy
+# numa e2-micro.
+#   docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml up -d
+# Os valores vêm do .env da raiz (defaults não sensíveis); cada interpolação repete o default para o
+# compose também funcionar sem --env-file (o projeto fica em infra/, então o .env da raiz só é lido
+# com --env-file). O -p é obrigatório junto com o --env-file: o COMPOSE_PROJECT_NAME=leilao do .env
+# tem precedência sobre o `name:` abaixo e poria estes contêineres no projeto de dev (os volumes
+# têm nome fixo, leilao-prod_*, e não se misturam com os de dev).
+# Nenhuma senha passa por `environment:` ou `command:`: as senhas são arquivos montados pelo
+# Compose `secrets:` em /run/secrets/<nome> (ADR 0023).
+#   LEILAO_SECRETS_DIR  diretório com db_password e redis_password (padrão ../.secrets, criado por
+#                       `pnpm keys:generate`). Na VM, /run/leilao/secrets, gravado pelo
+#                       infra/deploy/fetch-secrets.sh a partir do Secret Manager (tarefa 008).
+#   API_IMAGE, WEB_IMAGE  imagens a usar (prod: ghcr.io/<owner>/leilao-api:<sha> e leilao-web:<sha>,
+#                       com `pull` e `up --no-build`); sem elas, o compose constrói as imagens locais.
+# Só o Caddy publica portas (80 e 443). Postgres e Redis ficam numa rede sem saída para a internet.
+name: leilao-prod
+
+# Logs do Docker (specs/014 §Observabilidade): json-file, 10 MB por arquivo, 5 arquivos.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18.6-alpine}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-leilao}
+      POSTGRES_USER: ${POSTGRES_USER:-leilao}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      TZ: ${TZ:-UTC}
+    secrets:
+      - db_password
+    networks:
+      - dados
+    volumes:
+      - pgdata:/var/lib/postgresql
+    read_only: true
+    tmpfs:
+      - /run:size=8m,nosuid,nodev,noexec
+      - /var/run/postgresql:size=8m,nosuid,nodev,noexec
+      - /tmp:size=16m,nosuid,nodev,noexec
+    # Mesmas capabilities do compose de dev (database/postgres/docker-compose.yml): só o entrypoint,
+    # como root, as usa (PGDATA, leitura do segredo, gosu); o postgres roda sem nenhuma.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: ${POSTGRES_NOFILE:-4096}
+        hard: ${POSTGRES_NOFILE:-4096}
+    deploy:
+      resources:
+        limits:
+          cpus: '${POSTGRES_CPUS:-1}'
+          memory: ${POSTGRES_MEM:-300m}
+          pids: ${POSTGRES_PIDS:-200}
+    # RAM + swap (ADR 0013 e 0024): o banco pode usar swap até 2× o limite em vez de ser morto pelo
+    # OOM do cgroup.
+    memswap_limit: ${POSTGRES_MEMSWAP:-600m}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
+      start_interval: 1s
+    # Fast shutdown do Postgres (STOPSIGNAL SIGINT da imagem) com tempo para o checkpoint.
+    stop_grace_period: 30s
+    logging: *logging
+    restart: always
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:8.8.3-alpine}
+    # Igual ao dev (cache/redis/docker-compose.yml): valida o charset base64url da senha, grava
+    # `requirepass` num redis.conf no tmpfs /run (600, dono redis) e segue o entrypoint oficial.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        umask 077
+        arquivo=/run/secrets/redis_password
+        if [ ! -r "$$arquivo" ]; then
+          echo "redis: $$arquivo ausente ou ilegível" >&2
+          exit 1
+        fi
+        senha=$$(cat "$$arquivo")
+        case "$$senha" in
+          '' | *[!A-Za-z0-9_-]*)
+            echo "redis: $$arquivo vazio ou fora de base64url (A-Z a-z 0-9 - _)" >&2
+            exit 1
+            ;;
+        esac
+        mkdir -p /run/redis
+        printf 'requirepass %s\n' "$$senha" > /run/redis/redis.conf
+        unset senha
+        chown -R redis:redis /run/redis
+        exec docker-entrypoint.sh "$$@"
+      - redis-entrypoint
+    command:
+      - redis-server
+      - /run/redis/redis.conf
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-48mb}
+      - --maxmemory-policy
+      - volatile-lru
+      - --save
+      - ''
+      - --appendonly
+      - 'no'
+    secrets:
+      - redis_password
+    networks:
+      - dados
+    read_only: true
+    tmpfs:
+      - /run:size=8m,nosuid,nodev,noexec
+      - /tmp:size=8m,nosuid,nodev,noexec
+      # O entrypoint da imagem carrega todo .so deste diretório (search, json, bloom, timeseries).
+      # Nenhuma spec usa esses módulos: um tmpfs vazio por cima faz o Redis subir sem eles.
+      - /usr/local/lib/redis/modules:size=64k,mode=0555,nosuid,nodev,noexec
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: ${REDIS_NOFILE:-4096}
+        hard: ${REDIS_NOFILE:-4096}
+    deploy:
+      resources:
+        limits:
+          cpus: '${REDIS_CPUS:-0.5}'
+          memory: ${REDIS_MEM:-64m}
+          pids: ${REDIS_PIDS:-64}
+    # Sem swap (ADR 0024): o maxmemory limita o Redis abaixo do limite do contêiner, e sem
+    # persistência não há fork.
+    memswap_limit: ${REDIS_MEMSWAP:-64m}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli ping | grep -q PONG',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+      start_interval: 1s
+    logging: *logging
+    restart: always
+
+  api:
+    image: ${API_IMAGE:-leilao-api:local}
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      API_PORT: ${API_PORT:-13000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: ${TZ:-UTC}
+      SCRYFALL_USER_AGENT: ${SCRYFALL_USER_AGENT:-LeilaoVerzel/0.1}
+      # Conexão em partes (specs/014 §Conexão da API com Postgres e Redis), pelos nomes dos serviços.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-leilao}
+      POSTGRES_USER: ${POSTGRES_USER:-leilao}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Origem pública da SPA (CORS e cookies); a validação no boot é do api-dev.
+      WEB_ORIGIN: https://${CADDY_SITE_ADDRESS:-localhost}
+      # Caminhos (não os valores) das senhas: a API lê <VAR> ou <VAR>_FILE (ADR 0023).
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      # JWT_SECRET (F1), PSEUDONYM_HMAC_KEY e ED25519_PRIVATE_KEY (F3) entram só neste serviço, como
+      # JWT_SECRET_FILE etc. + secrets jwt_secret, pseudonym_hmac_key e ed25519_private_key, quando a
+      # API passar a lê-los (ADR 0023). Nunca em environment:. Montá-los antes faria o `up` falhar,
+      # porque os arquivos ainda não existem em .secrets/.
+    # Os arquivos montados por `secrets:` (bind) mantêm dono e modo do host; uid/gid/mode do
+    # Compose valem só no Swarm. A API roda como uid 1000 sem capabilities, então os arquivos que ela
+    # lê precisam ser do uid 1000 e só dele: `chown 1000:1000` e modo 600 (specs/014 §Segredos) ou
+    # 0400, diretório 700, nunca 644 (keys:generate: tarefa 023; fetch-secrets na VM: tarefa 008).
+    # O Postgres e o Redis leem como root no entrypoint (DAC_OVERRIDE e DAC_READ_SEARCH).
+    secrets:
+      - db_password
+      - redis_password
+    # borda: alcançada pelo Caddy e com saída para a Scryfall; dados: Postgres e Redis.
+    networks:
+      - borda
+      - dados
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /run:size=8m,nosuid,nodev,noexec
+      - /tmp:size=16m,nosuid,nodev,noexec
+    # Usuário node (uid 1000) da imagem, porta 13000: nenhuma capability.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: ${API_NOFILE:-8192}
+        hard: ${API_NOFILE:-8192}
+    deploy:
+      resources:
+        limits:
+          cpus: '${API_CPUS:-1}'
+          memory: ${API_MEM:-300m}
+          pids: ${API_PIDS:-128}
+    memswap_limit: ${API_MEMSWAP:-600m}
+    # Healthcheck: o HEALTHCHECK de apps/api/Dockerfile (provisório em /api/health/live até a 017).
+    logging: *logging
+    restart: always
+
+  caddy:
+    image: ${WEB_IMAGE:-leilao-web:local}
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-localhost}
+      API_PORT: ${API_PORT:-13000}
+      # Teto de heap do runtime Go em ~75% do limite do contêiner (o GC aperta antes do OOM).
+      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-48MiB}
+    networks:
+      - borda
+    depends_on:
+      api:
+        condition: service_healthy
+    # Única exceção a portas < 1024 (80 e 443 públicas). Locais: CADDY_HTTP_PORT/CADDY_HTTPS_PORT.
+    ports:
+      - '${CADDY_HTTP_PORT:-80}:80/tcp'
+      - '${CADDY_HTTPS_PORT:-443}:443/tcp'
+    # O Caddy roda como o usuário caddy (uid 10001) sem NET_BIND_SERVICE: liberar portas baixas
+    # no namespace de rede do próprio contêiner não afeta o host.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    volumes:
+      # Certificados e conta ACME: precisam persistir (o diretório de dados não é cache).
+      - caddy_data:/data
+    read_only: true
+    tmpfs:
+      - /run:size=8m,nosuid,nodev,noexec
+      - /tmp:size=8m,nosuid,nodev,noexec
+      # XDG_CONFIG_HOME do Caddy: com persist_config off nada é gravado aqui, e o que fosse é
+      # derivado do Caddyfile (não precisa persistir).
+      - /config:size=1m,uid=10001,gid=10001,mode=0700,nosuid,nodev,noexec
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: ${CADDY_NOFILE:-8192}
+        hard: ${CADDY_NOFILE:-8192}
+    # 64 MB para TLS + WebSocket, sem swap (memswap igual ao limite): ADR 0024.
+    deploy:
+      resources:
+        limits:
+          cpus: '${CADDY_CPUS:-0.5}'
+          memory: ${CADDY_MEM:-64m}
+          pids: ${CADDY_PIDS:-64}
+    memswap_limit: ${CADDY_MEMSWAP:-64m}
+    # Healthcheck: o HEALTHCHECK de apps/web/Dockerfile (http://127.0.0.1:2020/saude).
+    logging: *logging
+    restart: always
+
+networks:
+  borda: {}
+  # Sem rota para fora: Postgres e Redis só falam com a API.
+  dados:
+    internal: true
+
+secrets:
+  db_password:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/db_password
+  redis_password:
+    file: ${LEILAO_SECRETS_DIR:-../.secrets}/redis_password
+
+# Nomes explícitos: mesmo com o projeto errado (COMPOSE_PROJECT_NAME=leilao do .env, sem -p), o
+# compose de prod nunca anexa o volume leilao_pgdata do dev.
+volumes:
+  pgdata:
+    name: leilao-prod_pgdata
+  caddy_data:
+    name: leilao-prod_caddy_data
