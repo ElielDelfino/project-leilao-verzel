@@ -7,7 +7,8 @@
 // - os triggers append-only de ledger_entries (public.impedir_alteracao(), specs/008);
 // - os GRANTs ao papel da API (matriz D3 da tarefa 036): ledger_entries SELECT, INSERT;
 //   wallet_balances SELECT, INSERT, UPDATE.
-// lote_id e lance_id ficam sem FK até lots (F2) e bids (F3) existirem.
+// - as FKs lote_id → lots(id) e lance_id → bids(id), imediatas e sem índice (migration
+//   0003_lances_integridade, D9 da ADR 0031): o lançamento do lance vem depois do `bids`.
 import { sql } from 'drizzle-orm';
 import { bigint, check, index, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 
