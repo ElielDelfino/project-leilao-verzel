@@ -91,11 +91,42 @@ export interface ClienteRedisDaApi extends ClienteRedis {
   incrementarNaJanela(chave: string, janelaS: number): Promise<ContagemNaJanelaDoRedis>;
 }
 
+/**
+ * Comandos do cache, do bucket e do circuito do catálogo (tarefa 054). Sem fila offline: com o
+ * Redis fora, rejeitam na hora com ErroDoRedis.
+ */
+export interface ComandosDoCatalogoNoRedis {
+  /** GET. `null` se a chave não existe. */
+  obter(chave: string): Promise<string | null>;
+  /** SET com expiração em milissegundos (PX). */
+  gravarComTtl(chave: string, valor: string, ttlMs: number): Promise<void>;
+  /** PTTL: ms restantes; -2 se a chave não existe; -1 se não tem expiração. */
+  ttlRestanteMs(chave: string): Promise<number>;
+  /** EVAL de um script Lua (operação atômica no Redis, ex.: token bucket do catálogo). */
+  executarLua(
+    script: string,
+    chaves: readonly string[],
+    argumentos: readonly string[],
+  ): Promise<unknown>;
+}
+
+/** O que `criarClienteRedis` devolve e o RedisModule injeta em CLIENTE_REDIS. */
+export interface ClienteRedisComCatalogo extends ClienteRedisDaApi, ComandosDoCatalogoNoRedis {}
+
 function comoInteiro(valor: unknown): number {
   if (typeof valor !== 'number' || !Number.isInteger(valor)) {
     throw new ErroDoRedis('RespostaInesperada', undefined);
   }
   return valor;
+}
+
+/** Executa um comando e converte qualquer falha em ErroDoRedis. */
+async function convertido<T>(comando: () => Promise<T>): Promise<T> {
+  try {
+    return await comando();
+  } catch (erro: unknown) {
+    throw paraErroDoRedis(erro);
+  }
 }
 
 /** Avisa cada código uma vez até a próxima conexão pronta. */
@@ -132,7 +163,7 @@ function criarAviso(aoErro: (erro: ErroDoRedis) => void): {
  * (`disableOfflineQueue`): um comando feito sem conexão pronta rejeita na hora, em vez de esperar
  * na fila; o RedisModule chama `aguardarConexao` no boot para os primeiros comandos não caírem aí.
  */
-export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaApi {
+export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisComCatalogo {
   const { conexao } = opcoes;
   const cliente = createClient({
     socket: {
@@ -202,6 +233,15 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaA
       }
       return { contagem: comoInteiro(respostas[0]), ttlS: comoInteiro(respostas[2]) };
     },
+    obter: (chave) => convertido(() => cliente.get(chave)),
+    gravarComTtl: async (chave, valor, ttlMs) => {
+      await convertido(() =>
+        cliente.set(chave, valor, { expiration: { type: 'PX', value: ttlMs } }),
+      );
+    },
+    ttlRestanteMs: async (chave) => comoInteiro(await convertido(() => cliente.pTTL(chave))),
+    executarLua: (script, chaves, argumentos) =>
+      convertido(() => cliente.eval(script, { keys: [...chaves], arguments: [...argumentos] })),
     encerrar: () => {
       encerrado = true;
       cliente.destroy();

@@ -12,7 +12,7 @@ import {
 import { ENV, type Env } from '../config/env.js';
 import {
   type ClienteRedis,
-  type ClienteRedisDaApi,
+  type ClienteRedisComCatalogo,
   criarClienteRedis,
   TEMPO_LIMITE_DE_CONEXAO_DO_REDIS_MS,
 } from './cliente.js';
@@ -34,7 +34,7 @@ class EncerramentoDoRedis implements OnApplicationShutdown {
  * de conexão) antes de o boot seguir: sem fila offline, um login logo depois do `listen` cairia no
  * 500 INDISPONIVEL só porque a conexão ainda não estava pronta. Com o Redis fora, o boot segue.
  */
-async function criarClienteDoEnv(env: Env): Promise<ClienteRedisDaApi> {
+async function criarClienteDoEnv(env: Env): Promise<ClienteRedisComCatalogo> {
   const logger = new Logger('Redis');
   const cliente = criarClienteRedis({
     conexao: env.redis,

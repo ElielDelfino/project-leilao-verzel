@@ -21,6 +21,7 @@ const CONEXAO = {
   REDIS_HOST: '127.0.0.1',
   REDIS_PORT: '16379',
   WEB_ORIGIN: 'http://localhost:15173',
+  SCRYFALL_USER_AGENT: 'LeilaoVerzel/0.1',
 } as const;
 
 /** Os 5 segredos que a API lê (specs/014 §Segredos; DB_PASSWORD é só do dono). */
@@ -292,6 +293,42 @@ describe('carregarEnv: WEB_ORIGIN', () => {
   ])('WEB_ORIGIN=%s → cookiesSeguros=%s', (valor, seguro) => {
     expect(carregarEnv(envValido({ WEB_ORIGIN: valor })).cookiesSeguros).toBe(seguro);
   });
+});
+
+// specs/005 §Cliente HTTP e docs/variaveis-de-ambiente.md.
+describe('carregarEnv: Scryfall', () => {
+  it('não sobe sem SCRYFALL_USER_AGENT', () => {
+    expect(mensagemDe(() => carregarEnv(envValido({ SCRYFALL_USER_AGENT: undefined })))).toContain(
+      'SCRYFALL_USER_AGENT',
+    );
+  });
+
+  it.each(['', 'Leilao\nVerzel/0.1', 'á/1'])('recusa SCRYFALL_USER_AGENT=%j', (valor) => {
+    expect(mensagemDe(() => carregarEnv(envValido({ SCRYFALL_USER_AGENT: valor })))).toContain(
+      'SCRYFALL_USER_AGENT',
+    );
+  });
+
+  it('sem SCRYFALL_BASE_URL, usa https://api.scryfall.com', () => {
+    expect(carregarEnv(envValido()).scryfall).toEqual({
+      userAgent: 'LeilaoVerzel/0.1',
+      baseUrl: 'https://api.scryfall.com',
+    });
+  });
+
+  it('aceita SCRYFALL_BASE_URL http://127.0.0.1:porta (Scryfall falsa)', () => {
+    const env = carregarEnv(envValido({ SCRYFALL_BASE_URL: 'http://127.0.0.1:18080' }));
+    expect(env.scryfall.baseUrl).toBe('http://127.0.0.1:18080');
+  });
+
+  it.each(['', 'api.scryfall.com', 'ftp://x.com', 'https://api.scryfall.com/', 'https://x.com/v1'])(
+    'recusa SCRYFALL_BASE_URL=%j',
+    (valor) => {
+      expect(mensagemDe(() => carregarEnv(envValido({ SCRYFALL_BASE_URL: valor })))).toContain(
+        'SCRYFALL_BASE_URL',
+      );
+    },
+  );
 });
 
 // specs/014 §Leitura e ADR 0023: exatamente uma de <VAR> e <VAR>_FILE; forma canônica.
