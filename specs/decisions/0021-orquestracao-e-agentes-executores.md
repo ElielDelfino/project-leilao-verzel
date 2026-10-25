@@ -1,6 +1,6 @@
 # 0021 — Orquestrador hub-and-spoke e agentes executores com três camadas
 
-Status: aceita
+Status: parcialmente substituída por 0028 (só o modelo e o esforço do item 1; ver 0028-modelo-e-esforco-por-papel.md)
 Data: 2026-10-24
 
 ## Contexto
