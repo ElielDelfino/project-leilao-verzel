@@ -1,0 +1,142 @@
+# CI de pull request e da main (task 006; specs/014 §CI/CD, specs/013, ADR 0017).
+# Jobs: `verificacao` (commitlint, pnpm audit, smoke do compose de dev, verify:full) e `segredos`
+# (gitleaks em todo o histórico). O deploy da main entra em outro workflow (tarefa 008).
+# Actions fixadas por SHA de commit, com a versão no comentário; o Dependabot as atualiza.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Nada por padrão; cada job pede só o que usa.
+permissions: {}
+
+# Um push novo no mesmo PR cancela a execução anterior. Na main nada é cancelado.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verificacao:
+    name: verify:full, audit e commitlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      # Sem git hooks no CI (o postinstall do lefthook não roda com CI=true e LEFTHOOK=0); o que eles
+      # fazem (eslint, prettier, commitlint) é repetido abaixo.
+      LEFTHOOK: '0'
+      # Já definido pelo runner; explícito porque o @asyncapi/cli (contracts:lint, tarefa 021) não
+      # envia telemetria com CI=true.
+      CI: 'true'
+      # Banco de teste: até a tarefa 030, o Postgres do compose de dev (pnpm infra:up) via TEMPLATE.
+      # Depois da 030, trocar para `testcontainers` (specs/013 §Banco de teste).
+      LEILAO_TEST_DB: local
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Histórico completo: o commitlint lê o intervalo de commits do PR.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Node (versão do .nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # O cache é o do store do pnpm (passo seguinte).
+          package-manager-cache: false
+
+      - name: pnpm (versão do packageManager) com cache do store
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          cache: true
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      # Commits do PR. Os do Dependabot ficam de fora: o corpo traz notas de versão com linhas longas
+      # (body-max-line-length); o título do PR, que vira a mensagem do squash merge, é checado abaixo.
+      - name: commitlint (commits do PR)
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA"
+
+      - name: commitlint (título do PR, mensagem do squash merge)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+
+      - name: commitlint (commits do push na main)
+        if: github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: pnpm exec commitlint --from "$BEFORE_SHA" --to "$AFTER_SHA"
+
+      - name: pnpm audit (high ou acima falha)
+        run: pnpm audit --audit-level=high
+
+      # Smoke do compose de dev (specs/014 §Dev): sem .env.local, o compose não aceita a config.
+      - name: Compose de dev sem segredos falha
+        run: |
+          if saida=$(docker compose --env-file .env --env-file .env.local config --quiet 2>&1); then
+            echo "::error::docker compose config --quiet aceitou a config sem .env.local"
+            exit 1
+          fi
+          case "$saida" in
+            *.env.local*) echo "ok: o compose recusou a config sem .env.local" ;;
+            *)
+              echo "::error::o compose falhou sem citar o .env.local: $saida"
+              exit 1
+              ;;
+          esac
+
+      # Segredos descartáveis, gerados no runner a cada execução (nunca impressos nem salvos fora
+      # dele): .env.local e .secrets/ (600) para o Postgres e o Redis do compose de dev.
+      - name: Gerar segredos descartáveis
+        run: pnpm keys:generate
+
+      - name: Subir Postgres e Redis (healthy)
+        timeout-minutes: 3
+        run: pnpm infra:up --wait
+
+      # --e2e entra quando houver playwright.config.* (specs/013); contracts:* aparecem como pulados
+      # até a tarefa 021.
+      - name: verify:full
+        run: pnpm verify:full
+
+      - name: Estado do compose (falha)
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail=100
+
+  segredos:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Todo o histórico: um segredo commitado e apagado depois continua no Git.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # `detect` sem --no-git varre o `git log` inteiro com as regras padrão. Imagem fixada por digest,
+      # sem rede e só leitura; --redact não imprime o valor encontrado.
+      - name: gitleaks (histórico completo)
+        run: >-
+          docker run --rm --network none --read-only
+          -v "$GITHUB_WORKSPACE:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          detect --source /repo --redact --no-banner --no-color --verbose --exit-code 1
