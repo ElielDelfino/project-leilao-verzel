@@ -22,21 +22,15 @@ interface Props {
   aoSincronizar: () => void;
 }
 
-function SalaSemEstado({ detalhe, semEstado }: { detalhe: LoteDetalhe; semEstado: ReactNode }) {
+function PainelSemEstado({ detalhe, semEstado }: { detalhe: LoteDetalhe; semEstado: ReactNode }) {
   return (
-    <>
-      <h1 className="text-3xl font-bold tracking-tight">{detalhe.titulo}</h1>
-      <div className="mt-6 grid gap-8 md:grid-cols-2">
-        <Carta lote={detalhe} />
-        <section aria-labelledby="lote-titulo" className="flex flex-col gap-3">
-          <h2 id="lote-titulo" className="sr-only">
-            Dados do lote
-          </h2>
-          {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
-          <div className="flex flex-col items-start gap-4">{semEstado}</div>
-        </section>
-      </div>
-    </>
+    <section aria-labelledby="lote-titulo" className="flex flex-col gap-3">
+      <h2 id="lote-titulo" className="sr-only">
+        Dados do lote
+      </h2>
+      {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
+      <div className="flex flex-col items-start gap-4">{semEstado}</div>
+    </section>
   );
 }
 
@@ -61,15 +55,21 @@ function Situacao({ sala }: { sala: EstadoDaSala }) {
   return null;
 }
 
-export function Sala({
+interface PainelProps {
+  detalhe: LoteDetalhe;
+  sala: EstadoDaSala;
+  reconectando: boolean;
+  seloDeFimEstendido: boolean;
+  aoSincronizar: () => void;
+}
+
+function PainelAoVivo({
   detalhe,
   sala,
   reconectando,
   seloDeFimEstendido,
-  semEstado,
   aoSincronizar,
-}: Props) {
-  if (!sala) return <SalaSemEstado detalhe={detalhe} semEstado={semEstado} />;
+}: PainelProps) {
   const { lote } = sala;
   const aoVivo = lote.status === 'ao_vivo';
   const textoSemLances = aoVivo
@@ -79,61 +79,98 @@ export function Sala({
 
   return (
     <>
-      <h1 className="text-3xl font-bold tracking-tight">{detalhe.titulo}</h1>
-      {reconectando ? <p role="status">Reconectando…</p> : null}
-      <div className="mt-6 grid gap-8 md:grid-cols-2">
-        <Carta lote={detalhe} />
-        <section aria-labelledby="lote-titulo" className="flex flex-col gap-3">
-          <h2 id="lote-titulo" className="sr-only">
-            Dados do lote
-          </h2>
-          <p className="font-bold">
-            <span aria-hidden="true">{ICONES_DE_STATUS[lote.status]}</span>{' '}
-            {ROTULOS_DE_STATUS[lote.status]}
-          </p>
-          {aoVivo ? (
-            <Contagem
-              fimEm={lote.fimEm}
-              deslocamentoMs={sala.deslocamentoMs}
-              fimEstendido={seloDeFimEstendido}
-            />
-          ) : null}
-          {aoVivo ? null : <p>Fim: {formatarDataHora(lote.fimEm)}</p>}
-          {sala.avisoFimEstendido ? <p role="status">{sala.avisoFimEstendido}</p> : null}
-          <Situacao sala={sala} />
-          {mostrarPosicao ? (
-            <IndicadorDePosicao
-              posicao={sala.suaPosicao}
-              lanceAtualCentavos={lote.lanceAtualCentavos}
-            />
-          ) : null}
-          <AreaDeLance lote={lote} aoSincronizar={aoSincronizar} reconectando={reconectando} />
-          {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
-          <p>Lance inicial: {formatarCentavos(lote.lanceInicialCentavos)}</p>
-          <p>Incremento mínimo: {formatarCentavos(lote.incrementoMinimoCentavos)}</p>
-          <p>
-            {lote.lanceAtualCentavos === null
-              ? 'Nenhum lance ainda.'
-              : `Lance atual: ${formatarCentavos(lote.lanceAtualCentavos)}`}
-          </p>
-          <p>{textoDeLances(lote.totalLances)}</p>
-          <p>Início: {formatarDataHora(lote.inicioEm)}</p>
-          {lote.fimOriginalEm === lote.fimEm ? null : (
-            <p>Fim original: {formatarDataHora(lote.fimOriginalEm)}</p>
-          )}
-          <HistoricoDeLances
-            lances={sala.lances}
-            seuPseudonimo={sala.seuPseudonimo}
-            textoSemLances={textoSemLances}
+      <section aria-labelledby="lote-titulo" className="flex flex-col gap-3">
+        <h2 id="lote-titulo" className="sr-only">
+          Dados do lote
+        </h2>
+        <p className="font-bold">
+          <span aria-hidden="true">{ICONES_DE_STATUS[lote.status]}</span>{' '}
+          {ROTULOS_DE_STATUS[lote.status]}
+        </p>
+        {aoVivo ? (
+          <Contagem
+            fimEm={lote.fimEm}
+            deslocamentoMs={sala.deslocamentoMs}
+            fimEstendido={seloDeFimEstendido}
           />
-        </section>
-      </div>
+        ) : null}
+        {aoVivo ? null : <p>Fim: {formatarDataHora(lote.fimEm)}</p>}
+        {sala.avisoFimEstendido ? <p role="status">{sala.avisoFimEstendido}</p> : null}
+        <Situacao sala={sala} />
+        {mostrarPosicao ? (
+          <IndicadorDePosicao
+            posicao={sala.suaPosicao}
+            lanceAtualCentavos={lote.lanceAtualCentavos}
+          />
+        ) : null}
+        <AreaDeLance lote={lote} aoSincronizar={aoSincronizar} reconectando={reconectando} />
+        {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
+        <p>Lance inicial: {formatarCentavos(lote.lanceInicialCentavos)}</p>
+        <p>Incremento mínimo: {formatarCentavos(lote.incrementoMinimoCentavos)}</p>
+        <p>
+          {lote.lanceAtualCentavos === null
+            ? 'Nenhum lance ainda.'
+            : `Lance atual: ${formatarCentavos(lote.lanceAtualCentavos)}`}
+        </p>
+        <p>{textoDeLances(lote.totalLances)}</p>
+        <p>Início: {formatarDataHora(lote.inicioEm)}</p>
+        {lote.fimOriginalEm === lote.fimEm ? null : (
+          <p>Fim original: {formatarDataHora(lote.fimOriginalEm)}</p>
+        )}
+        <HistoricoDeLances
+          lances={sala.lances}
+          seuPseudonimo={sala.seuPseudonimo}
+          textoSemLances={textoSemLances}
+        />
+      </section>
+    </>
+  );
+}
+
+function AnunciosDaSala({ sala }: { sala: EstadoDaSala }) {
+  return (
+    <>
       <div aria-live="polite" className="sr-only">
         {sala.anuncioCortes}
       </div>
       <div role="alert" aria-live="assertive" className="sr-only">
         {sala.anuncioSuperado}
       </div>
+    </>
+  );
+}
+
+/**
+ * A `<Carta>` fica sempre na mesma posição da árvore, com e sem `sala`: assim a `<img>` não é
+ * desmontada (nem recarregada) quando o estado chega. Só o painel ao vivo alterna.
+ */
+export function Sala({
+  detalhe,
+  sala,
+  reconectando,
+  seloDeFimEstendido,
+  semEstado,
+  aoSincronizar,
+}: Props) {
+  return (
+    <>
+      <h1 className="text-3xl font-bold tracking-tight">{detalhe.titulo}</h1>
+      {sala && reconectando ? <p role="status">Reconectando…</p> : null}
+      <div className="mt-6 grid gap-8 md:grid-cols-2">
+        <Carta lote={detalhe} />
+        {sala ? (
+          <PainelAoVivo
+            detalhe={detalhe}
+            sala={sala}
+            reconectando={reconectando}
+            seloDeFimEstendido={seloDeFimEstendido}
+            aoSincronizar={aoSincronizar}
+          />
+        ) : (
+          <PainelSemEstado detalhe={detalhe} semEstado={semEstado} />
+        )}
+      </div>
+      {sala ? <AnunciosDaSala sala={sala} /> : null}
     </>
   );
 }
