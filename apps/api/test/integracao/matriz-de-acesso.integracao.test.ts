@@ -75,11 +75,6 @@ interface Operacao {
   readonly saldoDoLicitanteCentavos?: number;
   /** Resultado com CSRF válido, por papel. */
   readonly comCsrf: Readonly<Record<Papel, Esperado>>;
-  /**
-   * Rota ainda inexistente na API: os casos viram `it.todo`, sem expectativa que passe por acaso
-   * (404 não vale como "ok"). Remover a marca quando a tarefa indicada entregar a rota.
-   */
-  readonly pendente?: { readonly tarefa: string; readonly motivo: string };
 }
 
 const igualParaTodos = (e: Esperado): Operacao['comCsrf'] => ({
@@ -204,7 +199,7 @@ const OPERACOES: readonly Operacao[] = [
       leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
     },
   },
-  // F3 (openapi 0.5.0): lances (079, 080). A auditoria (081) segue pendente.
+  // F3 (openapi 0.5.0): lances (079, 080) e auditoria pública (081).
   {
     metodo: 'POST',
     caminho: '/api/lotes/{id}/lances',
@@ -241,13 +236,11 @@ const OPERACOES: readonly Operacao[] = [
     caminho: '/api/auditoria/lotes/{id}',
     url: () => `/api/auditoria/lotes/${alvo.loteId}`,
     comCsrf: igualParaTodos({ status: 200 }),
-    pendente: { tarefa: '081', motivo: 'GET /api/auditoria/lotes/{id} ainda não existe na API' },
   },
   {
     metodo: 'GET',
     caminho: '/api/auditoria/chaves',
     comCsrf: igualParaTodos({ status: 200 }),
-    pendente: { tarefa: '081', motivo: 'GET /api/auditoria/chaves ainda não existe na API' },
   },
 ];
 
@@ -397,53 +390,39 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       return email;
     }
 
-    describe.each(OPERACOES.filter((o) => o.pendente !== undefined))(
-      'pendente: $metodo $caminho',
-      (operacao) => {
-        const { tarefa, motivo } = operacao.pendente ?? { tarefa: '?', motivo: '?' };
-        for (const papel of PAPEIS) {
-          it.todo(`${papel} com CSRF válido (task ${tarefa}: ${motivo})`);
-          it.todo(`${papel} sem o header X-CSRF-Token (task ${tarefa}: ${motivo})`);
+    describe.each(OPERACOES)('$metodo $caminho', (operacao) => {
+      it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
+        const navegador = await navegadorDe(papel);
+        const email = await contaExistente();
+        await prepararSaldo(navegador, operacao, papel);
+
+        const resposta = await chamar(navegador, operacao, email, true);
+
+        const esperado = operacao.comCsrf[papel];
+        expect(resposta.statusCode).toBe(esperado.status);
+        if (esperado.codigo !== undefined) {
+          expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
+            esperado.codigo,
+          );
         }
-      },
-    );
+      });
 
-    describe.each(OPERACOES.filter((o) => o.pendente === undefined))(
-      '$metodo $caminho',
-      (operacao) => {
-        it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
-          const navegador = await navegadorDe(papel);
-          const email = await contaExistente();
-          await prepararSaldo(navegador, operacao, papel);
+      it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
+        const navegador = await navegadorDe(papel);
+        const email = await contaExistente();
+        await prepararSaldo(navegador, operacao, papel);
 
-          const resposta = await chamar(navegador, operacao, email, true);
+        const resposta = await chamar(navegador, operacao, email, false);
 
-          const esperado = operacao.comCsrf[papel];
-          expect(resposta.statusCode).toBe(esperado.status);
-          if (esperado.codigo !== undefined) {
-            expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
-              esperado.codigo,
-            );
-          }
-        });
-
-        it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
-          const navegador = await navegadorDe(papel);
-          const email = await contaExistente();
-          await prepararSaldo(navegador, operacao, papel);
-
-          const resposta = await chamar(navegador, operacao, email, false);
-
-          if (exigeCsrf(operacao.metodo, operacao.caminho)) {
-            expect(resposta.statusCode).toBe(403);
-            expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
-              'CSRF_INVALIDO',
-            );
-          } else {
-            expect(resposta.statusCode).toBe(operacao.comCsrf[papel].status);
-          }
-        });
-      },
-    );
+        if (exigeCsrf(operacao.metodo, operacao.caminho)) {
+          expect(resposta.statusCode).toBe(403);
+          expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
+            'CSRF_INVALIDO',
+          );
+        } else {
+          expect(resposta.statusCode).toBe(operacao.comCsrf[papel].status);
+        }
+      });
+    });
   },
 );

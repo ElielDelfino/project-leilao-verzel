@@ -23,6 +23,15 @@ if (!NOME_DE_BANCO_VALIDO.test(BANCO_ADMIN)) {
 const PORTA_DA_SCRYFALL = 13100;
 process.env['E2E_SCRYFALL_PORTA'] = String(PORTA_DA_SCRYFALL);
 const URL_DA_SCRYFALL = `http://127.0.0.1:${PORTA_DA_SCRYFALL}`;
+// Prefixo Redis da Scryfall próprio do e2e (task 099, specs/005): o circuito e o cache da API do e2e
+// ficam sob `scryfall:e2e:` e `restaurarScryfall` só toca nessas chaves. Formato fechado pela env da
+// API (`^scryfall:e2e[a-z0-9-]*:$`), que o rejeita com NODE_ENV=production (a API do e2e não o usa).
+const PREFIXO_REDIS_DA_SCRYFALL_NO_E2E = 'scryfall:e2e:';
+const PREFIXO_REDIS_VALIDO = /^scryfall:e2e[a-z0-9-]*:$/;
+if (!PREFIXO_REDIS_VALIDO.test(PREFIXO_REDIS_DA_SCRYFALL_NO_E2E)) {
+  throw new Error('playwright: prefixo Redis da Scryfall do e2e fora do formato aceito pela API');
+}
+process.env['E2E_SCRYFALL_PREFIXO_REDIS'] = PREFIXO_REDIS_DA_SCRYFALL_NO_E2E;
 const PREPARAR_BANCO =
   `POSTGRES_DB=${BANCO_ADMIN} node --import ../../apps/api/src/db/resolver-ts.mjs ` +
   '../../e2e/preparar-banco.ts';
@@ -34,8 +43,12 @@ const envDosServidores = {
   WEB_ORIGIN: ORIGEM_DA_WEB,
   POSTGRES_DB: nomeDoBancoDoWorktree(),
   SCRYFALL_BASE_URL: URL_DA_SCRYFALL,
+  SCRYFALL_REDIS_PREFIX: PREFIXO_REDIS_DA_SCRYFALL_NO_E2E,
   LOG_LEVEL: 'silent',
 };
+
+/** A API do e2e nunca sobe com NODE_ENV=production (a env recusa SCRYFALL_REDIS_PREFIX nesse caso). */
+const envDaApi = { ...envDosServidores, NODE_ENV: 'test' };
 
 export default defineConfig({
   testDir: './e2e',
@@ -64,7 +77,7 @@ export default defineConfig({
       url: `http://localhost:${PORTA_DA_API}/api/health/ready`,
       reuseExistingServer: false,
       timeout: ESPERA_DO_SERVIDOR_MS,
-      env: envDosServidores,
+      env: envDaApi,
     },
     {
       command: 'pnpm run dev',
