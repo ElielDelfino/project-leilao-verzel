@@ -108,6 +108,32 @@ copiar essa pasta mantendo a mesma posição relativa.
   migration nova quando `lots` (F2) e `bids` (F3) existirem, com índice.
 - Papel `leilao_api`, privilégios e `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (§Papéis).
 
+## Migration 0002 (`0002_catalogo_lotes.sql`)
+
+Só cria tabelas (tarefa 051). PKs `uuid` com `uuidv7()`; dinheiro em `bigint` (centavos, modo
+`number` na API), como no ledger.
+
+- `card_snapshots` (catalogo, specs/005 §Dados): imutável (a API só tem SELECT e INSERT).
+  `imagem` `bytea` obrigatória; `imagem_sha256` de exatamente 32 bytes; `imagem_mime` só
+  `image/jpeg` ou `image/png` (vira o `Content-Type` de `GET /api/imagens/{id}`); `texto_oracle`
+  e `artista` podem ser nulos; `scryfall_id` sem unique (cada lote grava o próprio snapshot).
+- `lots` (lotes, specs/006 §Dados): `status` com o enum `status_lote`; `carta_nome` e `raridade`
+  copiados do snapshot; `total_lances` com default 0. CHECKs da criação:
+  `lance_inicial_centavos` e `incremento_minimo_centavos` entre 100 e 100.000.000;
+  `fim_original_em >= inicio_em + 5 min` e `fim_original_em − inicio_em <= 7 dias`. CHECKs que
+  valem depois dela: `lance_atual_centavos` nulo ou `>= lance_inicial_centavos`;
+  `valor_arremate_centavos` nulo ou `> 0`; `total_lances >= 0`; `fim_em >= fim_original_em` (o
+  anti-sniping só estende). Sem CHECK de duração máxima em `fim_em` nem de tamanho de título e
+  descrição (a API valida). `snapshot_id` único: um snapshot pertence a um lote.
+- Índices de `lots`: `(status, fim_em)`, `(status, inicio_em)`,
+  `(leiloeiro_id, criado_em DESC, id DESC)` (painel, com o desempate por `id`) e GIN
+  `gin_trgm_ops` em `titulo` e em `carta_nome` (busca `ILIKE` da vitrine).
+- FKs só no SQL, sem `CASCADE`: `leiloeiro_id`, `lider_id` e `vencedor_id` → `users(id)` e
+  `snapshot_id` → `card_snapshots(id)`. Declarar `.references` no `schema.ts` faria `lotes`
+  importar `identidade` e `catalogo` (specs/001 §Módulos). `lider_id` e `vencedor_id` ficam sem
+  índice: `users` nunca tem DELETE, então a FK não varre `lots`.
+- **Ainda sem FK:** `ledger_entries.lote_id → lots(id)` (migration futura, com índice).
+
 ## Papéis (D2 e D3 da tarefa 036)
 
 | Papel | Quem usa | Atributos |
@@ -135,10 +161,15 @@ copiar essa pasta mantendo a mesma posição relativa.
   | `refresh_tokens` | SELECT, INSERT, UPDATE, DELETE |
   | `wallet_balances` | SELECT, INSERT, UPDATE |
   | `ledger_entries` | SELECT, INSERT |
+  | `card_snapshots` | SELECT, INSERT |
+  | `lots` | SELECT, INSERT; UPDATE só em `fim_em`, `status`, `lance_atual_centavos`, `lider_id`, `total_lances`, `vencedor_id`, `valor_arremate_centavos`, `encerrado_em`, `cancelado_em` |
   | `bids`, `lot_seals` (F3) | SELECT, INSERT |
 
 - A matriz é testada (`apps/api/test/db/papeis.test.ts`): toda tabela nova em `public` precisa
   entrar em `MATRIZ` (com `[]` se a API não a acessa) e ganhar os `GRANT`s na própria migration.
+  Privilégio de coluna só existe no UPDATE de `lots` (`COLUNAS_ATUALIZAVEIS` em
+  `lotes/schema.ts`, conferido por `COLUNAS_COM_UPDATE`): o que é copiado na criação (carta,
+  valores iniciais, prazo original, leiloeiro, snapshot) fica imutável para a API.
   Tabela append-only nova entra também em `TABELAS_APPEND_ONLY`.
 - **Senha:** depois das migrations, o `db:migrate` lê `POSTGRES_API_USER` e `DB_API_PASSWORD` (ou
   `DB_API_PASSWORD_FILE`) e aplica `ALTER ROLE ... LOGIN PASSWORD '<verificador>'`, com um
@@ -168,7 +199,11 @@ nele e o apaga no fim.
   e não vazio. O valor (`local` ou `testcontainers`, specs/013) não escolhe banco nem muda a
   conexão, que vem sempre de `POSTGRES_*` e `DB_PASSWORD` (ou `DB_PASSWORD_FILE`).
 - `papeis.test.ts` roda no banco de teste do worktree (já com as migrations), cada caso numa
-  transação desfeita no fim.
+  transação desfeita no fim. `catalogo-lotes.test.ts` (migration 0002) segue o mesmo modelo.
+- `restricoes-snapshot.test.ts` compara o banco migrado com o snapshot da última migration
+  (`meta/<idx>_snapshot.json`): as restrições `p`, `u`, `c` e `f` de `public` precisam ser as do
+  snapshot mais as FKs escritas à mão (listadas em `FKS_SO_NO_SQL`), e os índices que não
+  sustentam restrição, os do snapshot. FK nova escrita à mão entra nessa lista.
 
 ## Seed (D14 da tarefa 036)
 
