@@ -3,12 +3,14 @@
 import type { LightMyRequestResponse } from 'fastify';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { emitirAccessToken } from '../../../src/modules/identidade/tokens.js';
 import { criarConexaoDoRedis } from '../../../src/redis/conexao.js';
 import { criarAppDeTeste } from '../../helpers/app-de-teste.js';
 import { portaFechada } from '../../helpers/porta-fechada.js';
 import {
   type AppDeIdentidade,
   cadastrar,
+  CHAVE_JWT,
   criarAppDeIdentidade,
   emailNovo,
   envReal,
@@ -179,6 +181,142 @@ describe.skipIf(!INFRA_DISPONIVEL)('rate limit, guards e ordem das verificaçõe
       }
       expect((await licitante.get('/api/teste-guardas/licitante')).statusCode).toBe(200);
       expect((await leiloeiro.get('/api/teste-guardas/leiloeiro')).statusCode).toBe(200);
+    });
+
+    describe('@SessaoOpcional() (task 053)', () => {
+      const URL = '/api/teste-guardas/opcional';
+      const ID = '00000000-0000-4000-8000-000000000053';
+
+      function comAccess(token: string): Navegador {
+        const navegador = new Navegador(ctx.app);
+        navegador.cookies.set('access_token', token);
+        return navegador;
+      }
+
+      it('anônimo → 200 sem usuario', async () => {
+        const resposta = await new Navegador(ctx.app).get(URL);
+
+        expect(resposta.statusCode).toBe(200);
+        expect(resposta.json()).toEqual({ sucesso: true, dados: { usuario: null } });
+      });
+
+      it('token válido → 200 com id e papel', async () => {
+        const navegador = await logado('licitante', '10.3.2.1');
+
+        const resposta = await navegador.get(URL);
+
+        expect(resposta.statusCode).toBe(200);
+        expect(resposta.json()).toEqual({
+          sucesso: true,
+          dados: { usuario: { id: expect.any(String), papel: 'licitante' } },
+        });
+      });
+
+      it('token expirado → 200 anônimo, sem refresh nem cookies novos', async () => {
+        const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const token = await emitirAccessToken(CHAVE_JWT, { id: ID, papel: 'leiloeiro' }, ontem);
+
+        const resposta = await comAccess(token).get(URL);
+
+        expect(resposta.statusCode).toBe(200);
+        expect(resposta.json()).toEqual({ sucesso: true, dados: { usuario: null } });
+        expect(resposta.cookies).toHaveLength(0);
+      });
+
+      it.each([
+        [
+          'assinatura trocada',
+          (t: string): string => {
+            // Troca o 1º caractere da assinatura por outro sempre diferente (nunca é o original).
+            const i = t.lastIndexOf('.') + 1;
+            return `${t.slice(0, i)}${t[i] === 'A' ? 'B' : 'A'}${t.slice(i + 1)}`;
+          },
+        ],
+        ['payload trocado', (t: string): string => t.replace(/\.[^.]+\./, '.e30.')],
+        ['lixo', (): string => 'nao-e-um-jwt'],
+      ])('token adulterado (%s) → 200 anônimo', async (_nome, adulterar) => {
+        const token = await emitirAccessToken(CHAVE_JWT, { id: ID, papel: 'leiloeiro' });
+
+        const resposta = await comAccess(adulterar(token)).get(URL);
+
+        expect(resposta.statusCode).toBe(200);
+        expect(resposta.json()).toEqual({ sucesso: true, dados: { usuario: null } });
+      });
+
+      it('token assinado com outra chave → 200 anônimo', async () => {
+        const outra = new Uint8Array(32).fill(7);
+        const token = await emitirAccessToken(outra, { id: ID, papel: 'leiloeiro' });
+
+        const resposta = await comAccess(token).get(URL);
+
+        expect(resposta.json()).toEqual({ sucesso: true, dados: { usuario: null } });
+      });
+
+      it('o CSRF continua valendo: POST sem X-CSRF-Token → 403; com → 200', async () => {
+        const navegador = new Navegador(ctx.app);
+        await navegador.obterCsrf();
+
+        const sem = await navegador.post(URL, undefined, { semCsrf: true });
+        const com = await navegador.post(URL);
+
+        expect(sem.statusCode).toBe(403);
+        expect(sem.json()).toMatchObject({ erro: { codigo: 'CSRF_INVALIDO' } });
+        expect(com.statusCode).toBe(200);
+      });
+
+      it('rota sem o decorator continua exigindo sessão com token expirado → 401', async () => {
+        const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const token = await emitirAccessToken(CHAVE_JWT, { id: ID, papel: 'leiloeiro' }, ontem);
+
+        const resposta = await comAccess(token).get('/api/teste-guardas/sessao');
+
+        expect(resposta.statusCode).toBe(401);
+        expect(resposta.json()).toMatchObject({ erro: { codigo: 'NAO_AUTENTICADO' } });
+      });
+
+      describe('combinação com @Papel ou @Publico falha fechada (500 genérico)', () => {
+        const ROTAS = [
+          [
+            'classe opcional + método @Papel',
+            '/api/teste-guardas/opcional-na-classe/papel-no-metodo',
+          ],
+          [
+            'classe @Papel + método opcional',
+            '/api/teste-guardas/papel-na-classe/opcional-no-metodo',
+          ],
+          [
+            'classe opcional + método @Publico',
+            '/api/teste-guardas/opcional-na-classe/publico-no-metodo',
+          ],
+          [
+            'classe @Publico + método opcional',
+            '/api/teste-guardas/publico-na-classe/opcional-no-metodo',
+          ],
+          [
+            'opcional + @Papel no mesmo método',
+            '/api/teste-guardas/publico-na-classe/tudo-no-metodo',
+          ],
+        ] as const;
+
+        function esperar500(resposta: LightMyRequestResponse): void {
+          expect(resposta.statusCode).toBe(500);
+          expect(resposta.json()).toEqual({
+            sucesso: false,
+            erro: { codigo: 'INDISPONIVEL', mensagem: expect.any(String) },
+          });
+          expect(resposta.body).not.toMatch(/SessaoOpcional|Papel|Publico/);
+        }
+
+        it.each(ROTAS)('%s: anônimo → 500', async (_nome, rota) => {
+          esperar500(await new Navegador(ctx.app).get(rota));
+        });
+
+        it.each(ROTAS)('%s: leiloeiro logado → 500', async (_nome, rota) => {
+          const leiloeiro = await logado('leiloeiro', '10.3.3.1');
+
+          esperar500(await leiloeiro.get(rota));
+        });
+      });
     });
 
     describe('ordem: CSRF → autenticação → papel → validação (specs/003 §Ordem)', () => {

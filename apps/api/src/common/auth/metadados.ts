@@ -7,9 +7,19 @@ import type { PapelDoUsuario, UsuarioDaSessao } from './sessao.js';
 
 export const CHAVE_PUBLICO = 'leilao:auth:publico';
 export const CHAVE_PAPEL = 'leilao:auth:papel';
+export const CHAVE_SESSAO_OPCIONAL = 'leilao:auth:sessao-opcional';
 
 /** Rota sem autenticação (pula as etapas 2 e 3; o CSRF continua valendo para POST etc.). */
 export const Publico = (): MethodDecorator & ClassDecorator => SetMetadata(CHAVE_PUBLICO, true);
+
+/**
+ * Rota pública que lê a sessão se houver: com access token válido, `usuario` fica na requisição;
+ * sem cookie ou com token inválido/expirado, segue anônima (nunca 401, nunca refresh). O CSRF
+ * continua valendo. Não combine com @Papel nem com @Publico (no método ou na classe, em qualquer
+ * ordem): o guard falha fechado e responde 500 genérico em vez de abrir a rota.
+ */
+export const SessaoOpcional = (): MethodDecorator & ClassDecorator =>
+  SetMetadata(CHAVE_SESSAO_OPCIONAL, true);
 
 /** Rota restrita a um papel: outro papel recebe 403 PAPEL_NAO_PERMITIDO. */
 export const Papel = (papel: PapelDoUsuario): MethodDecorator & ClassDecorator =>
@@ -36,4 +46,10 @@ export function usuarioDaRequisicao(contexto: ExecutionContext): UsuarioDaSessao
 /** Parâmetro com o usuário da sessão (id e papel), posto pelo guard global. */
 export const UsuarioAtual = createParamDecorator((_dados: unknown, contexto: ExecutionContext) =>
   usuarioDaRequisicao(contexto),
+);
+
+/** Parâmetro para rotas com @SessaoOpcional(): o usuário da sessão ou undefined (anônimo). */
+export const UsuarioOpcional = createParamDecorator(
+  (_dados: unknown, contexto: ExecutionContext): UsuarioDaSessao | undefined =>
+    contexto.switchToHttp().getRequest<RequisicaoComSessao>().usuario,
 );
