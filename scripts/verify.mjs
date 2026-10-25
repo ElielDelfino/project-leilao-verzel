@@ -332,8 +332,17 @@ async function garantirPostgresLocal(env) {
   const porta = Number(env.POSTGRES_PORT);
   if (await postgresAceitaConexao(host, porta)) return true;
   const comando = 'pnpm infra:up --wait';
-  if (!HOSTS_LOCAIS.has(host) || !existsSync(join(RAIZ, '.env.local'))) {
-    process.stderr.write(`Postgres fora em ${host}:${porta}. Suba com: ${comando}\n`);
+  if (!HOSTS_LOCAIS.has(host)) {
+    process.stderr.write(
+      `Postgres fora em ${host}:${porta} (host não local). Suba-o e rode de novo.\n`,
+    );
+    return false;
+  }
+  // Sem .env.local o compose não sobe (infra:up passa --env-file .env.local).
+  if (!existsSync(join(RAIZ, '.env.local'))) {
+    process.stderr.write(
+      `Postgres fora em ${host}:${porta}. Suba com: pnpm keys:generate && ${comando}\n`,
+    );
     return false;
   }
   process.stdout.write(`Postgres fora em ${host}:${porta}; tentando \`${comando}\`.\n`);
@@ -419,12 +428,13 @@ async function passoTypecheckGuarda(v, pacotes) {
   });
 }
 
-async function passoTestes(v, pacotes, porPacote, nome, env) {
+/** porPacote: Map pasta → arquivos, ou 'todos' (suíte inteira de cada pacote com Vitest). */
+async function passoTestes(v, pacotes, porPacote, { nome, semTestes }, env) {
   for (const pacote of pacotes.filter((p) => p.temVitest)) {
     const arquivos = porPacote === 'todos' ? [] : porPacote.get(pacote.pasta);
     const titulo = `testes ${pacote.nome}`;
     if (arquivos === undefined) {
-      v.pular(titulo, 'nenhum teste ligado ao que mudou');
+      v.pular(titulo, semTestes);
       continue;
     }
     const usaBanco = pacote.pasta === PACOTE_DO_BANCO;
@@ -454,6 +464,13 @@ async function quick(opcoes, env) {
   process.stdout.write(
     `verify:quick: ${alterados.length} arquivo(s) alterado(s) desde ${base.ref} (${base.sha.slice(0, 7)})\n`,
   );
+  // Testes explícitos substituem os ligados ao que mudou; arquivo inexistente falha já aqui.
+  const explicitos =
+    opcoes.arquivos.length > 0
+      ? testesExplicitos(RAIZ, pacotes, opcoes.arquivos, env.INIT_CWD ?? process.cwd())
+      : undefined;
+  const porPacote = explicitos?.porPacote ?? testesRelacionados(RAIZ, pacotes, alterados, existe);
+  const semTestes = explicitos ? 'nenhum teste pedido' : 'nenhum teste ligado ao que mudou';
 
   if (presentes.length === 0) v.pular('formato', 'nada alterado');
   else {
@@ -479,26 +496,21 @@ async function quick(opcoes, env) {
     );
   }
 
-  const explicitos =
-    opcoes.arquivos.length > 0
-      ? testesExplicitos(RAIZ, pacotes, opcoes.arquivos, env.INIT_CWD ?? process.cwd())
-      : undefined;
-  const porPacote = explicitos?.porPacote ?? testesRelacionados(RAIZ, pacotes, alterados, existe);
-
   const testesDeScripts = explicitos
     ? explicitos.scripts
     : alterados.some((a) => /^scripts\/[^/]+\.mjs$/.test(a))
       ? ['scripts/*.test.mjs']
       : [];
-  if (testesDeScripts.length === 0) v.pular('testes de scripts', 'nada em scripts/*.mjs mudou');
-  else {
+  if (testesDeScripts.length === 0) {
+    v.pular('testes de scripts', explicitos ? semTestes : 'nada em scripts/*.mjs mudou');
+  } else {
     const nome = opcoes.nome ? [`--test-name-pattern=${opcoes.nome}`] : [];
     await v.passo('testes de scripts', () =>
       executar('node', ['--test', ...nome, ...testesDeScripts], { env }),
     );
   }
 
-  await passoTestes(v, pacotes, porPacote, opcoes.nome, env);
+  await passoTestes(v, pacotes, porPacote, { nome: opcoes.nome, semTestes }, env);
   return v;
 }
 
@@ -516,7 +528,7 @@ async function full(opcoes, env) {
   await v.passo('testes de scripts', () => executar('pnpm', ['run', 'test:scripts'], { env }));
   // Banco: o leilao_test local via TEMPLATE. O banco isolado com Testcontainers (specs/013)
   // depende de um pedido ao infra (allowBuilds no pnpm-workspace.yaml); veja a tarefa 011.
-  await passoTestes(v, pacotes, 'todos', undefined, env);
+  await passoTestes(v, pacotes, 'todos', { nome: undefined, semTestes: '' }, env);
   for (const script of ['contracts:lint', 'contracts:check']) {
     if (!scriptsDaRaiz[script]) v.pular(script, 'script ainda não existe (tarefa 021)');
     else await v.passo(script, () => executar('pnpm', ['run', script], { env }));

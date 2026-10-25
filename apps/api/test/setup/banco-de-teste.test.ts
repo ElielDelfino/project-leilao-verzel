@@ -5,12 +5,12 @@
 // Os testes usam nomes próprios (leilao_t011_<hex>) e uma cópia da pasta de migrations, então não
 // mexem no leilao_test nem no leilao_test_tpl de quem estiver rodando o verify.
 import { randomBytes } from 'node:crypto';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ambienteDeTeste } from '../../src/db/ambiente-de-teste.js';
 import { type ConexaoDoBanco, trocarBanco } from '../../src/db/conexao.js';
@@ -30,6 +30,13 @@ const HASH_SHA256 = /^[0-9a-f]{64}$/;
 
 /** Critério de aceite da tarefa 011: recriar o banco de teste a partir do modelo leva < 1 s. */
 const LIMITE_PARA_RECRIAR_MS = 1000;
+
+/**
+ * Os testes com Postgres refazem bancos logo depois de conexões recém-fechadas: o DROP DATABASE
+ * espera o backend que está saindo (medido: até ~3 s), e no verify:full eles disputam o Postgres
+ * com as outras suítes. O padrão de 5 s do Vitest não basta.
+ */
+const TEMPO_DOS_TESTES_COM_BANCO_MS = 30_000;
 
 /** Cópia descartável da pasta de migrations, para simular uma migration nova. */
 function copiarMigrations(): string {
@@ -66,6 +73,50 @@ async function estadoDoBanco(nome: string): Promise<EstadoDoBanco | undefined> {
     const linha = rows[0];
     return linha && { comentario: linha.comentario, aceitaConexoes: linha.conexoes };
   });
+}
+
+interface Diario {
+  readonly entries: readonly { readonly idx: number; readonly when: number }[];
+}
+
+function lerDiario(pasta: string): Diario & Record<string, unknown> {
+  return JSON.parse(readFileSync(join(pasta, 'meta', '_journal.json'), 'utf8')) as Diario &
+    Record<string, unknown>;
+}
+
+/** Acrescenta à cópia uma migration nova, registrada no diário (o Drizzle só aplica o que está lá). */
+function acrescentarMigration(pasta: string, tag: string, sql: string): void {
+  const diario = lerDiario(pasta);
+  const ultima = diario.entries.at(-1);
+  const entrada = {
+    idx: (ultima?.idx ?? -1) + 1,
+    version: '7',
+    when: (ultima?.when ?? 0) + 1,
+    tag,
+    breakpoints: true,
+  };
+  writeFileSync(join(pasta, `${tag}.sql`), sql);
+  writeFileSync(
+    join(pasta, 'meta', '_journal.json'),
+    JSON.stringify({ ...diario, entries: [...diario.entries, entrada] }),
+  );
+}
+
+/** Espera (sem sleep fixo) os backends recém-fechados saírem do banco. */
+async function esperarSemConexoes(nome: string): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      const conexoes = await comCliente(AMBIENTE.conexao(), async (cliente) => {
+        const { rows } = await cliente.query<{ total: string }>(
+          'select count(*) as total from pg_stat_activity where datname = $1',
+          [nome],
+        );
+        return Number(rows[0]?.total);
+      });
+      expect(conexoes).toBe(0);
+    },
+    { timeout: TEMPO_DOS_TESTES_COM_BANCO_MS, interval: 50 },
+  );
 }
 
 async function migrationsAplicadas(nome: string): Promise<number> {
@@ -134,123 +185,127 @@ describe('prepararBancoDeTeste (sem banco)', () => {
   });
 });
 
-describe.skipIf(!AMBIENTE.disponivel)('prepararBancoDeTeste (com Postgres)', () => {
-  const pasta = copiarMigrations();
-  const opcoes = { pasta, modelo: MODELO, teste: TESTE };
+describe.skipIf(!AMBIENTE.disponivel)(
+  'prepararBancoDeTeste (com Postgres)',
+  {
+    timeout: TEMPO_DOS_TESTES_COM_BANCO_MS,
+  },
+  () => {
+    const pasta = copiarMigrations();
+    const opcoes = { pasta, modelo: MODELO, teste: TESTE };
+    const migrationsDoRepositorio = lerDiario(PASTA_DAS_MIGRATIONS).entries.length;
 
-  beforeAll(async () => {
-    // Estado inicial conhecido: nem modelo nem banco de teste.
-    await comCliente(AMBIENTE.conexao(), async (cliente) => {
-      await cliente.query(`drop database if exists ${TESTE} with (force)`);
-      await cliente.query(`drop database if exists ${MODELO} with (force)`);
+    beforeAll(async () => {
+      // Estado inicial conhecido: nem modelo nem banco de teste.
+      await comCliente(AMBIENTE.conexao(), async (cliente) => {
+        await cliente.query(`drop database if exists ${TESTE} with (force)`);
+        await cliente.query(`drop database if exists ${MODELO} with (force)`);
+      });
     });
-  });
 
-  afterAll(async () => {
-    await comCliente(AMBIENTE.conexao(), async (cliente) => {
-      await cliente.query(`drop database if exists ${TESTE} with (force)`);
-      await cliente.query(`drop database if exists ${MODELO} with (force)`);
+    afterAll(async () => {
+      await comCliente(AMBIENTE.conexao(), async (cliente) => {
+        await cliente.query(`drop database if exists ${TESTE} with (force)`);
+        await cliente.query(`drop database if exists ${MODELO} with (force)`);
+      });
+      rmSync(pasta, { recursive: true, force: true });
     });
-    rmSync(pasta, { recursive: true, force: true });
-  });
 
-  it('sem modelo: cria o modelo com as migrations, grava o hash e cria o banco de teste', async () => {
-    const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+    it('sem modelo: cria o modelo com as migrations, grava o hash e cria o banco de teste', async () => {
+      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
 
-    expect(resultado.modeloRefeito).toBe(true);
-    expect(resultado.hash).toBe(hashDasMigrations(pasta));
-    expect(await estadoDoBanco(MODELO)).toEqual({
-      comentario: `migrations-sha256:${hashDasMigrations(pasta)}`,
-      // Ninguém conecta no modelo: uma conexão aberta faria o CREATE DATABASE ... TEMPLATE falhar.
-      aceitaConexoes: false,
+      expect(resultado.modeloRefeito).toBe(true);
+      expect(resultado.hash).toBe(hashDasMigrations(pasta));
+      expect(await estadoDoBanco(MODELO)).toEqual({
+        comentario: `migrations-sha256:${hashDasMigrations(pasta)}`,
+        // Ninguém conecta no modelo: uma conexão aberta faria o CREATE DATABASE ... TEMPLATE falhar.
+        aceitaConexoes: false,
+      });
+      expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio);
     });
-    expect(await migrationsAplicadas(TESTE)).toBe(1);
-  });
 
-  it('com o mesmo hash: reaproveita o modelo e recria o banco de teste do zero', async () => {
-    await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), (cliente) =>
-      cliente.query('create table sobra_da_execucao_anterior (id int)'),
-    );
-
-    const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
-
-    expect(resultado.modeloRefeito).toBe(false);
-    const sobra = await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), async (cliente) => {
-      const { rows } = await cliente.query<{ existe: boolean }>(
-        `select to_regclass('public.sobra_da_execucao_anterior') is not null as existe`,
+    it('com o mesmo hash: reaproveita o modelo e recria o banco de teste do zero', async () => {
+      await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), (cliente) =>
+        cliente.query('create table sobra_da_execucao_anterior (id int)'),
       );
-      return rows[0]?.existe;
+
+      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+
+      expect(resultado.modeloRefeito).toBe(false);
+      const sobra = await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), async (cliente) => {
+        const { rows } = await cliente.query<{ existe: boolean }>(
+          `select to_regclass('public.sobra_da_execucao_anterior') is not null as existe`,
+        );
+        return rows[0]?.existe;
+      });
+      expect(sobra).toBe(false);
+      expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio);
     });
-    expect(sobra).toBe(false);
-    expect(await migrationsAplicadas(TESTE)).toBe(1);
-  });
 
-  it(`recria o banco de teste a partir do modelo em menos de ${LIMITE_PARA_RECRIAR_MS} ms`, async () => {
-    const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+    it(`recria o banco de teste a partir do modelo em menos de ${LIMITE_PARA_RECRIAR_MS} ms`, async () => {
+      // Como no verify: ninguém conectado no banco de teste desde a execução anterior.
+      await esperarSemConexoes(TESTE);
 
-    expect(resultado.modeloRefeito).toBe(false);
-    expect(resultado.msParaRecriar).toBeLessThan(LIMITE_PARA_RECRIAR_MS);
-  });
+      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
 
-  it('com uma migration nova: refaz o modelo, aplica a nova e troca o hash', async () => {
-    writeFileSync(join(pasta, '0001_t011.sql'), 'create table marca_t011 (id int primary key);\n');
-    // O migrator do Drizzle só aplica o que está no diário.
-    const diario = join(pasta, 'meta', '_journal.json');
-    writeFileSync(
-      diario,
-      JSON.stringify({
-        version: '7',
-        dialect: 'postgresql',
-        entries: [
-          { idx: 0, version: '7', when: 1792877302279, tag: '0000_base', breakpoints: true },
-          { idx: 1, version: '7', when: 1792877302280, tag: '0001_t011', breakpoints: true },
-        ],
-      }),
-    );
+      expect(resultado.modeloRefeito).toBe(false);
+      expect(resultado.msParaRecriar).toBeLessThan(LIMITE_PARA_RECRIAR_MS);
+    });
 
-    const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+    it('com uma migration nova: refaz o modelo, aplica a nova e troca o hash', async () => {
+      acrescentarMigration(pasta, '9999_t011', 'create table marca_t011 (id int primary key);\n');
 
-    expect(resultado.modeloRefeito).toBe(true);
-    expect((await estadoDoBanco(MODELO))?.comentario).toBe(
-      `migrations-sha256:${hashDasMigrations(pasta)}`,
-    );
-    expect(await migrationsAplicadas(TESTE)).toBe(2);
-  });
+      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
 
-  it('modelo sem comentário (preparo interrompido antes do fim) é refeito', async () => {
-    await comCliente(AMBIENTE.conexao(), (cliente) =>
-      cliente.query(`comment on database ${MODELO} is null`),
-    );
+      expect(resultado.modeloRefeito).toBe(true);
+      expect((await estadoDoBanco(MODELO))?.comentario).toBe(
+        `migrations-sha256:${hashDasMigrations(pasta)}`,
+      );
+      expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio + 1);
+      const marca = await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), async (cliente) => {
+        const { rows } = await cliente.query<{ existe: boolean }>(
+          `select to_regclass('public.marca_t011') is not null as existe`,
+        );
+        return rows[0]?.existe;
+      });
+      expect(marca).toBe(true);
+    });
 
-    const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+    it('modelo sem comentário (preparo interrompido antes do fim) é refeito', async () => {
+      await comCliente(AMBIENTE.conexao(), (cliente) =>
+        cliente.query(`comment on database ${MODELO} is null`),
+      );
 
-    expect(resultado.modeloRefeito).toBe(true);
-    expect((await estadoDoBanco(MODELO))?.comentario).toBe(
-      `migrations-sha256:${hashDasMigrations(pasta)}`,
-    );
-  });
+      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
 
-  it('duas execuções simultâneas terminam as duas, com o banco de teste íntegro', async () => {
-    await Promise.all([
-      prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
-      prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
-    ]);
+      expect(resultado.modeloRefeito).toBe(true);
+      expect((await estadoDoBanco(MODELO))?.comentario).toBe(
+        `migrations-sha256:${hashDasMigrations(pasta)}`,
+      );
+    });
 
-    expect(await migrationsAplicadas(TESTE)).toBe(2);
-  });
+    it('duas execuções simultâneas terminam as duas, com o banco de teste íntegro', async () => {
+      await Promise.all([
+        prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
+        prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
+      ]);
 
-  it('recusa conectar pelo próprio banco de teste ou pelo modelo', async () => {
-    await expect(
-      prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), TESTE), opcoes),
-    ).rejects.toThrow(`POSTGRES_DB não pode ser "${TESTE}"`);
-    await expect(
-      prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), MODELO), opcoes),
-    ).rejects.toThrow(`POSTGRES_DB não pode ser "${MODELO}"`);
-  });
+      expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio + 1);
+    });
 
-  it('recusa nome de banco fora de [a-z0-9_]', async () => {
-    await expect(
-      prepararBancoDeTeste(AMBIENTE.conexao(), { ...opcoes, teste: 'leilao-test"; drop' }),
-    ).rejects.toThrow('nome de banco inválido');
-  });
-});
+    it('recusa conectar pelo próprio banco de teste ou pelo modelo', async () => {
+      await expect(
+        prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), TESTE), opcoes),
+      ).rejects.toThrow(`POSTGRES_DB não pode ser "${TESTE}"`);
+      await expect(
+        prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), MODELO), opcoes),
+      ).rejects.toThrow(`POSTGRES_DB não pode ser "${MODELO}"`);
+    });
+
+    it('recusa nome de banco fora de [a-z0-9_]', async () => {
+      await expect(
+        prepararBancoDeTeste(AMBIENTE.conexao(), { ...opcoes, teste: 'leilao-test"; drop' }),
+      ).rejects.toThrow('nome de banco inválido');
+    });
+  },
+);
