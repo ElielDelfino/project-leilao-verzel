@@ -50,6 +50,13 @@ jobs:
           # O cache é o do store do pnpm (passo seguinte).
           package-manager-cache: false
 
+      # A API usa node:crypto.argon2 (Node >= 24.7.0, ADR 0027); o .nvmrc "24" resolve para o 24.x mais
+      # recente, e este passo falha se o runner entregar um Node mais antigo.
+      - name: Node >= 24.7
+        run: |
+          node -e 'const [maior, menor] = process.versions.node.split(".").map(Number); process.exit(maior > 24 || (maior === 24 && menor >= 7) ? 0 : 1)' \
+            || { echo "::error::Node $(node --version) é anterior ao 24.7"; exit 1; }
+
       - name: pnpm (versão do packageManager) com cache do store
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -107,10 +114,26 @@ jobs:
         timeout-minutes: 3
         run: pnpm infra:up --wait
 
-      # --e2e entra quando houver playwright.config.* (specs/013); contracts:* aparecem como pulados
-      # até a tarefa 021.
+      # Chromium do Playwright para o verify:full --e2e (specs/013). Só quando já existe a config na
+      # raiz (a mesma condição do verify.mjs): antes disso o Playwright nem está instalado. O cache
+      # (binários em ~/.cache/ms-playwright) usa o lockfile como chave, que fixa a versão do Playwright.
+      - name: Cache do Chromium do Playwright
+        if: hashFiles('playwright.config.*') != ''
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Com cache cheio só confere os binários; com cache vazio baixa. --with-deps traz as bibliotecas
+      # de sistema do Chromium (apt, o runner tem sudo).
+      - name: Instalar o Chromium do Playwright
+        if: hashFiles('playwright.config.*') != ''
+        run: pnpm exec playwright install --with-deps chromium
+
+      # contracts:* aparecem como pulados até a tarefa 021. Os segredos de teste (inclusive
+      # DB_API_PASSWORD) vêm do .env.local descartável do passo `pnpm keys:generate`, que o verify lê.
       - name: verify:full
-        run: pnpm verify:full
+        run: pnpm verify:full ${{ hashFiles('playwright.config.*') != '' && '--e2e' || '' }}
 
       - name: Estado do compose (falha)
         if: failure()

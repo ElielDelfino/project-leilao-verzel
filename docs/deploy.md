@@ -22,16 +22,20 @@ docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml u
 
 Nenhum segredo passa por `environment:`, `env_file:`, `command:`, healthcheck ou argumento de build. Cada segredo é um arquivo montado pelo Compose `secrets:` em `/run/secrets/<nome>`, e o processo recebe só o caminho em `<VAR>_FILE`.
 
-| Arquivo | Variável na API | Outros leitores | No compose desde |
-|---|---|---|---|
-| `db_password` | `DB_PASSWORD_FILE=/run/secrets/db_password` | Postgres (`POSTGRES_PASSWORD_FILE`) | tarefa 007 |
-| `redis_password` | `REDIS_PASSWORD_FILE=/run/secrets/redis_password` | Redis (entrypoint grava `requirepass` num `redis.conf` em tmpfs) | tarefa 007 |
-| `jwt_secret` | `JWT_SECRET_FILE` | — | quando a API passar a usá-lo (F1) |
-| `pseudonym_hmac_key` | `PSEUDONYM_HMAC_KEY_FILE` | seed | quando a API passar a usá-lo (F3) |
-| `ed25519_private_key` | `ED25519_PRIVATE_KEY_FILE` | seed | quando a API passar a usá-lo (F3) |
+| Arquivo | Quem recebe (`<VAR>_FILE`) | No compose |
+|---|---|---|
+| `db_password` | Postgres (`POSTGRES_PASSWORD_FILE`); one-shots de migrations e seed (`DB_PASSWORD_FILE`). **Nunca a API** | tarefa 007 |
+| `db_api_password` | API (`DB_API_PASSWORD_FILE`); one-shot de migrations | tarefa 042 |
+| `redis_password` | API (`REDIS_PASSWORD_FILE`); Redis (entrypoint grava `requirepass` num `redis.conf` em tmpfs) | tarefa 007 |
+| `jwt_secret` | API (`JWT_SECRET_FILE`) | tarefa 042 |
+| `pseudonym_hmac_key` | API (`PSEUDONYM_HMAC_KEY_FILE`); seed | tarefa 042 |
+| `ed25519_private_key` | API (`ED25519_PRIVATE_KEY_FILE`); seed | tarefa 042 |
 
-- O diretório no host vem de `LEILAO_SECRETS_DIR`. O padrão `../.secrets` (relativo a `infra/`) é o `.secrets/` do `pnpm keys:generate`, para testar o compose localmente com as senhas de dev. Na VM, `LEILAO_SECRETS_DIR=/run/leilao/secrets`.
-- Na VM, `infra/deploy/fetch-secrets.sh` lê os 5 segredos do GCP Secret Manager e grava `/run/leilao/secrets/<nome>`: tmpfs, diretório 700, arquivos 600 com dono uid 1000 (usuário `node` da imagem da API), sem quebra de linha. Ele roda antes do `compose up` em cada deploy e no boot da VM, por uma unidade systemd ordenada antes do `docker.service`, porque o tmpfs se perde no reinício.
+- São 6 segredos, as 6 versões gratuitas do Secret Manager (ADR 0026). O sexto, `DB_API_PASSWORD`, é criado no Secret Manager pela tarefa 008, com a aprovação do humano; a tarefa 042 não cria nem altera nada no GCP.
+- A API conecta ao Postgres como o papel `leilao_api` (`POSTGRES_API_USER`, no `environment:`), não recebe `POSTGRES_USER` nem `DB_PASSWORD_FILE` e não monta o secret `db_password`: a senha do dono do banco não chega à API.
+- Os one-shots de migrations e de seed (specs/014 §Produção) entram no compose com a tarefa que os criar: o de migrations recebe `DB_PASSWORD_FILE` e `DB_API_PASSWORD_FILE`; o de seed, `DB_PASSWORD_FILE` e os segredos das suas etapas. Hoje o compose não tem nenhum dos dois.
+- O diretório no host vem de `LEILAO_SECRETS_DIR`. O padrão `../.secrets` (relativo a `infra/`) é o `.secrets/` do `pnpm keys:generate`, que só cria `db_password` e `redis_password`: para subir a API pelo compose de produção localmente, crie também os outros 4 arquivos (uid 1000, 600, sem quebra de linha); o `config` não acusa a falta. Na VM, `LEILAO_SECRETS_DIR=/run/leilao/secrets`.
+- Na VM, `infra/deploy/fetch-secrets.sh` lê os 6 segredos do GCP Secret Manager e grava `/run/leilao/secrets/<nome>`: tmpfs, diretório 700, arquivos 600 com dono uid 1000 (usuário `node` da imagem da API), sem quebra de linha. Ele roda antes do `compose up` em cada deploy e no boot da VM, por uma unidade systemd ordenada antes do `docker.service`, porque o tmpfs se perde no reinício.
 - O Compose ignora `uid`, `gid` e `mode` de secrets com `file:` fora do Swarm: o arquivo entra em bind somente leitura com o dono e o modo do host. Por isso o dono uid 1000 vem do `fetch-secrets.sh`; o Postgres e o Redis leem como root no entrypoint.
 - Sem um arquivo, o `up` do serviço que o usa falha com `bind source path does not exist: <caminho>` e o deploy aborta, mantendo a versão anterior (specs/001). `docker compose config --quiet` não detecta essa falta.
 - A API, o runner de migrations e o seed aceitam exatamente uma de `<VAR>` ou `<VAR>_FILE` por segredo e não sobem com valor fora do formato; a mensagem cita só o nome da variável (specs/014 §Segredos).

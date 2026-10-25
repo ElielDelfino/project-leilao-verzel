@@ -29,7 +29,7 @@ import * as ed from '@noble/ed25519';
 const RAIZ = resolve(import.meta.dirname, '..');
 const CAMINHO_PADRAO = join(RAIZ, '.env.local');
 
-// Os 5 segredos são 32 bytes em base64url sem padding (ADR 0023 §Decisão, item 4).
+// Os 6 segredos são 32 bytes em base64url sem padding (ADR 0023 §Decisão, item 4; ADR 0026).
 const BYTES_256_BITS = 32;
 // Sufixo aleatório do backup: dois --force no mesmo milissegundo não colidem.
 const BYTES_SUFIXO_BACKUP = 3;
@@ -39,6 +39,7 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 export const VARIAVEIS = Object.freeze([
   'DB_PASSWORD',
+  'DB_API_PASSWORD',
   'REDIS_PASSWORD',
   'JWT_SECRET',
   'PSEUDONYM_HMAC_KEY',
@@ -69,6 +70,8 @@ async function gerarSegredos() {
   const { secretKey } = await ed.keygenAsync();
   return Object.freeze({
     DB_PASSWORD: aleatorioBase64url(BYTES_256_BITS),
+    // Senha do papel `leilao_api` (ADR 0026); o `db:migrate` a aplica ao papel.
+    DB_API_PASSWORD: aleatorioBase64url(BYTES_256_BITS),
     REDIS_PASSWORD: aleatorioBase64url(BYTES_256_BITS),
     JWT_SECRET: aleatorioBase64url(BYTES_256_BITS),
     PSEUDONYM_HMAC_KEY: aleatorioBase64url(BYTES_256_BITS),
@@ -320,14 +323,36 @@ function publicarEnv(destino, conteudo, existia) {
   }
 }
 
-// Nomes (nunca valores) das variáveis obsoletas presentes num .env.local mantido.
-function obsoletasNoEnv(caminho) {
-  const nomes = new Set(
-    readFileSync(caminho, 'utf8')
+// Nomes (nunca valores) das variáveis presentes num .env.local.
+function nomesNoEnv(conteudo) {
+  return new Set(
+    conteudo
       .split('\n')
       .filter((linha) => linha.includes('=') && !linha.startsWith('#'))
       .map((linha) => linha.slice(0, linha.indexOf('=')).trim()),
   );
+}
+
+// Um .env.local anterior a uma variável nova (por exemplo, DB_API_PASSWORD da task 042) ganha só as
+// linhas que faltam, no fim: o conteúdo existente fica byte a byte como estava, sem --force. A troca
+// é atômica (temporário 600 + rename). Devolve os nomes acrescentados, nunca os valores.
+async function acrescentarFaltantes(base, destino) {
+  const atual = readFileSync(destino, 'utf8');
+  const presentes = nomesNoEnv(atual);
+  const faltantes = VARIAVEIS.filter((nome) => !presentes.has(nome));
+  if (faltantes.length === 0) return [];
+  const temporario = nomeTemporario(destino);
+  garantirNaoVersionaveis(base, [destino, temporario]);
+  const novos = await gerarSegredos();
+  const separador = atual === '' || atual.endsWith('\n') ? '' : '\n';
+  const linhas = faltantes.map((nome) => `${nome}=${novos[nome]}\n`).join('');
+  gravarAtomico(destino, temporario, `${atual}${separador}${linhas}`, true);
+  return faltantes;
+}
+
+// Nomes (nunca valores) das variáveis obsoletas presentes num .env.local mantido.
+function obsoletasNoEnv(caminho) {
+  const nomes = nomesNoEnv(readFileSync(caminho, 'utf8'));
   const presentes = VARIAVEIS_OBSOLETAS.filter((nome) => nomes.has(nome));
   return presentes.length > 0 ? presentes : undefined;
 }
@@ -339,7 +364,7 @@ function obsoletasNoEnv(caminho) {
  * os anteriores vão para backup (600). Arquivos e diretório que já existiam voltam a 600 e 700.
  * Recusa destino versionável pelo git e links simbólicos. `uid` existe para os testes.
  * @returns {Promise<{status: 'criado' | 'mantido' | 'sobrescrito', caminho: string, backup?: string,
- *   permissaoCorrigida?: true, obsoletas?: string[], donoDiferenteDaApi?: true,
+ *   permissaoCorrigida?: true, acrescentadas?: string[], obsoletas?: string[], donoDiferenteDaApi?: true,
  *   diretorioDeSegredos: {caminho: string, permissaoCorrigida?: true},
  *   segredos: Array<{variavel: string, caminho: string, status: string, backup?: string,
  *     permissaoCorrigida?: true}>}>}
@@ -371,6 +396,7 @@ export async function gerarEnvLocal({
       garantirNaoVersionaveis(base, caminhosQueSeraoGravados(planoFinal));
     }
   }
+  const acrescentadas = status === 'mantido' ? await acrescentarFaltantes(base, destino) : [];
   const envCorrigido = status === 'mantido' && fecharPermissao(destino, PERMISSAO_SO_DONO);
   const obsoletas = status === 'mantido' ? obsoletasNoEnv(destino) : undefined;
   const diretorioCorrigido = prepararDiretorioDeSegredos(diretorioDeSegredos);
@@ -381,6 +407,7 @@ export async function gerarEnvLocal({
     caminho: destino,
     ...(backup ? { backup } : {}),
     ...comCorrecao(envCorrigido),
+    ...(acrescentadas.length > 0 ? { acrescentadas } : {}),
     ...(obsoletas ? { obsoletas } : {}),
     ...(uid !== undefined && uid !== UID_DA_API ? { donoDiferenteDaApi: true } : {}),
     diretorioDeSegredos: { caminho: diretorioDeSegredos, ...comCorrecao(diretorioCorrigido) },
@@ -449,8 +476,15 @@ function mensagemDasObsoletas({ caminho, obsoletas }) {
   ];
 }
 
-function mensagemDoEnv({ status, caminho, backup, permissaoCorrigida }) {
+function mensagemDoEnv({ status, caminho, backup, permissaoCorrigida, acrescentadas }) {
   const nome = exibir(caminho);
+  if (status === 'mantido' && acrescentadas) {
+    return [
+      `${nome} já existe: as linhas existentes não foram alteradas; acrescentado só o que faltava:`,
+      ...acrescentadas.map((variavel) => `  - ${variavel}`),
+      'Rode pnpm db:migrate para aplicar a senha nova ao papel leilao_api.',
+    ].join('\n');
+  }
   if (status === 'mantido') {
     const correcao = permissaoCorrigida ? ' (só a permissão foi corrigida para 600)' : '';
     return `${nome} já existe e não foi alterado${correcao}. Para regerar todos os segredos: pnpm keys:generate --force`;
@@ -463,7 +497,8 @@ function mensagemDoEnv({ status, caminho, backup, permissaoCorrigida }) {
     `Arquivo anterior guardado em ${exibir(backup)} (permissão 600, ignorado pelo git).`,
     'Atenção: a chave Ed25519 antiga só existe nesse backup; sem ela, lances e selos já assinados',
     'deixam de ser verificáveis. O Postgres só lê DB_PASSWORD ao criar o volume: se ele já existia,',
-    'rode pnpm db:sync-password (aplica a senha nova sem apagar o volume).',
+    'rode pnpm db:sync-password (aplica a senha nova sem apagar o volume). A senha do papel leilao_api',
+    '(DB_API_PASSWORD) é aplicada pelo pnpm db:migrate.',
   ].join('\n');
 }
 
