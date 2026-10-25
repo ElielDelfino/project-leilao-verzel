@@ -32,7 +32,7 @@ REGRAS = {
     },
     "db-dev": {
         "permitir": ["database/*", "cache/*", "apps/api/src/*schema.ts", "apps/api/drizzle.config.ts",
-                     "apps/api/src/db/*"] + COMUNS,
+                     "apps/api/test/db/*", "apps/api/src/db/*"] + COMUNS,
         "negar": ["database/*/docker-compose.yml", "cache/*/docker-compose.yml"],
     },
     "qa": {
