@@ -93,6 +93,60 @@ describe('estadoDaSala: fimEm só cresce', () => {
     expect(novo.lote.totalLances).toBe(4);
   });
 
+  it('lance_aceito seguido de fim_estendido (mesmo fimEm) preenche o aviso', () => {
+    const aposLance = aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR }));
+    expect(aposLance.avisoFimEstendido).toBe('');
+
+    const novo = aplicarFimEstendido(aposLance, { loteId: ID, fimEm: FIM_MAIOR });
+
+    expect(novo).not.toBe(aposLance);
+    expect(novo.lote.fimEm).toBe(FIM_MAIOR);
+    expect(novo.avisoFimEstendido).toMatch(/^O fim do lote foi estendido para /);
+  });
+
+  it('fim_estendido seguido de lance_aceito (ordem inversa) mantém o aviso e o fim', () => {
+    const aposFim = aplicarFimEstendido(sala(), { loteId: ID, fimEm: FIM_MAIOR });
+
+    const novo = aplicarLance(aposFim, lanceAceito({ fimEm: FIM_MAIOR }));
+
+    expect(novo.lote.fimEm).toBe(FIM_MAIOR);
+    expect(novo.lote.totalLances).toBe(4);
+    expect(novo.avisoFimEstendido).toBe(aposFim.avisoFimEstendido);
+    expect(novo.avisoFimEstendido).not.toBe('');
+  });
+
+  it('fim_estendido repetido depois do lance_aceito não muda o estado', () => {
+    const aposLance = aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR }));
+    const anunciado = aplicarFimEstendido(aposLance, { loteId: ID, fimEm: FIM_MAIOR });
+
+    expect(aplicarFimEstendido(anunciado, { loteId: ID, fimEm: FIM_MAIOR })).toBe(anunciado);
+  });
+
+  it('uma segunda extensão (fim maior) volta a anunciar', () => {
+    const fimTres = '2026-10-25T14:12:03Z';
+    const primeira = aplicarFimEstendido(aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR })), {
+      loteId: ID,
+      fimEm: FIM_MAIOR,
+    });
+    const aposSegundoLance = aplicarLance(
+      primeira,
+      lanceAceito({ seq: 5, totalLances: 5, fimEm: fimTres }),
+    );
+
+    const segunda = aplicarFimEstendido(aposSegundoLance, { loteId: ID, fimEm: fimTres });
+
+    expect(segunda).not.toBe(aposSegundoLance);
+    expect(segunda.avisoFimEstendido).not.toBe(primeira.avisoFimEstendido);
+    expect(segunda.lote.fimEm).toBe(fimTres);
+  });
+
+  it('estado do resync já estendido não anuncia o mesmo fim de novo', () => {
+    const resync = sala({ fimEm: FIM_MAIOR });
+
+    expect(aplicarFimEstendido(resync, { loteId: ID, fimEm: FIM_MAIOR })).toBe(resync);
+    expect(resync.avisoFimEstendido).toBe('');
+  });
+
   it('lance_aceito com fimEm maior estende o fim', () => {
     const novo = aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR }));
 
