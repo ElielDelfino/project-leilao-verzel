@@ -17,10 +17,14 @@ export interface ContextoDaMensagem {
 
 const TEXTO_INDISPONIVEL = 'O serviço está indisponível agora. Tente de novo em instantes.';
 
+function textoDeEspera(segundos: number | undefined): string {
+  return segundos === undefined ? 'em instantes' : `em ${segundos} s`;
+}
+
 type Texto = (contexto: ContextoDaMensagem) => string;
 
 // Um único mapa código → mensagem (specs/012 e tarefa 036 D12). Códigos sem texto na spec
-// (LEILOEIRO_NAO_PODE_LANCAR, CATALOGO_*) caem no texto de indisponível.
+// (LEILOEIRO_NAO_PODE_LANCAR) caem no texto de indisponível.
 const MENSAGENS: Partial<Record<CodigoDeErro, Texto>> = {
   LANCE_ABAIXO_DO_MINIMO: ({ minimoCentavos }) =>
     `Seu lance precisa ser de pelo menos ${
@@ -46,6 +50,10 @@ const MENSAGENS: Partial<Record<CodigoDeErro, Texto>> = {
   CSRF_INVALIDO: () => 'Não foi possível confirmar o envio. Recarregue a página e tente de novo.',
   NAO_AUTENTICADO: () => 'Entre para continuar.',
   NAO_ENCONTRADO: () => 'Não encontramos o que você procurou.',
+  CATALOGO_OCUPADO: ({ segundos }) =>
+    `A busca de cartas está ocupada. Tente de novo ${textoDeEspera(segundos)}.`,
+  CATALOGO_INDISPONIVEL: ({ segundos }) =>
+    `A busca de cartas está indisponível agora. Tente de novo ${textoDeEspera(segundos)}.`,
   INDISPONIVEL: () => TEXTO_INDISPONIVEL,
 };
 

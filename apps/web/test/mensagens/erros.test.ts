@@ -42,7 +42,28 @@ describe('mensagemDoErro', () => {
   });
 
   it('usa a mensagem de indisponível para código sem texto na spec', () => {
-    expect(mensagemDoErro('CATALOGO_OCUPADO')).toBe(mensagemDoErro('INDISPONIVEL'));
+    expect(mensagemDoErro('LEILOEIRO_NAO_PODE_LANCAR')).toBe(mensagemDoErro('INDISPONIVEL'));
+  });
+
+  it.each([
+    ['CATALOGO_OCUPADO', 1, 'A busca de cartas está ocupada. Tente de novo em 1 s.'],
+    [
+      'CATALOGO_INDISPONIVEL',
+      30,
+      'A busca de cartas está indisponível agora. Tente de novo em 30 s.',
+    ],
+  ] as const)('%s com {segundos}', (codigo, segundos, esperado) => {
+    expect(mensagemDoErro(codigo, { segundos })).toBe(esperado);
+  });
+
+  it.each([
+    ['CATALOGO_OCUPADO', 'A busca de cartas está ocupada. Tente de novo em instantes.'],
+    [
+      'CATALOGO_INDISPONIVEL',
+      'A busca de cartas está indisponível agora. Tente de novo em instantes.',
+    ],
+  ] as const)('%s sem segundos não mostra "undefined"', (codigo, esperado) => {
+    expect(mensagemDoErro(codigo)).toBe(esperado);
   });
 
   it('MUITAS_TENTATIVAS sem segundos não mostra "undefined"', () => {
