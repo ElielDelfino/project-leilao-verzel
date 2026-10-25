@@ -143,7 +143,18 @@ describe('CadeiaDeLances: entradas recusadas antes de tocar o banco', () => {
 
   it('selar recusa instante inválido com RangeError', async () => {
     await expect(
-      cadeia.selar(tx, { loteId: base.loteId, status: 'cancelado', seladoEm: new Date('x') }),
+      cadeia.selar(tx, {
+        loteId: base.loteId,
+        status: 'cancelado',
+        seladoEm: new Date('x'),
+        lote: {
+          id: base.loteId,
+          status: 'agendado',
+          totalLances: 0,
+          lanceAtualCentavos: null,
+          liderId: null,
+        },
+      }),
     ).rejects.toBeInstanceOf(RangeError);
   });
 });

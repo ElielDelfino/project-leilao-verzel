@@ -36,7 +36,7 @@ import {
   type TabelaDeIntegridade,
   TABELAS_DE_INTEGRIDADE,
 } from '../helpers/adulterar-por-sql.js';
-import { encerrarPorSql } from '../helpers/lances-por-sql.js';
+import { encerrarPorSql, estadoDoLote } from '../helpers/lances-por-sql.js';
 import { type ContaPorSql, inserirLote, inserirUsuario } from '../helpers/lotes-por-sql.js';
 import {
   type AppDeIdentidade,
@@ -166,10 +166,19 @@ describe.skipIf(!INFRA_DISPONIVEL)(
         await semear(loteId, i % 2 === 0 ? a : b, 1000 + i * 100);
       }
       if (selado) {
-        await encerrarPorSql(pool, loteId, { status: 'encerrado', vencedorId: a.id });
+        // Ordem do encerramento (D7): o selo confere o lote ainda `ao_vivo`, depois o status muda.
+        const estado = await estadoDoLote(pool, loteId);
+        const lote = {
+          id: loteId,
+          status: 'ao_vivo' as const,
+          totalLances: estado.total,
+          lanceAtualCentavos: estado.lanceAtualCentavos,
+          liderId: estado.liderId,
+        };
         await banco.transaction((tx) =>
-          cadeia.selar(tx, { loteId, status: 'encerrado', seladoEm: new Date() }),
+          cadeia.selar(tx, { loteId, status: 'encerrado', seladoEm: new Date(), lote }),
         );
+        await encerrarPorSql(pool, loteId, { status: 'encerrado', vencedorId: a.id });
       }
       return { loteId, contas: [leiloeiro, a, b], autor: a };
     }

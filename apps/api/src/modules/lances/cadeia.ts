@@ -3,10 +3,10 @@
 // (FOR UPDATE em `lots`). Hash, canônico e assinatura vêm das funções puras de integridade/.
 import { Injectable } from '@nestjs/common';
 
-import type { Transacao } from '../../db/banco.js';
+import { converterErroDoBanco, ErroDoBanco, type Transacao } from '../../db/banco.js';
 import { ServicoDeChaves } from './chaves.js';
 import { hashDoLance, hashDoSelo, hashGenese, type StatusDoSelo } from './integridade/hash.js';
-import { inserirLance, inserirSelo, lerUltimoLance } from './repositorio.js';
+import { inserirLance, inserirSelo, lerUltimoLance, type UltimoLance } from './repositorio.js';
 import { CENTAVOS_MAXIMO_DO_LANCE, CENTAVOS_MINIMO_DO_LANCE } from './schema.js';
 
 /** Dados do lance novo. `criadoEm` é o `agora(tx)` lido uma vez depois do lock do lote. */
@@ -35,11 +35,27 @@ export interface LanceAnexado {
   readonly lanceAnteriorId: string | null;
 }
 
+/** Status gravado em `lots.status` (specs/006), na forma em que `lotes` o devolve. */
+export type StatusDoLoteTravado = 'agendado' | 'ao_vivo' | 'encerrado' | 'cancelado';
+
+/**
+ * Estado do lote lido por quem chama, na mesma `tx`, logo depois do FOR UPDATE em `lots`: `lances`
+ * não lê `lots` (specs/001) e confere este estado contra a própria cadeia antes de selar.
+ */
+export interface LoteTravado {
+  readonly id: string;
+  readonly status: StatusDoLoteTravado;
+  readonly totalLances: number;
+  readonly lanceAtualCentavos: number | null;
+  readonly liderId: string | null;
+}
+
 /** Dados do selo. `seladoEm` é o `agora(tx)` da transação do encerramento ou do cancelamento. */
 export interface NovoSelo {
   readonly loteId: string;
   readonly status: StatusDoSelo;
   readonly seladoEm: Date;
+  readonly lote: LoteTravado;
 }
 
 /** Selo gravado, na forma de specs/008 §Forma canônica, com assinatura e `keyId`. */
@@ -53,7 +69,28 @@ export interface SeloGravado {
   readonly seladoEm: string;
   readonly assinatura: string;
   readonly keyId: string;
+  /** Último lance da cadeia (o arremate, se `encerrado`), para o ledger; `null` sem lances. */
+  readonly ultimoLanceId: string | null;
 }
+
+/**
+ * Recusas de `selar`. `LOTE_DIVERGENTE`: o lote travado não é o do selo, não está no status que o
+ * selo exige ou diverge da cadeia (total, valor ou líder); `SELO_JA_GRAVADO`: o lote já tem selo.
+ * Nenhum valor de lance, id de usuário ou pseudônimo na mensagem: só o código.
+ */
+export type CodigoDoErroDeSelo = 'LOTE_DIVERGENTE' | 'SELO_JA_GRAVADO';
+
+export class ErroDeSelo extends Error {
+  override readonly name = 'ErroDeSelo';
+
+  constructor(readonly codigo: CodigoDoErroDeSelo) {
+    super(`selo recusado: ${codigo}`);
+  }
+}
+
+/** PK de `lot_seals` (lote_id): um selo por lote. */
+const RESTRICAO_DO_SELO = 'lot_seals_pkey';
+const VIOLACAO_DE_UNICIDADE = '23505';
 
 const UUID_MINUSCULO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -76,6 +113,33 @@ function validarLance(novo: NovoLance): void {
   ) {
     throw new RangeError('valorCentavos fora da faixa do lance');
   }
+}
+
+/**
+ * O lote travado tem de bater com a cadeia lida na mesma `tx`: mesmo id, `encerrado` só sobre lote
+ * `ao_vivo`, e total, valor atual e líder iguais aos do último lance (ou zero, nulo e nulo).
+ */
+function loteConfereComACadeia(
+  novo: NovoSelo,
+  ultimo: UltimoLance | null,
+  pseudonimoDe: (liderId: string) => string,
+): boolean {
+  const { lote } = novo;
+  if (lote.id !== novo.loteId) return false;
+  if (novo.status === 'encerrado' && lote.status !== 'ao_vivo') return false;
+  if (lote.totalLances !== (ultimo?.seq ?? 0)) return false;
+  if (lote.lanceAtualCentavos !== (ultimo?.valorCentavos ?? null)) return false;
+  if (ultimo === null) return lote.liderId === null;
+  return lote.liderId !== null && pseudonimoDe(lote.liderId) === ultimo.pseudonimo;
+}
+
+function ehSeloRepetido(erro: unknown): boolean {
+  const convertido = converterErroDoBanco(erro);
+  return (
+    convertido instanceof ErroDoBanco &&
+    convertido.codigo === VIOLACAO_DE_UNICIDADE &&
+    convertido.restricao === RESTRICAO_DO_SELO
+  );
 }
 
 @Injectable()
@@ -117,15 +181,21 @@ export class CadeiaDeLances {
   /**
    * Sela o lote com o estado da cadeia na `tx`: `totalLances` e `hashFinal` do último lance (ou
    * 0 e a gênese) e, só em lote encerrado com lance, vencedor e arremate do último lance (o
-   * maior). Chamado por `liquidacao` na transação do encerramento ou do cancelamento (specs/010).
-   * Pré-condições (quem chama): o lote está travado na `tx` com o mesmo FOR UPDATE do `anexar`,
-   * senão o selo pode ler um último lance defasado e gravar total, `hashFinal` e vencedor errados,
-   * e o banco não pega; e `status` é `encerrado` só para lote de fato encerrado, porque `selar`
-   * não confere o status do lote e daria vencedor num lote aberto.
+   * maior). Chamado por `liquidacao` na transação do encerramento ou do cancelamento (specs/010),
+   * com o lote travado na `tx` pelo mesmo FOR UPDATE do `anexar` e o estado lido depois do lock
+   * em `novo.lote`. Antes de assinar, confere esse estado com a cadeia e recusa com
+   * `ErroDeSelo('LOTE_DIVERGENTE')` se o id não é o do selo, se `encerrado` vem sobre lote que não
+   * está `ao_vivo`, ou se total, lance atual ou líder divergem do último lance (estado defasado).
+   * Selo já gravado vira `ErroDeSelo('SELO_JA_GRAVADO')`. Qualquer erro exige rollback da `tx`.
+   * Devolve o selo e o `ultimoLanceId` (o lance arrematado, para o ledger).
    */
   async selar(tx: Transacao, novo: NovoSelo): Promise<SeloGravado> {
     const seladoEm = instante('seladoEm', novo.seladoEm);
     const ultimo = await lerUltimoLance(tx, novo.loteId);
+    const pseudonimoDe = (liderId: string): string => this.chaves.pseudonimo(novo.loteId, liderId);
+    if (!loteConfereComACadeia(novo, ultimo, pseudonimoDe)) {
+      throw new ErroDeSelo('LOTE_DIVERGENTE');
+    }
     const vencedor = novo.status === 'encerrado' ? ultimo : null;
     const dados = {
       loteId: novo.loteId,
@@ -137,7 +207,12 @@ export class CadeiaDeLances {
       seladoEm,
     };
     const { assinatura, keyId } = this.chaves.assinar(hashDoSelo(dados));
-    await inserirSelo(tx, { ...dados, seladoEm: new Date(seladoEm), assinatura, keyId });
-    return { ...dados, assinatura, keyId };
+    try {
+      await inserirSelo(tx, { ...dados, seladoEm: new Date(seladoEm), assinatura, keyId });
+    } catch (erro: unknown) {
+      if (ehSeloRepetido(erro)) throw new ErroDeSelo('SELO_JA_GRAVADO');
+      throw erro;
+    }
+    return { ...dados, assinatura, keyId, ultimoLanceId: ultimo?.id ?? null };
   }
 }
