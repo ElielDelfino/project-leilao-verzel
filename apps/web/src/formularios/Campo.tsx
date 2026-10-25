@@ -11,6 +11,7 @@ type Props = {
   valor?: string;
   aoMudar?: (valor: string) => void;
   desabilitado?: boolean;
+  maxLength?: number;
 };
 
 const CLASSE_ENTRADA =
@@ -28,6 +29,7 @@ export function Campo({
   valor,
   aoMudar,
   desabilitado,
+  maxLength,
 }: Props) {
   const idErro = `${nome}-erro`;
   const idAjuda = `${nome}-ajuda`;
@@ -49,6 +51,7 @@ export function Campo({
         autoComplete={autoComplete}
         disabled={desabilitado}
         inputMode={inputMode}
+        maxLength={maxLength}
         aria-invalid={erro ? true : undefined}
         aria-describedby={descricao || undefined}
         className={CLASSE_ENTRADA}
