@@ -7,6 +7,8 @@ export interface SocketDoApp {
   on(evento: string, ouvinte: (...args: never[]) => void): unknown;
   off(evento: string, ouvinte?: (...args: never[]) => void): unknown;
   emit(evento: string, ...args: unknown[]): unknown;
+  /** Como `emit`, mas o último argumento (ack) recebe `(erro, resposta)`; `erro` vem no timeout. */
+  timeout(ms: number): { emit(evento: string, ...args: unknown[]): unknown };
   close(): unknown;
 }
 

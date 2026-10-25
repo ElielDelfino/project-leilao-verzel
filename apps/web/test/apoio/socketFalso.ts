@@ -6,7 +6,7 @@ type Ouvinte = (...args: never[]) => void;
 export class SocketFalso implements SocketDoApp {
   connected = false;
   fechado = false;
-  readonly emitidos: { evento: string; args: unknown[] }[] = [];
+  readonly emitidos: { evento: string; args: unknown[]; timeoutMs?: number }[] = [];
   private readonly ouvintes = new Map<string, Set<Ouvinte>>();
 
   on(evento: string, ouvinte: Ouvinte): this {
@@ -25,6 +25,16 @@ export class SocketFalso implements SocketDoApp {
   emit(evento: string, ...args: unknown[]): this {
     this.emitidos.push({ evento, args });
     return this;
+  }
+
+  /** Como o do socket.io: o último argumento do `emit` é o ack `(erro, resposta)`. */
+  timeout(ms: number): { emit(evento: string, ...args: unknown[]): unknown } {
+    return {
+      emit: (evento, ...args) => {
+        this.emitidos.push({ evento, args, timeoutMs: ms });
+        return this;
+      },
+    };
   }
 
   close(): this {
