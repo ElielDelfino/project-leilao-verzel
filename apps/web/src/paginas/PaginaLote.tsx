@@ -7,7 +7,7 @@ import { ErroDoServidor } from '../formularios/ErroDoServidor';
 import { tituloDaPagina } from '../layout/site';
 import { mensagemDoErro } from '../mensagens/erros';
 import { Sala } from '../sala/Sala';
-import { useSalaAoVivo } from '../sala/useSalaAoVivo';
+import { type CodigoDeErroDaSala, type SalaAoVivo, useSalaAoVivo } from '../sala/useSalaAoVivo';
 
 const TITULO_NAO_ENCONTRADO = 'Lote não encontrado';
 
@@ -50,7 +50,12 @@ function SalaDoLote({ id }: { id: string }) {
     salaAoVivo.erro === 'NAO_ENCONTRADO';
   // Com a sala já aberta, erro de refetch ou de resync vira aviso, não tela de erro.
   const bloqueiaPorConsulta = consulta.error !== null && !consulta.data;
-  const bloqueiaPorSala = salaAoVivo.erro !== null && salaAoVivo.estado === null;
+  // O erro da sala só substitui a página enquanto o detalhe ainda não chegou, ou quando o
+  // gateway diz que o lote não existe; os demais erros aparecem na região ao vivo.
+  const bloqueiaPorSala =
+    salaAoVivo.erro !== null &&
+    salaAoVivo.estado === null &&
+    (!consulta.data || salaAoVivo.erro === 'NAO_ENCONTRADO');
 
   if (bloqueiaPorConsulta || bloqueiaPorSala) {
     if (naoEncontrado) {
@@ -92,7 +97,7 @@ function SalaDoLote({ id }: { id: string }) {
     );
   }
 
-  if (!consulta.data || !salaAoVivo.estado) {
+  if (!consulta.data) {
     return (
       <>
         <title>{tituloDaPagina('Lote')}</title>
@@ -112,8 +117,30 @@ function SalaDoLote({ id }: { id: string }) {
         sala={salaAoVivo.estado}
         reconectando={semConexaoOuComErro}
         seloDeFimEstendido={salaAoVivo.seloDeFimEstendido}
+        semEstado={<RegiaoSemEstado sala={salaAoVivo} />}
       />
       <VoltarAVitrine />
+    </>
+  );
+}
+
+function textoDoErroDaSala(erro: CodigoDeErroDaSala): string {
+  if (erro === 'SALA_CHEIA') return TEXTO_SALA_CHEIA;
+  if (erro === 'NAO_ENCONTRADO') return mensagemDoErro('NAO_ENCONTRADO');
+  return mensagemDoErro(erro === 'DADOS_INVALIDOS' ? 'DADOS_INVALIDOS' : 'INDISPONIVEL');
+}
+
+/** Parte ao vivo antes de existir estado: carregando, reconectando ou erro de entrada. */
+function RegiaoSemEstado({ sala }: { sala: SalaAoVivo }) {
+  if (sala.erro === null) {
+    return <p role="status">{sala.reconectando ? 'Reconectando…' : 'Carregando sala…'}</p>;
+  }
+  return (
+    <>
+      <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+        {textoDoErroDaSala(sala.erro)}
+      </p>
+      <BotaoTentarDeNovo aoClicar={sala.tentarDeNovo} />
     </>
   );
 }

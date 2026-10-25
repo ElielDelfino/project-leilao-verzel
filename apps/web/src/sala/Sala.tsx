@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import type { LoteDetalhe } from '../api/lotes';
 import { formatarDataHora } from '../formatacao/data';
 import { formatarCentavos } from '../formatacao/dinheiro';
@@ -10,9 +12,30 @@ import { IndicadorDePosicao } from './IndicadorDePosicao';
 
 interface Props {
   detalhe: LoteDetalhe;
-  sala: EstadoDaSala;
+  /** `null` enquanto o estado da sala não chegou: o detalhe estático aparece mesmo assim. */
+  sala: EstadoDaSala | null;
   reconectando: boolean;
   seloDeFimEstendido: boolean;
+  /** Mostrado no lugar da parte ao vivo enquanto não há `sala` (carregando ou erro de entrada). */
+  semEstado?: ReactNode;
+}
+
+function SalaSemEstado({ detalhe, semEstado }: { detalhe: LoteDetalhe; semEstado: ReactNode }) {
+  return (
+    <>
+      <h1 className="text-3xl font-bold tracking-tight">{detalhe.titulo}</h1>
+      <div className="mt-6 grid gap-8 md:grid-cols-2">
+        <Carta lote={detalhe} />
+        <section aria-labelledby="lote-titulo" className="flex flex-col gap-3">
+          <h2 id="lote-titulo" className="sr-only">
+            Dados do lote
+          </h2>
+          {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
+          <div className="flex flex-col items-start gap-4">{semEstado}</div>
+        </section>
+      </div>
+    </>
+  );
 }
 
 function Situacao({ sala }: { sala: EstadoDaSala }) {
@@ -36,7 +59,8 @@ function Situacao({ sala }: { sala: EstadoDaSala }) {
   return null;
 }
 
-export function Sala({ detalhe, sala, reconectando, seloDeFimEstendido }: Props) {
+export function Sala({ detalhe, sala, reconectando, seloDeFimEstendido, semEstado }: Props) {
+  if (!sala) return <SalaSemEstado detalhe={detalhe} semEstado={semEstado} />;
   const { lote } = sala;
   const aoVivo = lote.status === 'ao_vivo';
   const textoSemLances = aoVivo
