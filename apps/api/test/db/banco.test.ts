@@ -219,3 +219,81 @@ describe.skipIf(!AMBIENTE.disponivel)('criarBanco: queda de conexão fora de con
     }
   });
 });
+
+describe.skipIf(!AMBIENTE.disponivel)('criarBanco: verificar(sinal) (pendência da 017)', () => {
+  const LENTA = 'select pg_sleep(5)';
+
+  async function lentasNoServidor(): Promise<number> {
+    const cliente = new pg.Client(AMBIENTE.conexao());
+    await cliente.connect();
+    try {
+      const { rows } = await cliente.query<{ total: number }>(
+        `select count(*)::int as total from pg_stat_activity
+          where query = $1 and state = 'active' and datname = current_database()`,
+        [LENTA],
+      );
+      return Number(rows[0]?.total);
+    } finally {
+      await cliente.end();
+    }
+  }
+
+  it('resolve com select 1', async () => {
+    const outro = criarBanco({ conexao: AMBIENTE.conexao(), aoErroOcioso: () => undefined });
+    try {
+      await expect(outro.verificar(new AbortController().signal)).resolves.toBeUndefined();
+    } finally {
+      await outro.encerrar();
+    }
+  });
+
+  it('sinal já disparado: rejeita com o motivo, sem consultar', async () => {
+    const outro = criarBanco({ conexao: AMBIENTE.conexao(), aoErroOcioso: () => undefined });
+    const motivo = new Error('tempo esgotado');
+    try {
+      await expect(outro.verificar(AbortSignal.abort(motivo))).rejects.toBe(motivo);
+    } finally {
+      await outro.encerrar();
+    }
+  });
+
+  it('interrompe um pg_sleep(5) em menos de 1 s depois do abort e o cancela no servidor', async () => {
+    const avisos: unknown[] = [];
+    const outro = criarBanco({
+      conexao: AMBIENTE.conexao(),
+      aoErroOcioso: (erro) => avisos.push(erro),
+      consultaDeVerificacao: LENTA,
+    });
+    const controle = new AbortController();
+    const motivo = new Error('tempo esgotado');
+    try {
+      const verificacao = outro.verificar(controle.signal);
+      await vi.waitFor(
+        async () => {
+          expect(await lentasNoServidor()).toBe(1);
+        },
+        { timeout: 5000 },
+      );
+
+      const inicio = performance.now();
+      controle.abort(motivo);
+      const erro = await verificacao.catch((e: unknown) => e);
+      const decorrido = performance.now() - inicio;
+
+      expect(erro).toBe(motivo);
+      expect(decorrido).toBeLessThan(1000);
+      await vi.waitFor(
+        async () => {
+          expect(await lentasNoServidor()).toBe(0);
+        },
+        { timeout: 5000 },
+      );
+      // O pool continua utilizável depois do cancelamento.
+      const { rows } = await outro.consultar((db) => db.execute(sql`select 1 as um`));
+      expect(rows).toEqual([{ um: 1 }]);
+      expect(avisos).toEqual([]);
+    } finally {
+      await outro.encerrar();
+    }
+  });
+});

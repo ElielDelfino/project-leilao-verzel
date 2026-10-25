@@ -17,7 +17,7 @@ const CONEXAO = lerConexaoDoBanco({
   POSTGRES_PORT: '1',
   POSTGRES_DB: 'd',
   POSTGRES_USER: 'u',
-  DB_PASSWORD: 'p',
+  DB_PASSWORD: Buffer.alloc(32).toString('base64url'),
 });
 
 interface Comportamento {

@@ -2,7 +2,7 @@
 // entre módulos recebem a mesma `tx`). Pool `pg` + Drizzle; todo erro que sai de `consultar` e
 // `transaction` passa por converterErroDoBanco (sem SQL nem valores de parâmetro).
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { Pool, type PoolClient } from 'pg';
+import pg, { Pool, type PoolClient } from 'pg';
 
 import type { ConexaoDoBanco } from './conexao.js';
 import { converterErroDoBanco, paraErroDoBanco } from './erros.js';
@@ -53,9 +53,12 @@ export interface OpcoesDoBanco {
    * Chamado quando uma conexão do pool falha fora de uma consulta (queda do Postgres, por
    * exemplo), esteja ela ociosa ou emprestada. Sem listener, o `pg` derrubaria o processo. O
    * erro chega como ErroDoBanco só com o código (SQLSTATE ou ECONNRESET etc.). Se este callback
-   * lançar, o erro dele vai para o stderr em vez de derrubar o processo.
+   * lançar, o erro dele vai para o stderr em vez de derrubar o processo. Também recebe a falha
+   * ao cancelar a consulta de `verificar` depois de um abort.
    */
   readonly aoErroOcioso: (erro: unknown) => void;
+  /** Consulta de `verificar`. Padrão `select 1`; os testes usam uma lenta (pg_sleep). */
+  readonly consultaDeVerificacao?: string;
 }
 
 export interface Banco {
@@ -65,6 +68,19 @@ export interface Banco {
   transaction<T>(fn: (tx: Transacao) => Promise<T>): Promise<T>;
   /** Fecha o pool, esperando as conexões em uso terminarem. Chamar de novo não faz nada. */
   encerrar(): Promise<void>;
+}
+
+/**
+ * Banco com a verificação de prontidão (pendência da 017). Interface à parte para não quebrar
+ * quem implementa Banco (dublês de teste); criarBanco devolve esta.
+ */
+export interface BancoVerificavel extends Banco {
+  /**
+   * `select 1` numa conexão do pool. Se `sinal` disparar, rejeita na hora com `sinal.reason`,
+   * cancela a consulta no servidor (pg_cancel_backend, por outra conexão) e descarta a conexão
+   * em vez de devolvê-la ao pool. Sinal já disparado: rejeita sem pegar conexão.
+   */
+  verificar(sinal: AbortSignal): Promise<void>;
 }
 
 async function comErroConvertido<T>(operacao: () => Promise<T>): Promise<T> {
@@ -92,7 +108,108 @@ function criarAvisoDeErro(aoErroOcioso: (erro: unknown) => void): (erro: Error) 
   };
 }
 
-export function criarBanco(opcoes: OpcoesDoBanco): Banco {
+const CONSULTA_DE_VERIFICACAO = 'select 1';
+
+/** Cancela no servidor a consulta do backend `pid`, por uma conexão avulsa (o pool pode estar cheio). */
+async function cancelarNoServidor(conexao: ConexaoDoBanco, pid: number): Promise<void> {
+  const cliente = new pg.Client({
+    host: conexao.host,
+    port: conexao.port,
+    database: conexao.database,
+    user: conexao.user,
+    password: conexao.password,
+    connectionTimeoutMillis: LIMITES_DO_POOL.connectionTimeoutMillis,
+  });
+  cliente.on('error', () => undefined);
+  try {
+    await cliente.connect();
+    await cliente.query('select pg_cancel_backend($1)', [pid]);
+  } finally {
+    await cliente.end();
+  }
+}
+
+/** Rejeita quando o sinal dispara; `desligar` remove o listener. */
+function quandoAbortar(sinal: AbortSignal): { promessa: Promise<never>; desligar: () => void } {
+  let desligar = (): void => undefined;
+  const promessa = new Promise<never>((_, rejeitar) => {
+    const aoAbortar = (): void => {
+      rejeitar(sinal.reason);
+    };
+    sinal.addEventListener('abort', aoAbortar, { once: true });
+    desligar = () => {
+      sinal.removeEventListener('abort', aoAbortar);
+    };
+  });
+  return { promessa, desligar };
+}
+
+/**
+ * Pega uma conexão, descobre o pid do backend e roda a consulta. Se o sinal disparar durante a
+ * consulta, pede o cancelamento no servidor e descarta a conexão (release(true)) em vez de
+ * devolvê-la ao pool: um cancelamento atrasado nunca atinge a consulta de outra pessoa.
+ */
+async function executarVerificacao(
+  pool: Pool,
+  consulta: string,
+  sinal: AbortSignal,
+  cancelar: (pid: number) => void,
+): Promise<void> {
+  const cliente = await pool.connect();
+  let cancelada = false;
+  try {
+    if (sinal.aborted) {
+      return;
+    }
+    const { rows } = await cliente.query<{ pid: number }>('select pg_backend_pid() as pid');
+    const pid = Number(rows[0]?.pid);
+    if (sinal.aborted) {
+      return;
+    }
+    const aoAbortar = (): void => {
+      cancelada = true;
+      cancelar(pid);
+    };
+    sinal.addEventListener('abort', aoAbortar, { once: true });
+    try {
+      await cliente.query(consulta);
+    } finally {
+      sinal.removeEventListener('abort', aoAbortar);
+    }
+  } finally {
+    cliente.release(cancelada);
+  }
+}
+
+function criarVerificar(
+  pool: Pool,
+  conexao: ConexaoDoBanco,
+  consulta: string,
+  avisar: (erro: Error) => void,
+): (sinal: AbortSignal) => Promise<void> {
+  const cancelar = (pid: number): void => {
+    cancelarNoServidor(conexao, pid).catch((falha: unknown) => {
+      avisar(falha instanceof Error ? falha : new Error('falha ao cancelar a verificação'));
+    });
+  };
+  return async (sinal) => {
+    sinal.throwIfAborted();
+    const aborto = quandoAbortar(sinal);
+    const trabalho = executarVerificacao(pool, consulta, sinal, cancelar);
+    // Depois de um abort, o resultado do trabalho (inclusive o erro 57014) é descartado.
+    trabalho.catch(() => undefined);
+    aborto.promessa.catch(() => undefined);
+    try {
+      await Promise.race([trabalho, aborto.promessa]);
+    } catch (erro: unknown) {
+      throw sinal.aborted ? sinal.reason : converterErroDoBanco(erro);
+    } finally {
+      aborto.desligar();
+    }
+  };
+}
+
+export function criarBanco(opcoes: OpcoesDoBanco): BancoVerificavel {
   const { conexao } = opcoes;
   // Objeto novo e explícito: o pg-pool copia as opções com Object.assign, que ignoraria a senha
   // (não enumerável em ConexaoDoBanco). O pg-pool esconde a senha das opções dele.
@@ -114,6 +231,12 @@ export function criarBanco(opcoes: OpcoesDoBanco): Banco {
   let encerramento: Promise<void> | undefined;
 
   return {
+    verificar: criarVerificar(
+      pool,
+      conexao,
+      opcoes.consultaDeVerificacao ?? CONSULTA_DE_VERIFICACAO,
+      avisar,
+    ),
     consultar: (fn) => comErroConvertido(() => fn(db)),
     transaction: (fn) => comErroConvertido(() => db.transaction(fn)),
     encerrar: () => {
