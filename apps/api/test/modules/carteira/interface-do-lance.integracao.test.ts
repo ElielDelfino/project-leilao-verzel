@@ -7,19 +7,16 @@ import { sql } from 'drizzle-orm';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { type BancoVerificavel, criarBanco, type Transacao } from '../../../src/db/banco.js';
+import { type BancoVerificavel, criarBanco } from '../../../src/db/banco.js';
 import {
   comprometer,
+  creditarArremate,
+  debitarArremate,
   ErroDeCarteira,
+  estornar,
   liberar,
   travarCarteiras,
 } from '../../../src/modules/carteira/index.js';
-import { efeitoDoLancamento, type TipoDeLancamento } from '../../../src/modules/carteira/efeito.js';
-import {
-  atualizarSaldo,
-  inserirLancamento,
-  travarSaldo,
-} from '../../../src/modules/carteira/repositorio.js';
 import { ServicoDeCarteira } from '../../../src/modules/carteira/servico-de-carteira.js';
 import { criarLoteELance, type ReferenciaDeLance } from '../../helpers/lance-por-sql.js';
 import { BANCO, emailNovo } from '../identidade/ambiente.js';
@@ -84,16 +81,43 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
     return linha;
   }
 
-  /** O mesmo caminho que liquidação e cancelamento vão usar (F4), para os tipos sem função ainda. */
-  async function lancar(
-    tx: Transacao,
-    userId: string,
-    tipo: TipoDeLancamento,
-    valorCentavos: number,
-  ): Promise<void> {
-    await travarSaldo(tx, userId);
-    await inserirLancamento(tx, { userId, tipo, valorCentavos, ...(await referencia()) });
-    await atualizarSaldo(tx, userId, efeitoDoLancamento(tipo, valorCentavos));
+  /** Usuários com projeção ≠ Σ ledger ou fora de 0 ≤ comprometido ≤ total (vazio = reconciliado). */
+  async function divergentes(userIds: readonly string[]): Promise<readonly unknown[]> {
+    const { rows } = await pool.query(
+      `select u.id
+         from unnest($1::uuid[]) as u(id)
+         left join wallet_balances w on w.user_id = u.id
+         left join lateral (
+           select coalesce(sum(case l.tipo when 'deposito' then l.valor_centavos
+                                           when 'credito_arremate' then l.valor_centavos
+                                           when 'debito_arremate' then -l.valor_centavos
+                                           when 'compromisso' then 0
+                                           when 'liberacao' then 0
+                                           when 'estorno' then 0
+                                           else ('tipo sem efeito: ' || l.tipo)::bigint end), 0)
+                    as total,
+                  coalesce(sum(case l.tipo when 'compromisso' then l.valor_centavos
+                                           when 'liberacao' then -l.valor_centavos
+                                           when 'estorno' then -l.valor_centavos
+                                           when 'debito_arremate' then -l.valor_centavos
+                                           when 'deposito' then 0
+                                           when 'credito_arremate' then 0
+                                           else ('tipo sem efeito: ' || l.tipo)::bigint end), 0)
+                    as comprometido
+             from ledger_entries l where l.user_id = u.id
+         ) s on true
+        where coalesce(w.total_centavos, 0) <> s.total
+           or coalesce(w.comprometido_centavos, 0) <> s.comprometido
+           or coalesce(w.comprometido_centavos, 0) < 0
+           or coalesce(w.comprometido_centavos, 0) > coalesce(w.total_centavos, 0)`,
+      [userIds],
+    );
+    return rows;
+  }
+
+  async function temLinhaDeSaldo(userId: string): Promise<boolean> {
+    const { rows } = await pool.query('select 1 from wallet_balances where user_id = $1', [userId]);
+    return rows.length > 0;
   }
 
   describe('comprometer', () => {
@@ -363,9 +387,10 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
         await travarCarteiras(tx, [licitante, leiloeiro]);
         await comprometer(tx, licitante, 5_000, await referencia());
         await liberar(tx, licitante, 2_000, await referencia());
-        await lancar(tx, licitante, 'estorno', 1_000);
-        await lancar(tx, licitante, 'debito_arremate', 1_500);
-        await lancar(tx, leiloeiro, 'credito_arremate', 1_500);
+        await estornar(tx, licitante, 1_000, await referencia());
+        const arremate = await referencia();
+        await debitarArremate(tx, licitante, 1_500, arremate);
+        await creditarArremate(tx, leiloeiro, 1_500, arremate);
       });
 
       const { rows } = await pool.query<{ tipo: string }>(
@@ -383,31 +408,113 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
       expect(await linhas(licitante)).toMatchObject({ total: '18500', comprometido: '500' });
       expect(await linhas(leiloeiro)).toMatchObject({ total: '1500', comprometido: '0' });
 
-      const { rows: divergentes } = await pool.query(
-        `select u.id
-           from unnest($1::uuid[]) as u(id)
-           left join wallet_balances w on w.user_id = u.id
-           left join lateral (
-             select coalesce(sum(case l.tipo when 'deposito' then l.valor_centavos
-                                             when 'credito_arremate' then l.valor_centavos
-                                             when 'debito_arremate' then -l.valor_centavos
-                                             else 0 end), 0) as total,
-                    coalesce(sum(case l.tipo when 'compromisso' then l.valor_centavos
-                                             when 'liberacao' then -l.valor_centavos
-                                             when 'estorno' then -l.valor_centavos
-                                             when 'debito_arremate' then -l.valor_centavos
-                                             else 0 end), 0) as comprometido
-               from ledger_entries l where l.user_id = u.id
-           ) s on true
-          where coalesce(w.total_centavos, 0) <> s.total
-             or coalesce(w.comprometido_centavos, 0) <> s.comprometido
-             or coalesce(w.comprometido_centavos, 0) < 0
-             or coalesce(w.comprometido_centavos, 0) > coalesce(w.total_centavos, 0)`,
-        [criados],
+      expect(criados.length).toBeGreaterThan(0);
+      expect(await divergentes(criados)).toEqual([]);
+    });
+  });
+
+  describe('estornar, debitarArremate e creditarArremate (tarefa 103)', () => {
+    it('estorno derruba o comprometido do líder, grava lote e lance e reconcilia', async () => {
+      const lider = await novoUsuario(10_000);
+      const lance = await referencia();
+      await banco.transaction((tx) => comprometer(tx, lider, 4_000, lance));
+
+      const saldo = await banco.transaction(async (tx) => {
+        await travarCarteiras(tx, [lider]);
+        return estornar(tx, lider, 4_000, lance);
+      });
+
+      expect(saldo).toEqual({
+        totalCentavos: 10_000,
+        comprometidoCentavos: 0,
+        disponivelCentavos: 10_000,
+      });
+      const { rows } = await pool.query<{ lote: string; lance: string; valor: string }>(
+        `select lote_id as lote, lance_id as lance, valor_centavos::text as valor
+           from ledger_entries where user_id = $1 and tipo = 'estorno'`,
+        [lider],
+      );
+      expect(rows).toEqual([{ lote: lance.loteId, lance: lance.lanceId, valor: '4000' }]);
+      expect(await divergentes([lider])).toEqual([]);
+    });
+
+    it('débito e crédito: vencedor −v em total e comprometido, leiloeiro +v, reconciliado', async () => {
+      const vencedor = await novoUsuario(10_000);
+      const leiloeiro = await novoUsuario(2_000);
+      const lance = await referencia();
+      await banco.transaction((tx) => comprometer(tx, vencedor, 6_000, lance));
+
+      const [doVencedor, doLeiloeiro] = await banco.transaction(async (tx) => {
+        await travarCarteiras(tx, [vencedor, leiloeiro]);
+        return [
+          await debitarArremate(tx, vencedor, 6_000, lance),
+          await creditarArremate(tx, leiloeiro, 6_000, lance),
+        ] as const;
+      });
+
+      expect(doVencedor).toEqual({
+        totalCentavos: 4_000,
+        comprometidoCentavos: 0,
+        disponivelCentavos: 4_000,
+      });
+      expect(doLeiloeiro).toEqual({
+        totalCentavos: 8_000,
+        comprometidoCentavos: 0,
+        disponivelCentavos: 8_000,
+      });
+      expect(await linhas(vencedor)).toMatchObject({ total: '4000', comprometido: '0' });
+      expect(await linhas(leiloeiro)).toMatchObject({ total: '8000', comprometido: '0' });
+      expect(await divergentes([vencedor, leiloeiro])).toEqual([]);
+    });
+
+    it('leiloeiro sem linha de wallet_balances recebe o crédito e a linha nasce', async () => {
+      const leiloeiro = await novoUsuario();
+      expect(await temLinhaDeSaldo(leiloeiro)).toBe(false);
+
+      const saldo = await banco.transaction(async (tx) =>
+        creditarArremate(tx, leiloeiro, 2_500, await referencia()),
       );
 
-      expect(criados.length).toBeGreaterThan(0);
-      expect(divergentes).toEqual([]);
+      expect(saldo).toEqual({
+        totalCentavos: 2_500,
+        comprometidoCentavos: 0,
+        disponivelCentavos: 2_500,
+      });
+      expect(await temLinhaDeSaldo(leiloeiro)).toBe(true);
+      expect(await linhas(leiloeiro)).toEqual({
+        total: '2500',
+        comprometido: '0',
+        lancamentos: '1',
+      });
+      expect(await divergentes([leiloeiro])).toEqual([]);
+    });
+
+    it.each([
+      ['estornar', estornar],
+      ['debitarArremate', debitarArremate],
+    ] as const)('%s acima do comprometido recusa sem gravar lançamento', async (_n, operacao) => {
+      const usuario = await novoUsuario(5_000);
+      await banco.transaction(async (tx) => comprometer(tx, usuario, 1_000, await referencia()));
+      const antes = await linhas(usuario);
+      const ref = await referencia();
+
+      await expect(
+        banco.transaction((tx) => operacao(tx, usuario, 1_001, ref)),
+      ).rejects.toMatchObject({ codigo: 'COMPROMETIDO_INSUFICIENTE', comprometido: 1_000 });
+      expect(await linhas(usuario)).toEqual(antes);
+    });
+
+    it.each([0, -100, 10.5])('valor %s → RangeError e nada é gravado', async (valor) => {
+      const usuario = await novoUsuario(5_000);
+      const antes = await linhas(usuario);
+      const ref = await referencia();
+
+      for (const operacao of [estornar, debitarArremate, creditarArremate]) {
+        await expect(
+          banco.transaction((tx) => operacao(tx, usuario, valor, ref)),
+        ).rejects.toBeInstanceOf(RangeError);
+      }
+      expect(await linhas(usuario)).toEqual(antes);
     });
   });
 });
