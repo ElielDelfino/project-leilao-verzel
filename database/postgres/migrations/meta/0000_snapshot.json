@@ -1,0 +1,41 @@
+{
+  "id": "408b46c5-65b7-4624-a4be-ddc04e4fa697",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {},
+  "enums": {
+    "public.papel_usuario": {
+      "name": "papel_usuario",
+      "schema": "public",
+      "values": ["leiloeiro", "licitante"]
+    },
+    "public.status_lote": {
+      "name": "status_lote",
+      "schema": "public",
+      "values": ["agendado", "ao_vivo", "encerrado", "cancelado"]
+    },
+    "public.tipo_lancamento": {
+      "name": "tipo_lancamento",
+      "schema": "public",
+      "values": [
+        "deposito",
+        "compromisso",
+        "liberacao",
+        "estorno",
+        "debito_arremate",
+        "credito_arremate"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
