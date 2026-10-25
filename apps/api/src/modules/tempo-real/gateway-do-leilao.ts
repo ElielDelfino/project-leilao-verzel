@@ -1,7 +1,7 @@
 // Gateway Socket.IO do namespace /leilao (specs/009). Só transporte websocket; handshake
 // autenticado pelo cookie `access_token` (anônimo = só leitura); rooms `usuario:{id}`, `lote:{id}`
-// e `vitrine`; limites de 50 conexões por lote e 200 no total. O estado do lote no ack de
-// `entrar_lote` vem na tarefa 083; aqui o ack de sucesso é só `{sucesso: true}`.
+// e `vitrine`; limites de 50 conexões por lote e 200 no total. O ack de `entrar_lote` leva o estado
+// do lote (estado-da-sala.ts) e os eventos do barramento saem pela DifusaoDeEventos.
 import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
@@ -18,7 +18,9 @@ import type { UsuarioDaSessao } from '../../common/auth/sessao.js';
 import { ENV, type Env } from '../../config/env.js';
 import { AutenticacaoDoHandshake } from '../identidade/index.js';
 import { ADAPTER_REDIS_DO_TEMPO_REAL, type AdapterRedisDoTempoReal } from './adapter-redis.js';
+import { DifusaoDeEventos } from './difusao-de-eventos.js';
 import { lerLoteRef } from './esquemas.js';
+import { type EstadoDaSala, MontadorDoEstado } from './estado-da-sala.js';
 import {
   LIMITES_DO_TEMPO_REAL,
   LimiteDeEventos,
@@ -50,8 +52,8 @@ interface AckDeErro {
     readonly mensagem: string;
   };
 }
-/** A tarefa 083 troca o sucesso pelo `AckEntrarLote` completo, com o `estado`. */
-export type AckDeEntrada = AckDeErro | { readonly sucesso: true };
+/** Schema `AckEntrarLote` do asyncapi: erro tipado ou sucesso com o estado atual do lote. */
+export type AckDeEntrada = AckDeErro | { readonly sucesso: true; readonly estado: EstadoDaSala };
 
 function erroDeAck(codigo: AckDeErro['erro']['codigo'], mensagem: string): AckDeErro {
   return { sucesso: false, erro: { codigo, mensagem } };
@@ -74,6 +76,8 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
     @Inject(LIMITES_DO_TEMPO_REAL) private readonly limites: LimitesDoTempoReal,
     @Inject(AutenticacaoDoHandshake) private readonly autenticacao: AutenticacaoDoHandshake,
     @Inject(ADAPTER_REDIS_DO_TEMPO_REAL) private readonly adapterRedis: AdapterRedisDoTempoReal,
+    @Inject(MontadorDoEstado) private readonly montador: MontadorDoEstado,
+    @Inject(DifusaoDeEventos) private readonly difusao: DifusaoDeEventos,
   ) {
     this.conexoes = new ReservaDeConexoes(limites.total);
   }
@@ -83,6 +87,7 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       // Reinicializa o adapter de todos os namespaces já criados.
       namespace.server.adapter(this.adapterRedis.fabrica);
     }
+    this.difusao.iniciar(namespace);
     namespace.use((socket, proximo) => {
       void this.admitir(socket as SocketDoLeilao, proximo);
     });
@@ -116,9 +121,9 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
     if (loteId === undefined) {
       return erroDeAck('DADOS_INVALIDOS', 'Informe o loteId (UUID) e nenhum outro campo.');
     }
+    const sala = salaDoLote(loteId);
+    const jaEstaNaSala = socket.rooms.has(sala);
     try {
-      const sala = salaDoLote(loteId);
-      const jaEstaNaSala = socket.rooms.has(sala);
       // Sem `await` entre as contagens e o join: entradas simultâneas não furam os limites.
       if (!jaEstaNaSala && this.salasDeLoteDoSocket(socket) >= this.limites.salasDeLotePorSocket) {
         // O AsyncAPI não tem código próprio para este teto (SALA_CHEIA é o limite por lote).
@@ -127,12 +132,30 @@ export class GatewayDoLeilao implements OnGatewayInit, OnGatewayConnection {
       if (!jaEstaNaSala && this.ocupacaoDaSala(sala) >= this.limites.porLote) {
         return erroDeAck('SALA_CHEIA', 'A sala deste lote está cheia. Tente novamente mais tarde.');
       }
+      // Entra antes de ler o estado: um lance confirmado depois da leitura chega por evento, e
+      // nenhum se perde entre a leitura e a entrada. Se o ack for de erro, o socket sai do room.
       await socket.join(sala);
-      return { sucesso: true };
+      const estado = await this.montador.montar(loteId, socket.data.usuario?.id);
+      if (estado === null) {
+        await this.desfazerEntrada(socket, sala, jaEstaNaSala);
+        return erroDeAck('NAO_ENCONTRADO', 'Lote não encontrado.');
+      }
+      return { sucesso: true, estado };
     } catch (erro: unknown) {
       this.registrarFalha('entrar_lote', erro);
+      await this.desfazerEntrada(socket, sala, jaEstaNaSala);
       return erroDeAck('INDISPONIVEL', 'Não foi possível entrar na sala agora. Tente novamente.');
     }
+  }
+
+  /** Tira do room só quem entrou nesta chamada (um resync que falha não derruba a sala atual). */
+  private async desfazerEntrada(
+    socket: SocketDoLeilao,
+    sala: string,
+    jaEstavaNaSala: boolean,
+  ): Promise<void> {
+    if (jaEstavaNaSala) return;
+    await this.sairDaSala(socket, sala, 'entrar_lote');
   }
 
   @SubscribeMessage('sair_lote')

@@ -46,6 +46,8 @@ export interface LoteDepoisDoLance {
  * para calcular a posição do usuário; nunca vão para uma resposta pública.
  */
 export interface ResumoDoLote extends LinhaDoLote {
+  /** Fim antes de qualquer extensão por anti-sniping (estado da sala, specs/009). */
+  readonly fimOriginalEm: Date;
   readonly liderId: string | null;
   readonly vencedorId: string | null;
 }
@@ -124,6 +126,7 @@ export async function obterResumos(db: Leitor, ids: readonly string[]): Promise<
       snapshotId: lots.snapshotId,
       inicioEm: lots.inicioEm,
       fimEm: lots.fimEm,
+      fimOriginalEm: lots.fimOriginalEm,
       lanceInicialCentavos: lots.lanceInicialCentavos,
       incrementoMinimoCentavos: lots.incrementoMinimoCentavos,
       lanceAtualCentavos: lots.lanceAtualCentavos,
