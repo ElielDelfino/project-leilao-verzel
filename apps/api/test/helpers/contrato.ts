@@ -164,9 +164,19 @@ function validarHeaders(
   }
 }
 
-function validarCorpo(resposta: Json, corpo: unknown, rotulo: string): void {
+function validarCorpo(
+  resposta: Json,
+  corpo: unknown,
+  rotulo: string,
+  contentType: string | undefined,
+): void {
   const conteudo = ehObjeto(resposta['content']) ? resposta['content'] : undefined;
   const json = conteudo?.['application/json'];
+  // Corpo binário (ex.: image/png de /api/imagens): basta o Content-Type ser um dos declarados.
+  const tipo = (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+  if (tipo !== 'application/json' && conteudo !== undefined && tipo in conteudo) {
+    return;
+  }
   if (!ehObjeto(json) || json['schema'] === undefined) {
     if (corpo !== undefined && corpo !== null && corpo !== '') {
       throw new Error(`contrato: ${rotulo} não declara corpo, mas a resposta trouxe um`);
@@ -185,7 +195,10 @@ export function validarContrato(resposta: RespostaObservada): void {
   const operacao = acharOperacao(resposta.metodo, resposta.caminho);
   const declarada = acharResposta(operacao, resposta.status, rotulo);
   validarHeaders(declarada, resposta.headers, resposta.status);
-  validarCorpo(declarada, resposta.corpo, rotulo);
+  const contentType = Object.entries(resposta.headers).find(
+    ([nome]) => nome.toLowerCase() === 'content-type',
+  )?.[1];
+  validarCorpo(declarada, resposta.corpo, rotulo, contentType);
 }
 
 /** Rotas do contrato como expressões regulares: `/api/lotes/{id}` casa `/api/lotes/abc`. */
