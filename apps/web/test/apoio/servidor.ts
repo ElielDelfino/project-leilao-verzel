@@ -11,6 +11,10 @@ const handlersBase: HttpHandler[] = [
   handlerDeCsrf(),
   http.get(`${ORIGEM}/api/auth/me`, () => envelopeDeErro('NAO_AUTENTICADO', 401)),
   http.post(`${ORIGEM}/api/auth/refresh`, () => envelopeDeErro('SESSAO_EXPIRADA', 401)),
+  // Vitrine vazia: testes de layout, sessão e erro que passam por `/` não precisam tratá-la.
+  http.get(`${ORIGEM}/api/lotes`, () =>
+    HttpResponse.json({ sucesso: true, dados: [], meta: { total: 0, pagina: 1, limite: 24 } }),
+  ),
 ];
 
 /** Servidor MSW compartilhado (test/setup.ts): requisição sem handler falha o teste. */

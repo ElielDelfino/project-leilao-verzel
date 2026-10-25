@@ -7,7 +7,11 @@ import { PaginaNaoEncontrada } from './paginas/PaginaNaoEncontrada';
 import { PaginaCadastro } from './paginas/PaginaCadastro';
 import { PaginaCarteira } from './paginas/PaginaCarteira';
 import { PaginaEntrar } from './paginas/PaginaEntrar';
+import { PaginaLote } from './paginas/PaginaLote';
+import { PaginaNovoLote } from './paginas/PaginaNovoLote';
+import { PaginaPainel } from './paginas/PaginaPainel';
 import { PaginaProvisoria } from './paginas/PaginaProvisoria';
+import { PaginaVitrine } from './paginas/PaginaVitrine';
 import { RotaAnonima, RotaRestrita } from './sessao/Guardas';
 import { RaizDaSessao } from './sessao/RaizDaSessao';
 
@@ -28,8 +32,9 @@ export const rotas: RouteObject[] = [
             // Rota sem caminho: um erro em qualquer página aparece no <Outlet>, dentro do layout.
             errorElement: <PaginaDeErro />,
             children: [
-              { index: true, element: provisoria('Vitrine') },
-              { path: 'lotes/:id', element: provisoria('Sala do lote') },
+              { index: true, element: <PaginaVitrine /> },
+              // Na F3 a sala ao vivo substitui o detalhe (specs/012 §Rotas).
+              { path: 'lotes/:id', element: <PaginaLote /> },
               {
                 element: <RotaAnonima />,
                 children: [
@@ -42,8 +47,8 @@ export const rotas: RouteObject[] = [
                 children: [
                   { path: 'carteira', element: <PaginaCarteira /> },
                   { path: 'meus-arremates', element: provisoria('Meus arremates') },
-                  { path: 'painel', element: provisoria('Painel do leiloeiro') },
-                  { path: 'painel/lotes/novo', element: provisoria('Novo lote') },
+                  { path: 'painel', element: <PaginaPainel /> },
+                  { path: 'painel/lotes/novo', element: <PaginaNovoLote /> },
                 ],
               },
               { path: 'auditoria/:loteId', element: provisoria('Auditoria do lote') },

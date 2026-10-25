@@ -5,11 +5,10 @@ import { simularPreferenciaDoSistema } from './apoio/matchMedia';
 import { renderizarApp } from './apoio/renderizarApp';
 import { usuarioLeiloeiro, usuarioLicitante } from './apoio/servidor';
 
-// Rotas de specs/012 §Rotas, ainda como páginas provisórias (tarefa 005).
+// Rotas de specs/012 §Rotas ainda como páginas provisórias (tarefa 005). A vitrine e o detalhe
+// do lote consultam a API e têm os próprios testes (test/paginas/vitrine.test.tsx e lote.test.tsx).
 type Usuario = typeof usuarioLicitante | typeof usuarioLeiloeiro | null;
 const ROTAS: Array<[string, string, Usuario]> = [
-  ['/', 'Vitrine', null],
-  ['/lotes/0192f0a0-0000-7000-8000-000000000001', 'Sala do lote', null],
   ['/entrar', 'Entrar', null],
   ['/cadastro', 'Cadastro', null],
   ['/carteira', 'Carteira', usuarioLicitante],
