@@ -1,14 +1,12 @@
 // axe-core em todas as rotas de specs/012 §Rotas, nos dois temas, como anônimo (task 041).
 // Zero violações com impacto serious ou critical (WCAG 2.0/2.1/2.2 A e AA).
-import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+import { aguardarEstadoEstavel, violacoesBloqueantes } from './apoio/axe.js';
 import { limparRateLimit } from './apoio/rate-limit.js';
 
 const UUID_FIXO = '00000000-0000-4000-8000-000000000001';
 const CODIGO_DO_COMPROVANTE = 'ABCDEFGHJKLMNPQR';
-const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
-const IMPACTOS_BLOQUEANTES = new Set(['serious', 'critical']);
 
 const ROTAS: readonly { nome: string; caminho: string }[] = [
   { nome: 'vitrine', caminho: '/' },
@@ -35,19 +33,10 @@ for (const rota of ROTAS) {
     const tema = info.project.name === 'tema-escuro' ? 'dark' : 'light';
 
     await page.goto(rota.caminho);
-    await expect(page.locator('main#conteudo')).toBeVisible();
     await expect(page.locator('html')).toHaveAttribute('data-theme', tema);
     // Rotas restritas redirecionam o anônimo para /entrar; o axe roda na tela que ficou.
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await aguardarEstadoEstavel(page);
 
-    const resultado = await new AxeBuilder({ page }).withTags(TAGS).analyze();
-    const bloqueantes = resultado.violations
-      .filter((v) => v.impact != null && IMPACTOS_BLOQUEANTES.has(v.impact))
-      .map((v) => ({
-        regra: v.id,
-        impacto: v.impact,
-        nos: v.nodes.map((n) => n.target.join(' ')),
-      }));
-    expect(bloqueantes).toEqual([]);
+    expect(await violacoesBloqueantes(page)).toEqual([]);
   });
 }

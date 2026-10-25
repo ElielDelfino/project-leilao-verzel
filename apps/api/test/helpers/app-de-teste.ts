@@ -2,6 +2,7 @@ import { MODULE_METADATA } from '@nestjs/common/constants.js';
 import type { Type } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
+import type { LightMyRequestResponse } from 'fastify';
 import type { DestinationStream } from 'pino';
 
 import { AppModule } from '../../src/app.module.js';
@@ -21,6 +22,7 @@ import { criarLogger, LoggerNestPino } from '../../src/logger/logger.js';
 import type { ClienteRedis } from '../../src/redis/cliente.js';
 import { criarConexaoDoRedis } from '../../src/redis/conexao.js';
 import { CLIENTE_REDIS } from '../../src/redis/redis.module.js';
+import { caminhoDoContrato, validarContrato } from './contrato.js';
 import { ModuloDeErros } from './modulo-de-erros.js';
 
 /** Só forma canônica (specs/014 §Leitura); não abre nenhum serviço real. */
@@ -161,5 +163,48 @@ export async function criarAppDeTeste(
   configurarApp(app);
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
+  return validarCadaResposta(app);
+}
+
+type OpcoesDeInject = { method?: string; url?: string; path?: string } | string;
+
+/**
+ * Todo `inject` com opções passa a validar a resposta contra o openapi.yaml (specs/013 §Contratos):
+ * os testes de integração viram também testes de contrato. Rotas que o contrato não declara
+ * (módulos só de teste, 404 de rota inexistente) ficam de fora.
+ */
+function validarCadaResposta(app: NestFastifyApplication): NestFastifyApplication {
+  const original = app.inject.bind(app) as (...args: unknown[]) => unknown;
+  const comValidacao = (...args: unknown[]): unknown => {
+    const resultado = original(...args);
+    const opcoes = args[0] as OpcoesDeInject | undefined;
+    if (opcoes === undefined || typeof (resultado as PromiseLike<unknown>)?.then !== 'function') {
+      return resultado;
+    }
+    return Promise.resolve(resultado).then((resposta) => {
+      conferirContrato(opcoes, resposta as LightMyRequestResponse);
+      return resposta;
+    });
+  };
+  app.inject = comValidacao as typeof app.inject;
   return app;
+}
+
+function conferirContrato(opcoes: OpcoesDeInject, resposta: LightMyRequestResponse): void {
+  const url = typeof opcoes === 'string' ? opcoes : (opcoes.url ?? opcoes.path ?? '');
+  const metodo = typeof opcoes === 'string' ? 'GET' : (opcoes.method ?? 'GET');
+  const caminho = caminhoDoContrato(url);
+  if (caminho === undefined) return;
+  const headers: Record<string, string> = {};
+  for (const [nome, valor] of Object.entries(resposta.headers)) {
+    headers[nome] = Array.isArray(valor) ? valor.join(', ') : String(valor);
+  }
+  const ehJson = (headers['content-type'] ?? '').includes('application/json');
+  validarContrato({
+    metodo,
+    caminho,
+    status: resposta.statusCode,
+    headers,
+    corpo: ehJson ? resposta.json() : resposta.body === '' ? undefined : resposta.body,
+  });
 }

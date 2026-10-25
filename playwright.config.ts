@@ -9,6 +9,13 @@ const PORTA_DA_API = 13000;
 const PORTA_DA_WEB = 15173;
 const ORIGEM_DA_WEB = `http://localhost:${PORTA_DA_WEB}`;
 const ESPERA_DO_SERVIDOR_MS = 120_000;
+// O Playwright sobe os webServers ANTES do globalSetup. Por isso o preparo do banco do worktree é
+// o primeiro passo do comando da API (que só conecta depois dele). Aqui POSTGRES_DB é o banco de
+// dev (admin, não sensível); no resto do comando vale o banco do worktree.
+const BANCO_ADMIN = process.env['POSTGRES_DB'] ?? '';
+const PREPARAR_BANCO =
+  `POSTGRES_DB=${BANCO_ADMIN} node --import ../../apps/api/src/db/resolver-ts.mjs ` +
+  '../../e2e/preparar-banco.ts';
 
 /** Env dos servidores: a API conecta como leilao_api (POSTGRES_API_USER) no banco do worktree. */
 const envDosServidores = {
@@ -22,7 +29,7 @@ const envDosServidores = {
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
-  globalSetup: './e2e/global-setup.ts',
+  globalTeardown: './e2e/global-teardown.ts',
   forbidOnly: !!process.env['CI'],
   retries: 0,
   workers: 1,
@@ -35,9 +42,9 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'pnpm run build && node dist/main.js',
+      command: `${PREPARAR_BANCO} && pnpm run build && node dist/main.js`,
       cwd: 'apps/api',
-      url: `http://localhost:${PORTA_DA_API}/api/health/live`,
+      url: `http://localhost:${PORTA_DA_API}/api/health/ready`,
       reuseExistingServer: false,
       timeout: ESPERA_DO_SERVIDOR_MS,
       env: envDosServidores,
