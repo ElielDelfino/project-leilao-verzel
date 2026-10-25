@@ -20,6 +20,7 @@ import {
   pacotesSemTypecheck,
   testesExplicitos,
   testesRelacionados,
+  variaveisFaltandoParaOE2e,
 } from './verify.mjs';
 
 // ---------------------------------------------------------------- fixtures
@@ -697,5 +698,91 @@ describe('mudouContrato', () => {
 
   it('sem alterações, não liga', () => {
     assert.equal(mudouContrato([]), false);
+  });
+});
+
+// ---------------------------------------------------------------- fronteiras no quick (tarefa 048)
+describe('gatilho do teste de fronteiras', () => {
+  const FRONTEIRAS = 'test/boundaries/fronteiras.test.ts';
+  const todosExistem = () => true;
+
+  for (const gatilho of ['eslint.config.mjs', 'tsconfig.base.json']) {
+    it(`${gatilho} alterado inclui o teste de fronteiras nos testes da API`, () => {
+      const raiz = criarWorkspace();
+
+      const mapa = testesRelacionados(raiz, lerPacotes(raiz), [gatilho], todosExistem);
+
+      assert.deepEqual(mapa.get('apps/api'), [FRONTEIRAS]);
+    });
+  }
+
+  it('sem eslint.config.mjs nem tsconfig.base.json alterados, não inclui', () => {
+    const raiz = criarWorkspace();
+
+    const mapa = testesRelacionados(
+      raiz,
+      lerPacotes(raiz),
+      ['apps/api/src/a.ts', 'eslint.config.mjs.bak', 'apps/web/eslint.config.mjs'],
+      todosExistem,
+    );
+
+    assert.ok(!(mapa.get('apps/api') ?? []).includes(FRONTEIRAS));
+  });
+
+  it('não inclui o teste se o arquivo não existe', () => {
+    const raiz = criarWorkspace();
+
+    const mapa = testesRelacionados(raiz, lerPacotes(raiz), ['eslint.config.mjs'], () => false);
+
+    assert.equal(mapa.size, 0);
+  });
+});
+
+describe('variaveisFaltandoParaOE2e', () => {
+  const completo = {
+    POSTGRES_API_USER: 'u-api',
+    DB_API_PASSWORD: 'segredo-api',
+    POSTGRES_USER: 'u',
+    DB_PASSWORD: 'segredo-db',
+    POSTGRES_DB: 'leilao',
+    REDIS_HOST: '127.0.0.1',
+    REDIS_PORT: '6379',
+    REDIS_PASSWORD: 'segredo-redis',
+    SEED_DEMO_PASSWORD: 'demo',
+  };
+
+  it('ambiente completo não falta nada', () => {
+    assert.deepEqual(variaveisFaltandoParaOE2e(completo), []);
+  });
+
+  it('lista ausentes e vazias, só os nomes, em ordem estável', () => {
+    const faltando = variaveisFaltandoParaOE2e({
+      ...completo,
+      POSTGRES_API_USER: undefined,
+      DB_API_PASSWORD: '',
+    });
+
+    assert.deepEqual(faltando, ['POSTGRES_API_USER', 'DB_API_PASSWORD']);
+    assert.ok(!JSON.stringify(faltando).includes('segredo'));
+  });
+
+  for (const nome of [
+    'POSTGRES_USER',
+    'DB_PASSWORD',
+    'POSTGRES_DB',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD',
+    'SEED_DEMO_PASSWORD',
+  ]) {
+    it(`${nome} ausente é apontada`, () => {
+      const env = { ...completo, [nome]: undefined };
+
+      assert.deepEqual(variaveisFaltandoParaOE2e(env), [nome]);
+    });
+  }
+
+  it('ambiente vazio aponta todas, sem valores', () => {
+    assert.equal(variaveisFaltandoParaOE2e({}).length, Object.keys(completo).length);
   });
 });
