@@ -15,16 +15,46 @@ export interface Divergencia {
   readonly projecaoComprometidoCentavos: number;
 }
 
-// Efeitos (specs/004): deposito +total; compromisso +comprometido; liberacao e estorno
-// −comprometido; debito_arremate −total e −comprometido; credito_arremate +total.
+type Sinal = -1 | 0 | 1;
+
+/**
+ * Efeito de cada tipo sobre [total, comprometido] (specs/004): deposito +total; compromisso
+ * +comprometido; liberacao e estorno −comprometido; debito_arremate −total e −comprometido;
+ * credito_arremate +total. Toda a lista dos tipos que o SQL trata sai daqui.
+ */
+const EFEITOS_NO_SQL = {
+  deposito: [1, 0],
+  compromisso: [0, 1],
+  liberacao: [0, -1],
+  estorno: [0, -1],
+  debito_arremate: [-1, -1],
+  credito_arremate: [1, 0],
+} as const satisfies Readonly<Record<string, readonly [Sinal, Sinal]>>;
+
+/** Tipos de lançamento que o SQL de reconciliação trata (o enum `tipo_lancamento` tem de igualar). */
+export const TIPOS_TRATADOS_PELO_SQL: readonly string[] = Object.keys(EFEITOS_NO_SQL);
+
+function parcela(sinal: Sinal): string {
+  if (sinal === 0) return '0';
+  return sinal === 1 ? 'valor_centavos' : '-valor_centavos';
+}
+
+/**
+ * CASE de um dos eixos. Tipo fora da tabela não soma 0 em silêncio: o `else` força um erro de
+ * conversão que cita o tipo (invalid input syntax for type bigint: "tipo sem efeito no SQL: x").
+ */
+function casoDoEixo(eixo: 0 | 1): string {
+  const ramos = Object.entries(EFEITOS_NO_SQL)
+    .map(([tipo, efeito]) => `when '${tipo}' then ${parcela(efeito[eixo])}`)
+    .join(' ');
+  return `case tipo ${ramos} else ('tipo sem efeito no SQL: ' || tipo)::bigint end`;
+}
+
 const SQL_DE_DIVERGENCIAS = `
   with soma as (
     select user_id,
-      sum(case tipo when 'deposito' then valor_centavos when 'credito_arremate' then valor_centavos
-        when 'debito_arremate' then -valor_centavos else 0 end) as total,
-      sum(case tipo when 'compromisso' then valor_centavos
-        when 'liberacao' then -valor_centavos when 'estorno' then -valor_centavos
-        when 'debito_arremate' then -valor_centavos else 0 end) as comprometido
+      sum(${casoDoEixo(0)}) as total,
+      sum(${casoDoEixo(1)}) as comprometido
     from ledger_entries group by user_id
   )
   select coalesce(s.user_id, w.user_id)::text as user_id,
