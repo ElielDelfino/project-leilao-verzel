@@ -353,7 +353,8 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0003: append-only até para o d
       for (const lista of [
         'lot_seals',
         'bids, ledger_entries',
-        'signing_keys, bids, lot_seals, ledger_entries',
+        // receipts.key_id também referencia signing_keys (migration 0005, tarefa 102).
+        'signing_keys, bids, lot_seals, ledger_entries, receipts',
       ]) {
         expect(await codigoDaFalha(cliente, `truncate ${lista}`), lista).toBe(SQLSTATE.appendOnly);
       }

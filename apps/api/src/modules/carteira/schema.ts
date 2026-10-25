@@ -65,6 +65,13 @@ export const ledgerEntries = pgTable(
     uniqueIndex('ledger_entries_lance_id_tipo_unico')
       .on(t.lanceId, t.tipo)
       .where(sql`${t.tipo} IN ('compromisso', 'liberacao') AND ${t.lanceId} IS NOT NULL`),
+    // No máximo um `estorno`, um `debito_arremate` e um `credito_arremate` por lote (tarefa 102,
+    // migration 0005, D4): o cancelamento e a liquidação não rodam duas vezes no mesmo lote.
+    uniqueIndex('ledger_entries_lote_id_tipo_unico')
+      .on(t.loteId, t.tipo)
+      .where(
+        sql`${t.tipo} IN ('estorno', 'debito_arremate', 'credito_arremate') AND ${t.loteId} IS NOT NULL`,
+      ),
   ],
 );
 

@@ -19,7 +19,14 @@ const PAPEL_DA_API = 'leilao_api';
  * Tabelas append-only (specs/008, ADR 0031); cada uma precisa ligar os dois triggers com
  * public.impedir_alteracao(). bids, lot_seals e signing_keys vêm da 0003 (tarefa 073).
  */
-const TABELAS_APPEND_ONLY = ['ledger_entries', 'bids', 'lot_seals', 'signing_keys'] as const;
+const TABELAS_APPEND_ONLY = [
+  'ledger_entries',
+  'bids',
+  'lot_seals',
+  'signing_keys',
+  // Tarefa 102 (migration 0005).
+  'receipts',
+] as const;
 
 /**
  * Matriz D3 da tarefa 036: privilégios efetivos de leilao_api em cada tabela de public. Toda
@@ -38,6 +45,8 @@ const MATRIZ: Readonly<Record<string, readonly string[]>> = {
   bids: ['INSERT', 'SELECT'],
   lot_seals: ['INSERT', 'SELECT'],
   signing_keys: ['INSERT', 'SELECT'],
+  // Tarefa 102 (ADR 0026): comprovante append-only, só SELECT e INSERT.
+  receipts: ['INSERT', 'SELECT'],
 };
 
 /**

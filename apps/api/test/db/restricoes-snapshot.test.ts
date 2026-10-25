@@ -18,9 +18,11 @@ interface FkManual {
   readonly tabela: string;
   readonly coluna: string;
   readonly alvo: string;
+  /** Coluna referenciada; `id` se omitida. */
+  readonly colunaDoAlvo?: string;
 }
 
-/** FKs só no SQL (fora dos schema.ts); todas apontam para `<alvo>(id)`. */
+/** FKs só no SQL (fora dos schema.ts); apontam para `<alvo>(<colunaDoAlvo ?? id>)`. */
 const FKS_SO_NO_SQL: Readonly<Record<string, FkManual>> = {
   ledger_entries_user_id_users_id_fk: {
     tabela: 'ledger_entries',
@@ -49,6 +51,15 @@ const FKS_SO_NO_SQL: Readonly<Record<string, FkManual>> = {
     tabela: 'ledger_entries',
     coluna: 'lance_id',
     alvo: 'bids',
+  },
+  // Migration 0005 (tarefa 102): liquidacao não importa lotes, identidade nem lances.
+  receipts_lote_id_lots_id_fk: { tabela: 'receipts', coluna: 'lote_id', alvo: 'lots' },
+  receipts_vencedor_id_users_id_fk: { tabela: 'receipts', coluna: 'vencedor_id', alvo: 'users' },
+  receipts_key_id_signing_keys_key_id_fk: {
+    tabela: 'receipts',
+    coluna: 'key_id',
+    alvo: 'signing_keys',
+    colunaDoAlvo: 'key_id',
   },
 };
 
@@ -129,7 +140,7 @@ describe.skipIf(!AMBIENTE.disponivel)('banco migrado × snapshot do drizzle-kit'
       expect(porNome.get(nome), nome).toEqual({
         nome,
         tabela: fk.tabela,
-        definicao: `FOREIGN KEY (${fk.coluna}) REFERENCES ${fk.alvo}(id)`,
+        definicao: `FOREIGN KEY (${fk.coluna}) REFERENCES ${fk.alvo}(${fk.colunaDoAlvo ?? 'id'})`,
       });
     }
   });
