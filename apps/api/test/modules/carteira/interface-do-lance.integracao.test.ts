@@ -21,16 +21,13 @@ import {
   travarSaldo,
 } from '../../../src/modules/carteira/repositorio.js';
 import { ServicoDeCarteira } from '../../../src/modules/carteira/servico-de-carteira.js';
+import { criarLoteELance, type ReferenciaDeLance } from '../../helpers/lance-por-sql.js';
 import { BANCO, emailNovo } from '../identidade/ambiente.js';
 
 interface Linhas {
   readonly total: string;
   readonly comprometido: string;
   readonly lancamentos: string;
-}
-
-function referencia(): { loteId: string; lanceId: string } {
-  return { loteId: randomUUID(), lanceId: randomUUID() };
 }
 
 describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres real)', () => {
@@ -50,6 +47,9 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
     await pool.end();
     await banco.encerrar();
   });
+
+  /** Lote e lance reais (committed), pois o ledger tem FK imediata para `lots` e `bids` (D9). */
+  const referencia = (): Promise<ReferenciaDeLance> => criarLoteELance(pool);
 
   async function novoUsuario(depositoCentavos = 0): Promise<string> {
     const { rows } = await pool.query<{ id: string }>(
@@ -92,14 +92,14 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
     valorCentavos: number,
   ): Promise<void> {
     await travarSaldo(tx, userId);
-    await inserirLancamento(tx, { userId, tipo, valorCentavos, ...referencia() });
+    await inserirLancamento(tx, { userId, tipo, valorCentavos, ...(await referencia()) });
     await atualizarSaldo(tx, userId, efeitoDoLancamento(tipo, valorCentavos));
   }
 
   describe('comprometer', () => {
     it('reduz o disponível, grava compromisso com lote e lance e devolve o saldo novo', async () => {
       const usuario = await novoUsuario(10_000);
-      const ref = referencia();
+      const ref = await referencia();
 
       const saldo = await banco.transaction((tx) => comprometer(tx, usuario, 2_500, ref));
 
@@ -125,18 +125,20 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
 
     it('comprometer todo o disponível é aceito (limite exato)', async () => {
       const usuario = await novoUsuario(1_000);
+      const ref = await referencia();
 
-      const saldo = await banco.transaction((tx) => comprometer(tx, usuario, 1_000, referencia()));
+      const saldo = await banco.transaction((tx) => comprometer(tx, usuario, 1_000, ref));
 
       expect(saldo.disponivelCentavos).toBe(0);
     });
 
     it('disponível < valor → ErroDeCarteira e nada é gravado', async () => {
       const usuario = await novoUsuario(1_000);
-      await banco.transaction((tx) => comprometer(tx, usuario, 600, referencia()));
+      const [primeira, segunda] = [await referencia(), await referencia()];
+      await banco.transaction((tx) => comprometer(tx, usuario, 600, primeira));
       const antes = await linhas(usuario);
 
-      const tentativa = banco.transaction((tx) => comprometer(tx, usuario, 401, referencia()));
+      const tentativa = banco.transaction((tx) => comprometer(tx, usuario, 401, segunda));
 
       await expect(tentativa).rejects.toBeInstanceOf(ErroDeCarteira);
       await expect(tentativa).rejects.toMatchObject({
@@ -149,19 +151,19 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
 
     it('usuário sem carteira (nenhum lançamento) → ErroDeCarteira', async () => {
       const usuario = await novoUsuario();
+      const ref = await referencia();
 
       await expect(
-        banco.transaction((tx) => comprometer(tx, usuario, 1, referencia())),
+        banco.transaction((tx) => comprometer(tx, usuario, 1, ref)),
       ).rejects.toMatchObject({ codigo: 'SALDO_INSUFICIENTE', disponivel: 0 });
     });
 
     it('concorrentes no mesmo usuário ficam em fila pelo FOR UPDATE: só um cabe', async () => {
       const usuario = await novoUsuario(1_000);
+      const refs = await Promise.all(Array.from({ length: 5 }, referencia));
 
       const resultados = await Promise.allSettled(
-        Array.from({ length: 5 }, () =>
-          banco.transaction((tx) => comprometer(tx, usuario, 700, referencia())),
-        ),
+        refs.map((ref) => banco.transaction((tx) => comprometer(tx, usuario, 700, ref))),
       );
 
       expect(resultados.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -177,7 +179,7 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
   describe('liberar', () => {
     it('devolve o disponível e grava liberacao na mesma transação do compromisso', async () => {
       const usuario = await novoUsuario(5_000);
-      const ref = referencia();
+      const ref = await referencia();
 
       const saldo = await banco.transaction(async (tx) => {
         await comprometer(tx, usuario, 3_000, ref);
@@ -199,10 +201,11 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
     it('rollback da transação desfaz compromisso e saldo juntos', async () => {
       const usuario = await novoUsuario(5_000);
       const antes = await linhas(usuario);
+      const ref = await referencia();
 
       await expect(
         banco.transaction(async (tx) => {
-          await comprometer(tx, usuario, 1_000, referencia());
+          await comprometer(tx, usuario, 1_000, ref);
           throw new Error('falha depois do compromisso');
         }),
       ).rejects.toThrow('falha depois do compromisso');
@@ -212,11 +215,12 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
 
     it('liberar mais que o comprometido → ErroDeCarteira e nada é gravado', async () => {
       const usuario = await novoUsuario(5_000);
-      await banco.transaction((tx) => comprometer(tx, usuario, 1_000, referencia()));
+      const [primeira, segunda] = [await referencia(), await referencia()];
+      await banco.transaction((tx) => comprometer(tx, usuario, 1_000, primeira));
       const antes = await linhas(usuario);
 
       await expect(
-        banco.transaction((tx) => liberar(tx, usuario, 1_001, referencia())),
+        banco.transaction((tx) => liberar(tx, usuario, 1_001, segunda)),
       ).rejects.toMatchObject({ codigo: 'COMPROMETIDO_INSUFICIENTE', comprometido: 1_000 });
       expect(await linhas(usuario)).toEqual(antes);
     });
@@ -242,8 +246,8 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
         banco.transaction(async (tx) => {
           await travarCarteiras(tx, [primeiro, segundo]);
           await tx.execute(sql`select pg_sleep(0.05)`);
-          await comprometer(tx, primeiro, 10, referencia());
-          await liberar(tx, primeiro, 10, referencia());
+          await comprometer(tx, primeiro, 10, await referencia());
+          await liberar(tx, primeiro, 10, await referencia());
         });
 
       const resultados = await Promise.allSettled(
@@ -301,8 +305,8 @@ describe.skipIf(!BANCO.disponivel)('interface da carteira para o lance (Postgres
       const leiloeiro = await novoUsuario();
       await banco.transaction(async (tx) => {
         await travarCarteiras(tx, [licitante, leiloeiro]);
-        await comprometer(tx, licitante, 5_000, referencia());
-        await liberar(tx, licitante, 2_000, referencia());
+        await comprometer(tx, licitante, 5_000, await referencia());
+        await liberar(tx, licitante, 2_000, await referencia());
         await lancar(tx, licitante, 'estorno', 1_000);
         await lancar(tx, licitante, 'debito_arremate', 1_500);
         await lancar(tx, leiloeiro, 'credito_arremate', 1_500);
