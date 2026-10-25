@@ -1,4 +1,5 @@
 // Interface pública do módulo liquidacao (specs/001 §Módulos da API). Outros módulos só importam daqui.
+export { AgendadorDoEncerramento } from './agendador/agendador-do-encerramento.js';
 export { type CodigoDoErroDeLiquidacao, ErroDeLiquidacao } from './encerramento/erros.js';
 export {
   type EncerramentoConcluido,
