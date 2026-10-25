@@ -1,5 +1,7 @@
 import { type INestApplicationContext, Module } from '@nestjs/common';
 
+import { ServicoDeAuditoria } from './auditoria.js';
+import { AuditoriaController } from './auditoria.controller.js';
 import { CadeiaDeLances } from './cadeia.js';
 import { ServicoDeChaves } from './chaves.js';
 import { LancesController } from './lances.controller.js';
@@ -11,11 +13,23 @@ import { ServicoDeLances } from './servico-de-lances.js';
  * Módulo lances (specs/007, specs/008): dono de `bids`, `lot_seals` e `signing_keys`. Depende dos
  * providers globais BANCO, ENV, LimiteDeTentativas e PublicadorDeEventos (AppModule). Outros
  * módulos usam só `CadeiaDeLances` (anexar e selar) e `LeiturasDeLances` (posição, últimos
- * lances e pseudônimo, para o estado da sala).
+ * lances e pseudônimo, para o estado da sala). A auditoria pública (GET /api/auditoria/*) é rota
+ * deste módulo, não interface.
  */
 @Module({
-  controllers: [LancesController, HistoricoDeLancesController, MeusLancesController],
-  providers: [ServicoDeChaves, CadeiaDeLances, ServicoDeLances, LeiturasDeLances],
+  controllers: [
+    LancesController,
+    HistoricoDeLancesController,
+    MeusLancesController,
+    AuditoriaController,
+  ],
+  providers: [
+    ServicoDeChaves,
+    CadeiaDeLances,
+    ServicoDeLances,
+    LeiturasDeLances,
+    ServicoDeAuditoria,
+  ],
   exports: [CadeiaDeLances, LeiturasDeLances],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- módulo Nest: o conteúdo vem do decorator
