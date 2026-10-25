@@ -46,9 +46,13 @@ export function envelopeDeErro(
   codigo: SchemasApi['Erro']['erro']['codigo'],
   status: number,
   cabecalhos: Record<string, string> = {},
+  detalhes?: Record<string, unknown>,
 ): Response {
   return HttpResponse.json(
-    { sucesso: false, erro: { codigo, mensagem: 'texto interno da API' } },
+    {
+      sucesso: false,
+      erro: { codigo, mensagem: 'texto interno da API', ...(detalhes ? { detalhes } : {}) },
+    },
     { status, headers: cabecalhos },
   );
 }

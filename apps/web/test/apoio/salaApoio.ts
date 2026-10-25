@@ -1,3 +1,4 @@
+import type { SchemasApi } from '@leilao/contracts';
 import { act, screen, waitFor } from '@testing-library/react';
 import { expect } from 'vitest';
 
@@ -87,10 +88,11 @@ export async function abrir(
   estado: Estado | null = criarEstado(),
   socket = new SocketFalso(),
   id = ID,
+  sessao: SchemasApi['Usuario'] | null = null,
 ) {
   servidor.use(servirDetalhe(criarLoteDetalhe({ id })));
   simularPreferenciaDoSistema(false);
-  const app = renderizarComTempoReal(`/lotes/${id}`, socket);
+  const app = renderizarComTempoReal(`/lotes/${id}`, socket, sessao);
   act(() => socket.receber('connect'));
   await waitFor(() => expect(entradas(socket)).toHaveLength(1));
   if (estado) {

@@ -6,6 +6,7 @@ import { formatarCentavos } from '../formatacao/dinheiro';
 import { ICONES_DE_STATUS, ROTULOS_DE_STATUS, textoDeLances } from '../lotes/rotulos';
 import { Carta } from './Carta';
 import { Contagem } from './Contagem';
+import { AreaDeLance } from './FormularioDeLance';
 import type { EstadoDaSala } from './estadoDaSala';
 import { HistoricoDeLances } from './HistoricoDeLances';
 import { IndicadorDePosicao } from './IndicadorDePosicao';
@@ -18,6 +19,7 @@ interface Props {
   seloDeFimEstendido: boolean;
   /** Mostrado no lugar da parte ao vivo enquanto não há `sala` (carregando ou erro de entrada). */
   semEstado?: ReactNode;
+  aoSincronizar: () => void;
 }
 
 function SalaSemEstado({ detalhe, semEstado }: { detalhe: LoteDetalhe; semEstado: ReactNode }) {
@@ -59,7 +61,14 @@ function Situacao({ sala }: { sala: EstadoDaSala }) {
   return null;
 }
 
-export function Sala({ detalhe, sala, reconectando, seloDeFimEstendido, semEstado }: Props) {
+export function Sala({
+  detalhe,
+  sala,
+  reconectando,
+  seloDeFimEstendido,
+  semEstado,
+  aoSincronizar,
+}: Props) {
   if (!sala) return <SalaSemEstado detalhe={detalhe} semEstado={semEstado} />;
   const { lote } = sala;
   const aoVivo = lote.status === 'ao_vivo';
@@ -98,6 +107,7 @@ export function Sala({ detalhe, sala, reconectando, seloDeFimEstendido, semEstad
               lanceAtualCentavos={lote.lanceAtualCentavos}
             />
           ) : null}
+          <AreaDeLance lote={lote} aoSincronizar={aoSincronizar} reconectando={reconectando} />
           {detalhe.descricao ? <p>{detalhe.descricao}</p> : null}
           <p>Lance inicial: {formatarCentavos(lote.lanceInicialCentavos)}</p>
           <p>Incremento mínimo: {formatarCentavos(lote.incrementoMinimoCentavos)}</p>

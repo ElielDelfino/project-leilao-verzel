@@ -1,3 +1,4 @@
+import type { SchemasApi } from '@leilao/contracts';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render, type RenderResult } from '@testing-library/react';
 import { createMemoryRouter } from 'react-router';
@@ -14,8 +15,12 @@ export interface AppComTempoReal extends RenderResult {
 }
 
 /** Como `renderizarApp`, mas com o provedor de tempo real sobre o socket falso do teste. */
-export function renderizarComTempoReal(url: string, socket: SocketFalso): AppComTempoReal {
-  servidor.use(handlerDeSessao(null));
+export function renderizarComTempoReal(
+  url: string,
+  socket: SocketFalso,
+  sessao: SchemasApi['Usuario'] | null = null,
+): AppComTempoReal {
+  servidor.use(handlerDeSessao(sessao));
   const router = createMemoryRouter(rotas, { initialEntries: [url] });
   const criarSocket = () => socket;
   const resultado = render(

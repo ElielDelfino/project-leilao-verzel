@@ -37,12 +37,14 @@ describe('mensagemDoErro', () => {
       'Este lote ainda não começou. Abre em 24/10/2026, 10:00.',
     ],
     ['LOTE_ENCERRADO', {}, 'Este lote já foi encerrado.'],
+    ['LEILOEIRO_NAO_PODE_LANCAR', {}, 'Leiloeiros não podem dar lances.'],
   ] as const)('%s', (codigo, contexto, esperado) => {
     expect(mensagemDoErro(codigo, contexto)).toBe(esperado);
   });
 
   it('usa a mensagem de indisponível para código sem texto na spec', () => {
-    expect(mensagemDoErro('LEILOEIRO_NAO_PODE_LANCAR')).toBe(mensagemDoErro('INDISPONIVEL'));
+    expect(mensagemDoErro('CATALOGO_INDISPONIVEL')).not.toBe('');
+    expect(mensagemDoErro('CODIGO_NOVO' as never)).toBe(mensagemDoErro('INDISPONIVEL'));
   });
 
   it.each([
