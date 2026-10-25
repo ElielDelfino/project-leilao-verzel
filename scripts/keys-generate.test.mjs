@@ -1,6 +1,6 @@
 // Testes de `pnpm keys:generate` (tasks 010 e 023, specs/014 §Segredos, ADR 0023). Rodar: pnpm test:scripts
 import { spawnSync } from 'node:child_process';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -20,7 +20,12 @@ import assert from 'node:assert/strict';
 
 import * as ed from '@noble/ed25519';
 
-import { sincronizarSenha, verificadorScram } from './db-sync-password.mjs';
+import {
+  SCRIPT_DE_CONFERENCIA,
+  ambienteSemSegredos,
+  sincronizarSenha,
+  verificadorScram,
+} from './db-sync-password.mjs';
 import {
   DIRETORIO_DE_SEGREDOS,
   SEGREDOS_EM_ARQUIVO,
@@ -778,20 +783,38 @@ describe('db:sync-password', () => {
   // O ALTER ROLE roda `psql` direto no `docker exec`; a conferência roda `sh -c` com o psql no script.
   const ehAlter = (args) => args[0] === 'exec' && args.includes('psql');
 
-  // Docker de mentira: o banco aceita `senhaNoBanco` até um ALTER ROLE trocar pelo verificador novo.
+  // Login SCRAM do lado do servidor, calculado aqui de forma independente do script: a senha
+  // autentica se o StoredKey derivado dela é o do verificador guardado (RFC 5802 §3).
+  function autenticaNoVerificador(verificador, senha) {
+    const [, iteracoes, sal, storedKey] = /^SCRAM-SHA-256\$(\d+):([^$]+)\$([^:]+):/.exec(
+      verificador,
+    );
+    const salgada = pbkdf2Sync(senha, Buffer.from(sal, 'base64'), Number(iteracoes), 32, 'sha256');
+    const clientKey = createHmac('sha256', salgada).update('Client Key').digest();
+    return createHash('sha256').update(clientKey).digest('base64') === storedKey;
+  }
+
+  const verificadorDoSql = (sql) => /PASSWORD '([^']+)'/.exec(sql)?.[1];
+
+  // Docker de mentira: o banco aceita `senhaNoBanco` até um ALTER ROLE guardar um verificador; daí
+  // em diante, só a senha que corresponde a esse verificador autentica.
   function dockerFalso({ senhaNoBanco, container = 'abc123', falhaNoAlter, sempreRecusa } = {}) {
     const chamadas = [];
-    let alterado = false;
+    let verificador;
     const executar = (args, { entrada } = {}) => {
       chamadas.push({ args, entrada });
       if (args[0] === 'compose') return { status: 0, stdout: `${container}\n`, stderr: '' };
       if (args[0] === 'inspect') return { status: 0, stdout: '172.18.0.2\n', stderr: '' };
       if (ehAlter(args)) {
         if (falhaNoAlter) return { status: 3, stdout: '', stderr: falhaNoAlter(entrada) };
-        alterado = true;
+        verificador = verificadorDoSql(entrada);
         return { status: 0, stdout: '', stderr: '' };
       }
-      const aceita = !sempreRecusa && (alterado || entrada === `${senhaNoBanco}\n`);
+      const senha = entrada.replace(/\n$/, '');
+      const confere = verificador
+        ? autenticaNoVerificador(verificador, senha)
+        : senha === senhaNoBanco;
+      const aceita = !sempreRecusa && confere;
       return aceita
         ? { status: 0, stdout: '1\n', stderr: '' }
         : { status: 2, stdout: '', stderr: 'FATAL:  password authentication failed for user' };
@@ -948,6 +971,296 @@ describe('db:sync-password', () => {
       assert.ok(!erro.message.includes('SCRAM-SHA-256$'), 'verificador no erro');
       assert.ok(!erro.message.includes(SENHA), 'senha no erro');
       return true;
+    });
+  });
+
+  it('do erro do psql mostra só a linha ERROR:, sem LINE 1: nem pedaços do verificador', async () => {
+    let pedacos;
+    const docker = dockerFalso({
+      senhaNoBanco: OUTRA,
+      falhaNoAlter: (sql) => {
+        // StoredKey e ServerKey sem o prefixo SCRAM-SHA-256$, como o psql os recorta.
+        pedacos = verificadorDoSql(sql).split('$')[2].split(':');
+        return [
+          `psql:<stdin>:1: ERROR:  syntax error at or near "${pedacos[0]}"`,
+          `LINE 1: ALTER ROLE "leilao" PASSWORD '...${pedacos[1]}';`,
+          '                                       ^',
+        ].join('\n');
+      },
+    });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(SENHA), docker)), (erro) => {
+      assert.match(
+        erro.message,
+        /ALTER ROLE falhou: psql:<stdin>:1: ERROR: {2}syntax error at or near/,
+      );
+      assert.ok(!erro.message.includes('LINE 1'), 'LINE 1 repassada');
+      for (const pedaco of pedacos)
+        assert.ok(!erro.message.includes(pedaco), 'trecho do verificador');
+      assert.ok(!erro.message.includes(pedacos[0].slice(0, 20)), 'trecho parcial do verificador');
+      return true;
+    });
+  });
+
+  it('sem linha ERROR: no stderr, não repassa nada do psql', async () => {
+    const docker = dockerFalso({ senhaNoBanco: OUTRA, falhaNoAlter: () => `LINE 1: ${SENHA}` });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(SENHA), docker)), (erro) => {
+      assert.match(erro.message, /ALTER ROLE falhou: o psql não informou o erro/);
+      assert.ok(!erro.message.includes(SENHA));
+      return true;
+    });
+  });
+
+  describe('ambiente do docker', () => {
+    it('tira os 5 segredos do ambiente e mantém o resto', () => {
+      const segredos = Object.fromEntries(VARIAVEIS.map((nome, i) => [nome, `${SENHA}${i}`]));
+      const ambiente = { ...segredos, PATH: '/usr/bin', HOME: '/home/x', POSTGRES_USER: 'leilao' };
+
+      const resultado = ambienteSemSegredos(ambiente);
+
+      for (const nome of VARIAVEIS) assert.equal(resultado[nome], undefined, `${nome} no ambiente`);
+      assert.deepEqual(resultado, {
+        PATH: '/usr/bin',
+        HOME: '/home/x',
+        POSTGRES_USER: 'leilao',
+        LC_ALL: 'C',
+      });
+      assert.equal(ambiente.DB_PASSWORD, `${SENHA}0`, 'alterou o objeto recebido');
+    });
+
+    it('lê process.env por padrão', () => {
+      const anterior = process.env.DB_PASSWORD;
+      process.env.DB_PASSWORD = SENHA;
+      try {
+        assert.equal(ambienteSemSegredos().DB_PASSWORD, undefined);
+      } finally {
+        if (anterior === undefined) delete process.env.DB_PASSWORD;
+        else process.env.DB_PASSWORD = anterior;
+      }
+    });
+  });
+
+  // Caminho real: `executarDocker` (spawn do binário `docker` do PATH com `ambienteSemSegredos`) e o
+  // SCRIPT_DE_CONFERENCIA rodado por `sh` de verdade. O `docker` e o `psql` são falsos, em Node; cada
+  // um grava argv, ambiente e stdin num .jsonl. O `docker exec` falso roda o comando com um ambiente
+  // de container (só PATH e FALSO_DIR), como o docker real, que não repassa o ambiente do host. O
+  // `psql` falso guarda o verificador no ALTER ROLE e, na conexão por TCP, faz a conta do SCRAM com o
+  // PGPASSWORD que recebeu: só a senha certa autentica.
+  describe('caminho real com docker e psql falsos no PATH', () => {
+    const IP = '10.0.0.7';
+    let bin;
+    let registros;
+
+    // O Node 24 lê `--env-file` mesmo depois do caminho do script (e o `docker compose` recebe um),
+    // então o `docker` falso é um sh que repassa os argumentos numa variável, um por linha.
+    const DOCKER_FALSO_SH = (js) =>
+      `#!/bin/sh\nFALSO_ARGS=$(printf '%s\\n' "$@") exec "${process.execPath}" "${js}"\n`;
+
+    const DOCKER_FALSO = `
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const args = process.env.FALSO_ARGS.split('\\n');
+const entrada = fs.readFileSync(0, 'utf8');
+const { FALSO_ARGS, ...env } = process.env;
+const registro = { args, env, entrada };
+fs.appendFileSync(process.env.FALSO_DIR + '/docker.jsonl', JSON.stringify(registro) + '\\n');
+if (args[0] === 'compose') { process.stdout.write('falso123\\n'); process.exit(0); }
+if (args[0] === 'inspect') { process.stdout.write('${IP} \\n'); process.exit(0); }
+if (args[0] !== 'exec' || args[4] !== 'falso123') process.exit(9);
+const [comando, ...resto] = args.slice(5);
+const ambiente = { PATH: process.env.PATH_DO_CONTAINER, FALSO_DIR: process.env.FALSO_DIR };
+const r = spawnSync(comando, resto, { input: entrada, encoding: 'utf8', env: ambiente });
+process.stdout.write(r.stdout ?? '');
+process.stderr.write(r.stderr ?? '');
+process.exit(r.status ?? 1);
+`;
+
+    const PSQL_FALSO = `
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const dir = process.env.FALSO_DIR;
+const args = process.argv.slice(2);
+const entrada = fs.readFileSync(0, 'utf8');
+const pgpassword = process.env.PGPASSWORD ?? null;
+fs.appendFileSync(dir + '/psql.jsonl', JSON.stringify({ args, pgpassword, entrada }) + '\\n');
+if (args.includes('-f')) {
+  const sql = /PASSWORD '([^']+)'/.exec(entrada);
+  if (!sql || args.includes('-h')) { console.error('psql:<stdin>:1: ERROR:  falso'); process.exit(3); }
+  fs.writeFileSync(dir + '/rolpassword', sql[1]);
+  process.exit(0);
+}
+const v = /^SCRAM-SHA-256\\$(\\d+):([^$]+)\\$([^:]+):/.exec(fs.readFileSync(dir + '/rolpassword', 'utf8'));
+const salgada = crypto.pbkdf2Sync(pgpassword ?? '', Buffer.from(v[2], 'base64'), Number(v[1]), 32, 'sha256');
+const clientKey = crypto.createHmac('sha256', salgada).update('Client Key').digest();
+if (crypto.createHash('sha256').update(clientKey).digest('base64') === v[3]) {
+  process.stdout.write('1\\n');
+  process.exit(0);
+}
+console.error('psql: error: FATAL:  password authentication failed for user');
+process.exit(2);
+`;
+
+    function criarExecutavel(nome, corpo) {
+      writeFileSync(join(bin, nome), `#!${process.execPath}\n${corpo}`, { mode: 0o755 });
+    }
+
+    const lerJsonl = (nome) => {
+      const caminho = join(registros, nome);
+      if (!existsSync(caminho)) return [];
+      return readFileSync(caminho, 'utf8')
+        .trim()
+        .split('\n')
+        .map((linha) => JSON.parse(linha));
+    };
+
+    function prepararBanco(senhaNoBanco) {
+      registros = mkdtempSync(join(dir, 'registros-'));
+      writeFileSync(join(registros, 'rolpassword'), verificadorScram(senhaNoBanco));
+    }
+
+    const ambienteDoContainer = () => ({
+      PATH: `${bin}:/usr/bin:/bin`,
+      FALSO_DIR: registros,
+    });
+
+    // Põe no process.env os 5 segredos (como o --env-file do .env.local) e o docker falso no PATH.
+    async function comAmbienteDeDev(funcao) {
+      const segredos = Object.fromEntries(
+        VARIAVEIS.map((nome, i) => [
+          nome,
+          nome === 'DB_PASSWORD' ? SENHA : `${OUTRA.slice(1)}${i}`,
+        ]),
+      );
+      const novos = {
+        ...segredos,
+        PATH: `${bin}:${process.env.PATH}`,
+        PATH_DO_CONTAINER: `${bin}:/usr/bin:/bin`,
+        FALSO_DIR: registros,
+      };
+      const anteriores = Object.fromEntries(Object.keys(novos).map((n) => [n, process.env[n]]));
+      Object.assign(process.env, novos);
+      try {
+        return { resultado: await funcao(), segredos };
+      } finally {
+        for (const [nome, valor] of Object.entries(anteriores)) {
+          if (valor === undefined) Reflect.deleteProperty(process.env, nome);
+          else process.env[nome] = valor;
+        }
+      }
+    }
+
+    before(() => {
+      bin = mkdtempSync(join(dir, 'bin-'));
+      const js = join(dir, 'docker-falso.cjs');
+      writeFileSync(js, DOCKER_FALSO);
+      writeFileSync(join(bin, 'docker'), DOCKER_FALSO_SH(js), { mode: 0o755 });
+      criarExecutavel('psql', PSQL_FALSO);
+    });
+
+    describe('SCRIPT_DE_CONFERENCIA rodado por sh', () => {
+      const rodarScript = (entrada) =>
+        spawnSync('sh', ['-c', SCRIPT_DE_CONFERENCIA, 'verificar', IP, 'leilao', 'leilao'], {
+          input: entrada,
+          encoding: 'utf8',
+          env: ambienteDoContainer(),
+        });
+
+      it('entrega a senha ao psql só por PGPASSWORD, lida do stdin, e nunca no argv', () => {
+        prepararBanco(SENHA);
+
+        const saida = rodarScript(`${SENHA}\n`);
+
+        assert.equal(saida.status, 0, saida.stderr);
+        assert.equal(saida.stdout, '', 'a saída do psql não vai para o terminal');
+        const [psql] = lerJsonl('psql.jsonl');
+        assert.equal(psql.pgpassword, SENHA);
+        assert.deepEqual(psql.args, [
+          ...['-X', '-A', '-t', '-w', '-h', IP, '-U', 'leilao', '-d', 'leilao'],
+          ...['-c', 'select 1'],
+        ]);
+        assert.equal(psql.entrada, '', 'a senha sobrou no stdin do psql');
+      });
+
+      it('sai com código ≠ 0 quando a senha não autentica', () => {
+        prepararBanco(OUTRA);
+
+        const saida = rodarScript(`${SENHA}\n`);
+
+        assert.notEqual(saida.status, 0);
+        assert.equal(lerJsonl('psql.jsonl')[0].pgpassword, SENHA);
+      });
+
+      it('não chama o psql se o stdin vier vazio', () => {
+        prepararBanco(SENHA);
+
+        const saida = rodarScript('');
+
+        assert.notEqual(saida.status, 0);
+        assert.deepEqual(lerJsonl('psql.jsonl'), []);
+      });
+    });
+
+    it('sincroniza de ponta a ponta: o verificador guardado autentica a senha do arquivo', async () => {
+      prepararBanco(OUTRA);
+
+      const { resultado } = await comAmbienteDeDev(() =>
+        sincronizarSenha({
+          raiz: raizCom(SENHA),
+          usuario: 'leilao',
+          banco: 'leilao',
+          senhaDoEnv: SENHA,
+        }),
+      );
+
+      assert.equal(resultado.status, 'sincronizada');
+      assert.equal(resultado.container, 'falso123');
+      const guardado = readFileSync(join(registros, 'rolpassword'), 'utf8');
+      assert.ok(autenticaNoVerificador(guardado, SENHA), 'verificador não autentica a senha');
+      assert.ok(
+        !autenticaNoVerificador(guardado, OUTRA),
+        'verificador ainda aceita a senha antiga',
+      );
+      const psql = lerJsonl('psql.jsonl');
+      const conferencias = psql.filter((c) => c.args.includes('-c'));
+      assert.equal(conferencias.length, 2, 'esperava conferência antes e depois do ALTER');
+      for (const c of conferencias) assert.equal(c.pgpassword, SENHA);
+      const [alter] = psql.filter((c) => c.args.includes('-f'));
+      assert.equal(alter.pgpassword, null, 'PGPASSWORD no ALTER ROLE pelo socket');
+      assert.ok(!alter.entrada.includes(SENHA), 'senha em claro no SQL');
+    });
+
+    it('o docker roda sem nenhum dos 5 segredos no ambiente nem a senha no argv', async () => {
+      prepararBanco(OUTRA);
+
+      const { segredos } = await comAmbienteDeDev(() =>
+        sincronizarSenha({
+          raiz: raizCom(SENHA),
+          usuario: 'leilao',
+          banco: 'leilao',
+          senhaDoEnv: SENHA,
+        }),
+      );
+
+      const chamadas = lerJsonl('docker.jsonl');
+      assert.deepEqual(
+        chamadas.map((c) => c.args[0]),
+        ['compose', 'inspect', 'exec', 'exec', 'exec'],
+      );
+      for (const { args, env } of chamadas) {
+        for (const nome of VARIAVEIS) assert.equal(env[nome], undefined, `${nome} no ambiente`);
+        const valores = Object.values(env).join('\n');
+        for (const valor of Object.values(segredos)) {
+          assert.ok(!valores.includes(valor), 'valor de segredo no ambiente do docker');
+        }
+        assert.equal(env.LC_ALL, 'C');
+        assert.ok(!args.join(' ').includes(SENHA), `senha no argv do docker ${args[0]}`);
+      }
+      for (const { args } of lerJsonl('psql.jsonl')) {
+        assert.ok(!args.join(' ').includes(SENHA), 'senha no argv do psql');
+      }
+      const conferencias = chamadas.filter((c) => c.args.includes('verificar'));
+      for (const c of conferencias) assert.equal(c.entrada, `${SENHA}\n`, 'senha fora do stdin');
     });
   });
 });

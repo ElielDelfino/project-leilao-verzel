@@ -4,12 +4,16 @@
 // `pnpm keys:generate --force` o banco continua com a senha antiga (erro 28P01 na API). Decisão do
 // humano (2026-10-25): trocar com ALTER ROLE pelo socket do container, sem apagar o volume.
 //
-// O segredo nunca vai para argv, log ou saída:
+// A senha nunca vai para argv, log ou saída:
 // - o ALTER ROLE recebe um verificador SCRAM-SHA-256 calculado aqui (o Postgres o guarda como está;
-//   docs da versão 18, CREATE ROLE §PASSWORD), então nem o servidor nem um log de erro veem a senha;
+//   docs da versão 18, CREATE ROLE §PASSWORD), então o servidor não vê a senha. Se o ALTER ROLE
+//   falhar, o Postgres registra o comando no log dele (log_min_error_statement = error): o que vai
+//   para o log é o verificador, não a senha. Ele não serve para entrar, mas permite atacar por
+//   força bruta uma senha fraca; com 32 bytes aleatórios isso não é viável;
 // - o SQL vai pelo stdin do `docker exec`; a conferência por TCP lê a senha do stdin dentro do
 //   container (PGPASSWORD só no ambiente do psql de lá);
-// - as mensagens de erro do psql passam por `semSegredos` antes de chegar ao terminal.
+// - o docker roda sem os 5 segredos no ambiente (`ambienteSemSegredos`);
+// - do erro do psql só sai a linha `ERROR:`, filtrada por `semSegredos`.
 import { spawnSync } from 'node:child_process';
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
@@ -34,7 +38,7 @@ const IDENTIFICADOR = /^[a-z_][a-z0-9_]{0,62}$/;
 
 // Conexão por TCP no IP do próprio container: o pg_hba da imagem aceita sem senha o socket e o
 // 127.0.0.1, mas exige SCRAM do resto, então só esse caminho prova que a senha autentica.
-const SCRIPT_DE_CONFERENCIA =
+export const SCRIPT_DE_CONFERENCIA =
   'IFS= read -r PGPASSWORD && export PGPASSWORD && ' +
   'exec psql -X -A -t -w -h "$1" -U "$2" -d "$3" -c "select 1" >/dev/null';
 
@@ -105,10 +109,10 @@ function validarEntradas({ raiz, usuario, banco, senhaDoEnv }) {
 }
 
 // Ambiente do docker sem os 5 segredos que o --env-file do .env.local pôs em process.env.
-function ambienteSemSegredos() {
+export function ambienteSemSegredos(ambiente = process.env) {
   const segredos = new Set(VARIAVEIS);
-  const ambiente = Object.entries(process.env).filter(([nome]) => !segredos.has(nome));
-  return { ...Object.fromEntries(ambiente), LC_ALL: 'C' };
+  const restante = Object.entries(ambiente).filter(([nome]) => !segredos.has(nome));
+  return { ...Object.fromEntries(restante), LC_ALL: 'C' };
 }
 
 function executarDocker(args, { entrada } = {}) {
@@ -121,13 +125,24 @@ function executarDocker(args, { entrada } = {}) {
   return saida;
 }
 
-// Tira do texto a senha e qualquer verificador SCRAM antes de mostrá-lo.
+// Sequência longa de caracteres base64/base64url: a senha (43), o sal (24) e as chaves (44) do
+// verificador, inteiros ou em pedaços, como no "LINE 1:" e no "at or near" do psql.
+const TRECHO_BASE64 = /[A-Za-z0-9+/=_-]{16,}/g;
+
+// Tira do texto a senha, qualquer verificador SCRAM e trechos longos em base64.
 function semSegredos(texto, senha) {
-  return (texto ?? '')
+  return texto
     .split(senha)
     .join('<omitido>')
     .replace(/SCRAM-SHA-256\$\S+/g, '<verificador omitido>')
+    .replace(TRECHO_BASE64, '<omitido>')
     .trim();
+}
+
+// Do stderr do psql, só a linha `ERROR:` (sem `LINE 1:`, que repete o SQL), já filtrada.
+function erroDoPsql(stderr, senha) {
+  const linha = (stderr ?? '').split('\n').find((texto) => texto.includes('ERROR:'));
+  return linha ? semSegredos(linha, senha) : 'o psql não informou o erro';
 }
 
 function localizarContainer(raiz, executar) {
@@ -179,7 +194,7 @@ function trocarSenha({ container, usuario, banco, senha, executar }) {
   const saida = executar(['exec', '-i', '-u', USUARIO_DO_SISTEMA, container, ...psql], {
     entrada: sql,
   });
-  if (saida.status !== 0) falhar(`ALTER ROLE falhou: ${semSegredos(saida.stderr, senha)}`);
+  if (saida.status !== 0) falhar(`ALTER ROLE falhou: ${erroDoPsql(saida.stderr, senha)}`);
 }
 
 /**
