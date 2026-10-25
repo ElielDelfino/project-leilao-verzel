@@ -738,6 +738,71 @@ describe('gatilho do teste de fronteiras', () => {
   });
 });
 
+// ---------------------------------------------------------------- rigor do contrato no quick (tarefa 066)
+describe('gatilho dos testes de rigor do contrato', () => {
+  const TESTES = {
+    'apps/api/test/helpers/contrato.test.ts': '',
+    'apps/api/test/auth/auth.integracao.test.ts': '',
+    'apps/api/test/health/ready.test.ts': '',
+    'apps/api/test/helpers/app-de-teste.ts': '',
+    'apps/web/test/b.test.tsx': '',
+  };
+  const TODOS_DA_API = [
+    'test/auth/auth.integracao.test.ts',
+    'test/health/ready.test.ts',
+    'test/helpers/contrato.test.ts',
+  ];
+  const todosExistem = () => true;
+
+  it('openapi.yaml alterado roda todos os testes da API (e só os dela)', () => {
+    const raiz = criarWorkspace(TESTES);
+
+    const mapa = testesRelacionados(
+      raiz,
+      lerPacotes(raiz),
+      ['apps/api/openapi.yaml'],
+      todosExistem,
+    );
+
+    assert.deepEqual(mapa.get('apps/api'), TODOS_DA_API);
+    assert.equal(mapa.has('apps/web'), false);
+  });
+
+  it('asyncapi.yaml não liga testes da API (é coberto por contracts:check)', () => {
+    const raiz = criarWorkspace(TESTES);
+
+    const mapa = testesRelacionados(
+      raiz,
+      lerPacotes(raiz),
+      ['eventbus/socketio/asyncapi.yaml'],
+      todosExistem,
+    );
+
+    assert.equal(mapa.size, 0);
+  });
+
+  it('outros arquivos (inclusive .bak do yaml) não incluem', () => {
+    const raiz = criarWorkspace(TESTES);
+
+    const mapa = testesRelacionados(
+      raiz,
+      lerPacotes(raiz),
+      ['apps/api/openapi.yaml.bak', 'eventbus/README.md'],
+      todosExistem,
+    );
+
+    assert.equal(mapa.size, 0);
+  });
+
+  it('não inclui os testes que não existem', () => {
+    const raiz = criarWorkspace(TESTES);
+
+    const mapa = testesRelacionados(raiz, lerPacotes(raiz), ['apps/api/openapi.yaml'], () => false);
+
+    assert.equal(mapa.size, 0);
+  });
+});
+
 describe('variaveisFaltandoParaOE2e', () => {
   const completo = {
     POSTGRES_API_USER: 'u-api',
