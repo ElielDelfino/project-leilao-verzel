@@ -3,8 +3,8 @@
 Status: aprovada
 Depende de: 000, 001
 
-## Ferramenta e orquestração (ADR 0021)
-Claude Code. `CLAUDE.md` contém apenas `@AGENTS.md`. Cada papel tem a sua definição em `.claude/agents/<papel>.md`, em opus, com gate de evidência, formato de relatório fixo e hook `scripts/agents/guard_paths.py` que bloqueia edições fora das pastas do papel.
+## Ferramenta e orquestração (ADR 0021, modelos pela ADR 0028)
+Claude Code. `CLAUDE.md` contém apenas `@AGENTS.md`. Cada papel tem a sua definição em `.claude/agents/<papel>.md`, com modelo e esforço definidos na ADR 0028 (opus só no api-dev e no db-dev), com gate de evidência, formato de relatório fixo e hook `scripts/agents/guard_paths.py` que bloqueia edições fora das pastas do papel.
 
 O trabalho é coordenado pelo **orquestrador** (`claude --agent orquestrador`): ele é o único que altera `tasks/` e fala com o humano; os agentes de papel não conversam entre si e se comunicam só por relatórios. Pedidos entre papéis viram tarefas novas.
 
@@ -36,7 +36,7 @@ Revisão: agentes globais `code-reviewer` (sempre), `security-reviewer` (auth, c
 1. Problemas encontrados por inspeção ou pedidos entre papéis viram uma nova tarefa, criada pelo orquestrador (template em AGENTS.md).
 2. O orquestrador escolhe tarefas `aberta` com todas as `depende-de` concluídas (arquivo removido), em lotes de até 3 sem `arquivos` sobrepostos, e pede aprovação humana.
 3. Ele marca `status: em-andamento` e `responsavel`, e entrega o texto integral da tarefa ao agente do papel (em worktree próprio, depois que existir git).
-4. O agente devolve o relatório no formato fixo; o orquestrador encaminha a revisão aos agentes globais e, com aprovação humana, faz o merge.
+4. O agente devolve o relatório no formato fixo; o orquestrador encaminha a revisão aos agentes globais e, com aprovação humana, faz o merge. Voltam ao agente no mesmo ciclo só CRITICAL, HIGH e MEDIUM que toque dinheiro, lance, integridade do histórico, auth ou segredos; o resto vai para o hardening da F5 ou para a nota da tarefa futura que mexe no mesmo código. Se o agente original passou de ~150 mil tokens de contexto, a correção vai para um agente novo do mesmo papel, no mesmo worktree, só com o relatório da revisão (ADR 0028).
 5. Após o merge, o orquestrador remove o arquivo da tarefa. Tarefa descartada também é removida; se o descarte for uma decisão, vira ADR.
 6. No fim da fase, o spec-guardian redige as tarefas da fase seguinte e o orquestrador as grava em `tasks/`.
 
@@ -63,4 +63,4 @@ Pare e pergunte quando:
 Fora desses casos, siga a recomendação mais conservadora, registre-a na tarefa e prossiga.
 
 ## Decisões relacionadas
-- decisions/0019-organizacao-agentes-e-git.md, 0021-orquestracao-e-agentes-executores.md
+- decisions/0019-organizacao-agentes-e-git.md, 0021-orquestracao-e-agentes-executores.md, 0028-modelo-e-esforco-por-papel.md
