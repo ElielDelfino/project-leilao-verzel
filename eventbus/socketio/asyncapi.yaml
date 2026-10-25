@@ -1,13 +1,17 @@
 # Contrato de tempo real (AsyncAPI 3). Fonte: specs/009. Dono: spec-guardian.
-# Tarefa 009: `name` de cada mensagem = nome do evento Socket.IO; payloads usados na geração de tipos
-# (packages/contracts, tarefa 021). Cliente → servidor (entrar_lote/sair_lote e o ack `estado`) entra na F3.
-# Ponto de atenção: Centavos (e Pseudonimo, quando as rotas da F3 entrarem) é duplicado em
-# apps/api/openapi.yaml; mude os dois juntos.
+# `name` de cada mensagem de components.messages = nome do evento Socket.IO servidor → cliente; só essas
+# mensagens entram no mapa EventosDoServidor da geração de tipos (packages/contracts, scripts/contracts-gen.mjs).
+# Cliente → servidor (entrar_lote, sair_lote, entrar_vitrine, sair_vitrine e o ack `estado`, F3, ADR 0031)
+# ficam como mensagens inline do canal `comandos`, com os payloads em components.schemas (que viram tipos).
+# Ponto de atenção: Centavos e Pseudonimo são duplicados em apps/api/openapi.yaml; mude os dois juntos.
 asyncapi: 3.0.0
 info:
   title: Casa de Leilões — tempo real
-  version: 0.2.0
-  description: Eventos Socket.IO do namespace /leilao. Publicados somente após o COMMIT.
+  version: 0.3.0
+  description: |
+    Eventos Socket.IO do namespace /leilao. Publicados somente após o COMMIT. Rooms: `lote:{loteId}`
+    (público), `vitrine` (público) e `usuario:{usuarioId}` (privado). Cliente → servidor: `entrar_lote`
+    (com ack), `sair_lote`, `entrar_vitrine` e `sair_vitrine` (sem ack).
 servers:
   local:
     host: localhost:13000
@@ -25,6 +29,17 @@ channels:
       loteIniciado: { $ref: '#/components/messages/lote_iniciado' }
       loteEncerrado: { $ref: '#/components/messages/lote_encerrado' }
       loteCancelado: { $ref: '#/components/messages/lote_cancelado' }
+  vitrine:
+    address: vitrine
+    description: |
+      Room público da vitrine ao vivo (ADR 0031). Recebe os mesmos eventos de lote, com o mesmo
+      payload, de todos os lotes.
+    messages:
+      lanceAceito: { $ref: '#/components/messages/lance_aceito' }
+      fimEstendido: { $ref: '#/components/messages/fim_estendido' }
+      loteIniciado: { $ref: '#/components/messages/lote_iniciado' }
+      loteEncerrado: { $ref: '#/components/messages/lote_encerrado' }
+      loteCancelado: { $ref: '#/components/messages/lote_cancelado' }
   usuario:
     address: 'usuario:{usuarioId}'
     parameters:
@@ -34,13 +49,64 @@ channels:
       voceFoiSuperado: { $ref: '#/components/messages/voce_foi_superado' }
       saldoAtualizado: { $ref: '#/components/messages/saldo_atualizado' }
       loteArrematado: { $ref: '#/components/messages/lote_arrematado' }
+  comandos:
+    address: /leilao
+    description: Eventos que o cliente envia ao servidor no namespace /leilao (specs/009).
+    messages:
+      entrarLote:
+        name: entrar_lote
+        summary: Entra no room `lote:{loteId}` e recebe o estado do lote no ack.
+        payload: { $ref: '#/components/schemas/LoteRef' }
+      ackEntrarLote:
+        name: entrar_lote_ack
+        summary: Ack do `entrar_lote`; só entra no room quando `sucesso` é true.
+        payload: { $ref: '#/components/schemas/AckEntrarLote' }
+      sairLote:
+        name: sair_lote
+        summary: Sai do room `lote:{loteId}`; sem ack.
+        payload: { $ref: '#/components/schemas/LoteRef' }
+      entrarVitrine:
+        name: entrar_vitrine
+        summary: Entra no room `vitrine`; sem payload e sem ack.
+        payload: { type: 'null' }
+      sairVitrine:
+        name: sair_vitrine
+        summary: Sai do room `vitrine`; sem payload e sem ack.
+        payload: { type: 'null' }
 operations:
   receberEventosDoLote:
     action: send
     channel: { $ref: '#/channels/lote' }
+  receberEventosDaVitrine:
+    action: send
+    channel: { $ref: '#/channels/vitrine' }
   receberEventosDoUsuario:
     action: send
     channel: { $ref: '#/channels/usuario' }
+  entrarLote:
+    action: receive
+    channel: { $ref: '#/channels/comandos' }
+    messages:
+      - $ref: '#/channels/comandos/messages/entrarLote'
+    reply:
+      channel: { $ref: '#/channels/comandos' }
+      messages:
+        - $ref: '#/channels/comandos/messages/ackEntrarLote'
+  sairLote:
+    action: receive
+    channel: { $ref: '#/channels/comandos' }
+    messages:
+      - $ref: '#/channels/comandos/messages/sairLote'
+  entrarVitrine:
+    action: receive
+    channel: { $ref: '#/channels/comandos' }
+    messages:
+      - $ref: '#/channels/comandos/messages/entrarVitrine'
+  sairVitrine:
+    action: receive
+    channel: { $ref: '#/channels/comandos' }
+    messages:
+      - $ref: '#/channels/comandos/messages/sairVitrine'
 components:
   schemas:
     Uuid: { type: string, format: uuid }
@@ -50,6 +116,105 @@ components:
       description: Pseudônimo estável por lote (specs/008).
       type: string
       pattern: '^Licitante #[0-9a-f]{6}$'
+    LoteRef:
+      description: Payload de `entrar_lote` e `sair_lote`; campo desconhecido é recusado.
+      type: object
+      required: [loteId]
+      additionalProperties: false
+      properties:
+        loteId: { $ref: '#/components/schemas/Uuid' }
+    StatusLote:
+      description: Status derivado dos horários (specs/006 §Estados e status derivado).
+      type: string
+      enum: [agendado, ao_vivo, encerrado, cancelado]
+    PosicaoNoLote:
+      description: Posição do usuário autenticado no lote (specs/007 §Posição do usuário no lote).
+      type: string
+      enum: [ganhando, superado, venceu, perdeu, sem_lance]
+    LanceDoHistorico:
+      description: Lance pseudonimizado, igual ao de `GET /api/lotes/{id}/lances`.
+      type: object
+      required: [seq, pseudonimo, valorCentavos, criadoEm]
+      additionalProperties: false
+      properties:
+        seq: { type: integer, minimum: 1 }
+        pseudonimo: { $ref: '#/components/schemas/Pseudonimo' }
+        valorCentavos: { $ref: '#/components/schemas/Centavos' }
+        criadoEm: { $ref: '#/components/schemas/Instante' }
+    LoteDoEstado:
+      description: Campos vivos do lote no estado da sala (specs/009 §Ack de `entrar_lote`).
+      type: object
+      required:
+        - id
+        - status
+        - inicioEm
+        - fimEm
+        - fimOriginalEm
+        - lanceInicialCentavos
+        - incrementoMinimoCentavos
+        - lanceAtualCentavos
+        - totalLances
+        - valorArremateCentavos
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        status: { $ref: '#/components/schemas/StatusLote' }
+        inicioEm: { $ref: '#/components/schemas/Instante' }
+        fimEm: { $ref: '#/components/schemas/Instante' }
+        fimOriginalEm: { $ref: '#/components/schemas/Instante' }
+        lanceInicialCentavos: { $ref: '#/components/schemas/Centavos' }
+        incrementoMinimoCentavos: { $ref: '#/components/schemas/Centavos' }
+        lanceAtualCentavos:
+          description: Null enquanto não há lance.
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+        totalLances: { type: integer, minimum: 0 }
+        valorArremateCentavos:
+          description: Null enquanto o lote não foi encerrado com vencedor.
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+    Estado:
+      description: |
+        Estado do lote devolvido no ack de `entrar_lote` (specs/009). `seuPseudonimo` e `suaPosicao`
+        só vêm para usuário autenticado. Nunca leva nome, e-mail nem id de usuário.
+      type: object
+      required: [lote, ultimosLances, agoraServidor]
+      additionalProperties: false
+      properties:
+        lote: { $ref: '#/components/schemas/LoteDoEstado' }
+        ultimosLances:
+          description: Até 50 lances, por `seq` decrescente.
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/LanceDoHistorico' }
+        agoraServidor: { $ref: '#/components/schemas/Instante' }
+        seuPseudonimo: { $ref: '#/components/schemas/Pseudonimo' }
+        suaPosicao: { $ref: '#/components/schemas/PosicaoNoLote' }
+    AckEntrarLote:
+      description: Ack de `entrar_lote`, sucesso ou erro tipado.
+      oneOf:
+        - type: object
+          required: [sucesso, estado]
+          additionalProperties: false
+          properties:
+            sucesso: { const: true }
+            estado: { $ref: '#/components/schemas/Estado' }
+        - type: object
+          required: [sucesso, erro]
+          additionalProperties: false
+          properties:
+            sucesso: { const: false }
+            erro:
+              type: object
+              required: [codigo, mensagem]
+              additionalProperties: false
+              properties:
+                codigo:
+                  type: string
+                  enum: [DADOS_INVALIDOS, NAO_ENCONTRADO, SALA_CHEIA, INDISPONIVEL]
+                mensagem: { type: string }
   messages:
     lance_aceito:
       name: lance_aceito
@@ -94,7 +259,9 @@ components:
         required: [loteId, valorCentavos]
         properties:
           loteId: { $ref: '#/components/schemas/Uuid' }
-          valorCentavos: { $ref: '#/components/schemas/Centavos' }
+          valorCentavos:
+            description: Valor do novo lance atual, que superou o do destinatário.
+            allOf: [{ $ref: '#/components/schemas/Centavos' }]
     saldo_atualizado:
       name: saldo_atualizado
       payload:

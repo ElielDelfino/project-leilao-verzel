@@ -5,3 +5,4 @@ apps/api/openapi.yaml:
     - '#/paths/~1api~1health~1live/get/responses'
     - '#/paths/~1api~1health~1ready/get/responses'
     - '#/paths/~1api~1auth~1csrf/get/responses'
+    - '#/paths/~1api~1auditoria~1chaves/get/responses'

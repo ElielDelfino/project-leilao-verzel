@@ -2,6 +2,7 @@
 
 Status: aceita
 Data: 2026-10-24
+Complementada pela ADR 0030
 
 ## Decisão
 Claude Code com os papéis spec-guardian, api-dev, web-dev, db-dev, qa e infra (`.claude/agents/`). Revisão pelos agentes globais. Trunk-based, branch e worktree por tarefa, PR com CI verde, squash merge, Conventional Commits citando a tarefa. Lista de escalonamento em specs/002.

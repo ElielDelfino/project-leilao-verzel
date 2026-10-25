@@ -27,10 +27,16 @@ Tipos de lançamento e efeito na projeção:
 | `credito_arremate` | liquidação, leiloeiro | +v | — |
 
 - Toda alteração acontece na transação de quem a causa (lance, liquidação, cancelamento), pela interface pública `carteira.*(tx, ...)`, que trava a linha de `wallet_balances` com `FOR UPDATE`.
-- Ordem de locks para evitar deadlock: lote primeiro, depois carteiras em ordem crescente de `user_id`.
+- Interface do lance (ADR 0031), com `tx` da transação do lote:
+  - `carteira.comprometer(tx, userId, valorCentavos, {loteId, lanceId})`: trava a carteira do usuário, recusa com `ErroDeCarteira` `SALDO_INSUFICIENTE` (campos `valor` e `disponivel`) se `disponível < valor`, grava `compromisso` (com `lote_id` e `lance_id`) e soma ao comprometido;
+  - `carteira.liberar(tx, userId, valorCentavos, {loteId, lanceId})`: grava `liberacao` e subtrai do comprometido; o `lanceId` é o do lance **superado**;
+  - as duas devolvem o saldo novo (`{totalCentavos, comprometidoCentavos, disponivelCentavos}`), que alimenta `saldo_atualizado` (specs/009). `lanceId` é gerado por `lances` antes de chamá-las (specs/007), porque o lançamento aponta para o lance, e o `bids` já está gravado quando elas rodam (a FK `lance_id → bids` é imediata, ADR 0031 D9).
+  - `ReferenciaDoLance` = `{loteId, lanceId}`. `ErroDeCarteira` (erro de domínio, não HTTP) tem `codigo` `SALDO_INSUFICIENTE` (de `comprometer`) ou `COMPROMETIDO_INSUFICIENTE` (de `liberar`, bug de quem chama) e os campos `valor`, `disponivel` e `comprometido` (os dois últimos conforme o código). Quem chama traduz: `disponivel` vira `detalhes.disponivelCentavos` na resposta da API. `ErroDeCarteira` exige rollback da `tx`: nunca capturar e seguir para o commit.
+  - Para travar mais de uma carteira na mesma transação (lance que supera outro licitante, liquidação), o jeito prescrito é `travarCarteiras(tx, userIds)`, que trava em ordem crescente de `user_id` (`ordemDeTrava`: minúsculas, sem repetidos) e devolve um `ReadonlyMap<string, SaldoEmCentavos>`: chaves são os `user_id` em minúsculas (os mesmos de `ordemDeTrava`, sem repetidos) e cada valor é `{ total, comprometido }`, em centavos inteiros (sem `disponivel`; ele é `total − comprometido`); só depois vêm `comprometer` e `liberar`.
+- Ordem de locks para evitar deadlock: lote primeiro, depois carteiras em ordem crescente de `user_id` (ADR 0031). Em um lance há duas carteiras (novo líder e líder anterior): **quem chama (`lances`) trava as duas com `travarCarteiras`** (ordem crescente de `user_id`) antes das duas chamadas; `comprometer` e `liberar` não reordenam. Caso cruzado: X lidera o lote 2 e Y lidera o lote 1, e cada um dá lance no lote do outro; sem a ordem, `comprometer(X)` e `liberar(Y)` pediriam os locks em ordens opostas.
 - A linha de `wallet_balances` de um usuário **nasce no primeiro lançamento dele** (para o licitante, o primeiro depósito; para o leiloeiro, o primeiro `credito_arremate`), na mesma transação do lançamento e sob o mesmo bloqueio, por `INSERT ... ON CONFLICT (user_id) DO UPDATE`; o cadastro (`identidade`) não escreve em tabela de `carteira` (ADR 0027). Sem linha, o saldo é zero: `GET /api/carteira` → 200 com os três valores em 0.
 - Extrato: uma `pagina` além da última não é erro: 200 com `dados: []` e `meta` com o `total` real; só `pagina` menor que 1 ou não inteira é 422.
-- Saldo insuficiente → erro de domínio `SALDO_INSUFICIENTE` com `disponivelCentavos`.
+- Saldo insuficiente → `ErroDeCarteira` `SALDO_INSUFICIENTE` com `disponivel`, traduzido pela API em `detalhes.disponivelCentavos`.
 - Idempotência do depósito, por `(user_id, idempotency_key)`: repetir a chave com o mesmo corpo responde 200 com o mesmo lançamento e o saldo atual; repetir a chave com corpo diferente responde 422 `DADOS_INVALIDOS`. Nos dois casos, nenhum lançamento novo é gravado.
 - Corpo com campo desconhecido → 422 `DADOS_INVALIDOS`.
 
@@ -41,7 +47,7 @@ Tipos de lançamento e efeito na projeção:
 - Evento Socket.IO pessoal `saldo_atualizado` (specs/009).
 
 ## Dados
-- `ledger_entries(id uuid pk, user_id fk, tipo tipo_lancamento, valor_centavos bigint check > 0, lote_id null, lance_id null, idempotency_key null, criado_em)`; unique `(user_id, idempotency_key)`; trigger bloqueia UPDATE/DELETE; o papel da API só tem SELECT e INSERT (specs/014 §Papéis do Postgres).
+- `ledger_entries(id uuid pk, user_id fk, tipo tipo_lancamento, valor_centavos bigint check > 0, lote_id null fk → lots, lance_id null fk → bids, idempotency_key null, criado_em)` (as duas FKs entram na migration da tarefa 073, ADR 0031 D9; a FK para `bids` é imediata, por isso o lance é gravado em `bids` antes do `compromisso` e do `liberacao` na transação do lance, specs/007); unique `(user_id, idempotency_key)`; trigger bloqueia UPDATE/DELETE; o papel da API só tem SELECT e INSERT (specs/014 §Papéis do Postgres).
 - `wallet_balances(user_id pk, total_centavos bigint, comprometido_centavos bigint, atualizado_em)`; `CHECK (comprometido_centavos >= 0 AND comprometido_centavos <= total_centavos)`.
 - Retenção: permanente.
 
@@ -52,10 +58,12 @@ Tipos de lançamento e efeito na projeção:
 - [ ] Usuário recém-cadastrado, sem lançamentos: `wallet_balances` não tem linha dele, `GET /api/carteira` → 200 com total, comprometido e disponível iguais a 0 e `GET /api/carteira/extrato` → 200 com `dados: []` e `meta.total` 0; depois do primeiro depósito de R$ 10,00, existe exatamente uma linha com total 1000 (teste de integração).
 - [ ] Extrato com 21 lançamentos: `pagina=2` → 1 item, `pagina=3` → 200 com `dados: []` e `meta.total` 21; `pagina=0` e `pagina=abc` → 422 (teste de integração).
 - [ ] 50 lances concorrentes do mesmo licitante em lotes diferentes nunca deixam o comprometido acima do total.
+- [ ] Lotes cruzados (X lidera o lote 2, Y lidera o lote 1, cada um dá lance no lote do outro ao mesmo tempo, repetido 20 vezes): nenhum deadlock (nenhum SQLSTATE 40P01) e ledger reconciliado.
+- [ ] `comprometer` com `disponível < valor` recusa com `SALDO_INSUFICIENTE` e não grava lançamento; `comprometer` e `liberar` gravam `lote_id` e `lance_id` no lançamento.
 - [ ] Teste de reconciliação: projeção == Σ ledger para todos os usuários após a suíte e2e.
 
 ## Fora de escopo
 Saque, pagamento real, moedas diferentes de BRL.
 
 ## Decisões relacionadas
-- decisions/0007-carteira-ledger-append-only.md, 0022-complementos-auth-e-idempotencia.md, 0026-papeis-do-postgres.md (privilégios de `ledger_entries` e `wallet_balances`), 0027-complementos-da-f1.md
+- decisions/0007-carteira-ledger-append-only.md, 0022-complementos-auth-e-idempotencia.md, 0026-papeis-do-postgres.md (privilégios de `ledger_entries` e `wallet_balances`), 0027-complementos-da-f1.md, 0031-complementos-da-f3.md (ordem dos locks e FKs de `lote_id` e `lance_id`)
