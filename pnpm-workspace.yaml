@@ -16,7 +16,10 @@ engineStrict: true
 # addons nativos opcionais com node-gyp; o ssh2 carrega os dois em try/catch e cai no crypto do
 # Node, e só é usado para Docker via SSH (o Testcontainers usa o socket local).
 # protobufjs (via @grpc/proto-loader, idem): o postinstall só avisa sobre o esquema de versão.
+# @scarf/scarf (via @redocly/cli, telemetria): o postinstall só envia analytics e não é necessário;
+# a telemetria também é desligada no wrapper scripts/contracts-lint.mjs.
 allowBuilds:
+  '@scarf/scarf': false
   cpu-features: false
   esbuild: false
   lefthook: true

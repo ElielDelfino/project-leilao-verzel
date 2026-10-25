@@ -1,0 +1,9 @@
+# Lint do contrato HTTP (specs/013 §Contratos; tarefa 021).
+extends:
+  - recommended
+
+rules:
+  # O servidor real é descrito por variável de ambiente; o exemplo de URL não é usado.
+  no-server-example.com: off
+  # Toda operação documenta ao menos uma resposta 4xx (exceções em .redocly.lint-ignore.yaml).
+  operation-4xx-response: error

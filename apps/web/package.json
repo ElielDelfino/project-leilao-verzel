@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@leilao/contracts": "workspace:*",
     "@tanstack/react-query": "5.104.5",
     "react": "19.3.1",
     "react-dom": "19.3.1",
