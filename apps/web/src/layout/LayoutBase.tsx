@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
 
-import { NOME_DO_SITE } from '../paginas/PaginaProvisoria';
 import { AlternarTema } from '../tema/AlternarTema';
 import { Rodape } from './Rodape';
+import { ID_CONTEUDO, NOME_DO_SITE } from './site';
 
-const ID_CONTEUDO = 'conteudo';
-
-/** Ao trocar de rota numa SPA, leva o foco ao conteúdo para teclado e leitor de tela. */
+/**
+ * Ao trocar de rota numa SPA, leva o foco ao conteúdo para teclado e leitor de tela
+ * (specs/012 §Comportamento): só quando o pathname muda; nunca na primeira carga nem quando só
+ * mudam a query string ou o hash.
+ */
 function useFocoAoTrocarDeRota() {
   const { pathname } = useLocation();
   const conteudo = useRef<HTMLElement>(null);

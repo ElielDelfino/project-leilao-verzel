@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { simularPreferenciaDoSistema } from './apoio/matchMedia';
@@ -31,10 +31,23 @@ describe('rotas', () => {
     simularPreferenciaDoSistema(false);
     renderizarApp('/nao-existe');
 
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Página não encontrada' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Voltar à vitrine' })).toHaveAttribute('href', '/');
+    const titulo = await screen.findByRole('heading', { level: 1, name: 'Página não encontrada' });
+    const conteudo = screen.getByRole('main');
+    expect(conteudo).toContainElement(titulo);
+    expect(within(conteudo).getByRole('link', { name: 'Voltar à vitrine' })).toHaveAttribute(
+      'href',
+      '/',
+    );
+    expect(screen.getByRole('banner')).toBeInTheDocument();
     expect(screen.getByRole('contentinfo')).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Página não encontrada · Casa de Leilões'));
+  });
+
+  it('URL desconhecida não redireciona', async () => {
+    simularPreferenciaDoSistema(false);
+    const { router } = renderizarApp('/nao-existe');
+
+    await screen.findByRole('heading', { level: 1, name: 'Página não encontrada' });
+    expect(router.state.location.pathname).toBe('/nao-existe');
   });
 });
