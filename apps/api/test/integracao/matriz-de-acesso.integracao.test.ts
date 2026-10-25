@@ -75,6 +75,11 @@ interface Operacao {
   readonly saldoDoLicitanteCentavos?: number;
   /** Resultado com CSRF válido, por papel. */
   readonly comCsrf: Readonly<Record<Papel, Esperado>>;
+  /**
+   * Operação já no contrato, mas com a rota ainda inexistente: entra na cobertura e vira `it.todo`,
+   * sem chamar a rota. A tarefa citada transforma a pendência em teste real.
+   */
+  readonly pendente?: { readonly tarefa: '106' | '109'; readonly motivo: string };
 }
 
 const igualParaTodos = (e: Esperado): Operacao['comCsrf'] => ({
@@ -242,6 +247,34 @@ const OPERACOES: readonly Operacao[] = [
     caminho: '/api/auditoria/chaves',
     comCsrf: igualParaTodos({ status: 200 }),
   },
+  // F4 (openapi 0.6.0): rotas ainda não implementadas, pendentes até as tarefas 106 e 109.
+  {
+    metodo: 'POST',
+    caminho: '/api/painel/lotes/{id}/cancelamento',
+    // Leiloeiro dono do lote: 200; lote de outro leiloeiro seria 404 (specs/006 RF-04).
+    comCsrf: {
+      anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
+      licitante: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
+      leiloeiro: { status: 200 },
+    },
+    pendente: { tarefa: '106', motivo: 'rota de cancelamento com estorno ainda não existe' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/comprovantes/{codigo}',
+    comCsrf: igualParaTodos({ status: 200 }),
+    pendente: { tarefa: '109', motivo: 'rota pública do comprovante ainda não existe' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/me/arremates',
+    comCsrf: {
+      anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
+      licitante: { status: 200 },
+      leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
+    },
+    pendente: { tarefa: '109', motivo: 'rota "Meus arremates" ainda não existe' },
+  },
 ];
 
 const chaveDe = (o: { metodo: string; caminho: string }): string =>
@@ -391,6 +424,13 @@ describe.skipIf(!INFRA_DISPONIVEL)(
     }
 
     describe.each(OPERACOES)('$metodo $caminho', (operacao) => {
+      if (operacao.pendente) {
+        it.todo(
+          `matriz completa (3 papéis, com e sem CSRF) pendente da tarefa ${operacao.pendente.tarefa}: ${operacao.pendente.motivo}`,
+        );
+        return;
+      }
+
       it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
         const navegador = await navegadorDe(papel);
         const email = await contaExistente();
