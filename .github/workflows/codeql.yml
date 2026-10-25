@@ -1,0 +1,47 @@
+# CodeQL para JavaScript e TypeScript (task 006; specs/014 §CI/CD, ADR 0017).
+# Code scanning em repositório privado exige a licença paga GitHub Code Security
+# (docs.github.com, "About code scanning"). O repositório fica privado até a F5: enquanto isso o
+# job é pulado (sem gastar minutos) e passa a rodar sozinho quando o repositório ficar público.
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Nada por padrão; o job pede só o que usa.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analise:
+    name: CodeQL (javascript-typescript)
+    # `visibility` vem do payload do evento; ausente, a comparação dá falso e o job é pulado.
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Envio dos resultados para o code scanning.
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # build-mode none: JavaScript e TypeScript são analisados sem build.
+      - name: Iniciar o CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Analisar
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:javascript-typescript
