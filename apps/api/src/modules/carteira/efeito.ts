@@ -45,6 +45,21 @@ export function aplicarEfeito(saldo: SaldoEmCentavos, efeito: Efeito): SaldoEmCe
   };
 }
 
+/** Saldo como sai na API e no evento `saldo_atualizado` (openapi Saldo, asyncapi). */
+export interface SaldoComDisponivel {
+  readonly totalCentavos: number;
+  readonly comprometidoCentavos: number;
+  readonly disponivelCentavos: number;
+}
+
+export function comDisponivel(saldo: SaldoEmCentavos): SaldoComDisponivel {
+  return {
+    totalCentavos: saldo.total,
+    comprometidoCentavos: saldo.comprometido,
+    disponivelCentavos: saldo.total - saldo.comprometido,
+  };
+}
+
 const INTEIRO_DECIMAL = /^(0|[1-9]\d*)$/;
 
 /**

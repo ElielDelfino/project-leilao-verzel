@@ -105,6 +105,9 @@ export async function inserirLancamento(
     tipo: TipoDeLancamento;
     valorCentavos: number;
     idempotencyKey?: string;
+    /** Lote e lance que causaram o lançamento (compromisso, liberação, liquidação, estorno). */
+    loteId?: string;
+    lanceId?: string;
   },
 ): Promise<LinhaDeLancamento> {
   const [linha] = await tx.insert(ledgerEntries).values(dados).returning(COLUNAS_DO_LANCAMENTO);
