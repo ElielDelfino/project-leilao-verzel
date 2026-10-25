@@ -1,26 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { Banco } from '../../src/db/banco.js';
+import type { BancoVerificavel } from '../../src/db/banco.js';
 import { verificacaoDoPostgres, verificacaoDoRedis } from '../../src/health/verificacoes.js';
 import type { ClienteRedis } from '../../src/redis/cliente.js';
 
-function bancoFalso(consultar: Banco['consultar']): Banco {
-  return { consultar, transaction: vi.fn(), encerrar: vi.fn(async () => {}) };
+function bancoFalso(verificar: BancoVerificavel['verificar']): BancoVerificavel {
+  return {
+    verificar,
+    consultar: vi.fn(),
+    transaction: vi.fn(),
+    encerrar: vi.fn(async () => {}),
+  };
 }
 
-describe('verificacaoDoPostgres (SELECT 1 pelo pool, specs/014 §Observabilidade)', () => {
-  it('chama-se "postgres" e resolve quando a consulta responde', async () => {
-    const execute = vi.fn(async () => ({ rows: [{ '?column?': 1 }] }));
-    const consultar = vi.fn(async (fn: (db: never) => Promise<unknown>) =>
-      fn({ execute } as never),
-    ) as unknown as Banco['consultar'];
-    const verificacao = verificacaoDoPostgres(bancoFalso(consultar));
+describe('verificacaoDoPostgres (banco.verificar, specs/014 §Observabilidade)', () => {
+  it('chama-se "postgres" e repassa o sinal a banco.verificar', async () => {
+    const verificar = vi.fn(async () => {});
+    const sinal = new AbortController().signal;
+    const banco = bancoFalso(verificar);
+    const verificacao = verificacaoDoPostgres(banco);
 
-    await expect(verificacao.verificar(new AbortController().signal)).resolves.toBeUndefined();
+    await expect(verificacao.verificar(sinal)).resolves.toBeUndefined();
 
     expect(verificacao.nome).toBe('postgres');
-    expect(consultar).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect(verificar).toHaveBeenCalledWith(sinal);
+    expect(banco.consultar).not.toHaveBeenCalled();
   });
 
   it('rejeita quando o banco rejeita', async () => {
@@ -28,16 +32,6 @@ describe('verificacaoDoPostgres (SELECT 1 pelo pool, specs/014 §Observabilidade
     const verificacao = verificacaoDoPostgres(bancoFalso(() => Promise.reject(falha)));
 
     await expect(verificacao.verificar(new AbortController().signal)).rejects.toBe(falha);
-  });
-
-  it('com o sinal já abortado, não abre consulta', async () => {
-    const consultar = vi.fn() as unknown as Banco['consultar'];
-    const verificacao = verificacaoDoPostgres(bancoFalso(consultar));
-
-    await expect(verificacao.verificar(AbortSignal.abort(new Error('tempo')))).rejects.toThrow(
-      'tempo',
-    );
-    expect(consultar).not.toHaveBeenCalled();
   });
 });
 

@@ -15,6 +15,8 @@ export interface LogDaRequisicao {
 export interface Traducao {
   readonly status: number;
   readonly corpo: CorpoDoErro;
+  /** Cabeçalhos extras da resposta (hoje, só o Retry-After de um ErroApi). */
+  readonly cabecalhos?: Readonly<Record<string, string>>;
 }
 
 const STATUS_PRIMEIRO_4XX = 400;
@@ -103,6 +105,13 @@ function traduzirErroApi(excecao: ErroApi, log: LogDaRequisicao): Traducao {
   const corpo: CorpoDoErro = excecao.detalhes
     ? { codigo: excecao.codigo, mensagem: excecao.message, detalhes: excecao.detalhes }
     : { codigo: excecao.codigo, mensagem: excecao.message };
+  if (excecao.retryAfterSegundos !== undefined) {
+    return {
+      status: excecao.status,
+      corpo,
+      cabecalhos: { 'Retry-After': String(excecao.retryAfterSegundos) },
+    };
+  }
   return { status: excecao.status, corpo };
 }
 

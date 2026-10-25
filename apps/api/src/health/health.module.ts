@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 
-import { BANCO, BancoModule } from '../config/banco.module.js';
-import type { Banco } from '../db/banco.js';
+import { BANCO } from '../config/banco.module.js';
+import type { BancoVerificavel } from '../db/banco.js';
 import type { ClienteRedis } from '../redis/cliente.js';
-import { CLIENTE_REDIS, RedisModule } from '../redis/redis.module.js';
+import { CLIENTE_REDIS } from '../redis/redis.module.js';
 import { HealthController } from './health.controller.js';
 import {
   ServicoDeProntidao,
@@ -13,16 +13,14 @@ import {
 import { verificacaoDoPostgres, verificacaoDoRedis } from './verificacoes.js';
 
 function verificacoesRegistradas(
-  banco: Banco,
+  banco: BancoVerificavel,
   redis: ClienteRedis,
 ): readonly VerificacaoDeProntidao[] {
   return [verificacaoDoPostgres(banco), verificacaoDoRedis(redis)];
 }
 
-// BancoModule e RedisModule são globais: importá-los aqui os registra para toda a API. Quando uma
-// tarefa listar app.module.ts, os imports passam para o AppModule.
+// BANCO e CLIENTE_REDIS vêm dos módulos globais importados pelo AppModule.
 @Module({
-  imports: [BancoModule, RedisModule],
   controllers: [HealthController],
   providers: [
     ServicoDeProntidao,

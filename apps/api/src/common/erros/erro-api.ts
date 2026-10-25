@@ -13,6 +13,11 @@ export interface DadosDoErroApi {
   readonly mensagem: string;
   /** Vai ao cliente como está. Nunca inclua e-mail, nome, token ou segredo. */
   readonly detalhes?: DetalhesDoErro;
+  /**
+   * Segundos até a próxima tentativa (inteiro ≥ 1). O filtro global o envia no header
+   * `Retry-After` (specs/001 §Erros: o 429 sai sempre com o header).
+   */
+  readonly retryAfterSegundos?: number;
 }
 
 const STATUS_MINIMO_DE_ERRO = 400;
@@ -33,6 +38,7 @@ export class ErroApi extends Error {
   readonly codigo: CodigoDeErro;
   readonly status: number;
   readonly detalhes: DetalhesDoErro | undefined;
+  readonly retryAfterSegundos: number | undefined;
 
   constructor(dados: DadosDoErroApi) {
     super(dados.mensagem);
@@ -51,6 +57,14 @@ export class ErroApi extends Error {
     if (chaveInvalida !== undefined) {
       throw new TypeError(`ErroApi.detalhes.${chaveInvalida} precisa ser um valor primitivo`);
     }
+    const { retryAfterSegundos } = dados;
+    if (
+      retryAfterSegundos !== undefined &&
+      (!Number.isInteger(retryAfterSegundos) || retryAfterSegundos < 1)
+    ) {
+      throw new RangeError(`Retry-After inválido: ${retryAfterSegundos}`);
+    }
+    this.retryAfterSegundos = retryAfterSegundos;
     this.codigo = dados.codigo;
     this.status = dados.status;
     // Cópia congelada: quem lançou o erro não consegue mudar o que vai ao cliente depois.

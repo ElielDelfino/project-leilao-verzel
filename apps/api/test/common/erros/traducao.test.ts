@@ -199,3 +199,24 @@ describe('traduzirExcecao', () => {
     });
   });
 });
+
+describe('traduzirExcecao: cabeçalhos', () => {
+  it('ErroApi com retryAfterSegundos devolve o cabeçalho Retry-After', () => {
+    const { log } = logEmMemoria();
+    const erro = new ErroApi({
+      codigo: 'MUITAS_TENTATIVAS',
+      status: 429,
+      mensagem: 'Muitas tentativas.',
+      retryAfterSegundos: 17,
+    });
+
+    expect(traduzirExcecao(erro, log).cabecalhos).toEqual({ 'Retry-After': '17' });
+  });
+
+  it('ErroApi sem retryAfterSegundos não devolve cabeçalhos', () => {
+    const { log } = logEmMemoria();
+    const erro = new ErroApi({ codigo: 'LOTE_ENCERRADO', status: 409, mensagem: 'x' });
+
+    expect(traduzirExcecao(erro, log).cabecalhos).toBeUndefined();
+  });
+});

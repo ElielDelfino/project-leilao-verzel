@@ -11,23 +11,23 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 
-import { type Banco, criarBanco } from '../db/banco.js';
+import { type BancoVerificavel, criarBanco } from '../db/banco.js';
 import { descreverFalhaSemDetalhes } from '../logger/falha-sem-detalhes.js';
 import { ENV, type Env } from './env.js';
 
-/** Token de injeção do Banco (consultar, transaction). */
+/** Token de injeção do BancoVerificavel (consultar, transaction, verificar). */
 export const BANCO = Symbol('BANCO');
 
 @Injectable()
 class EncerramentoDoBanco implements OnApplicationShutdown {
-  constructor(@Inject(BANCO) private readonly banco: Banco) {}
+  constructor(@Inject(BANCO) private readonly banco: BancoVerificavel) {}
 
   async onApplicationShutdown(): Promise<void> {
     await this.banco.encerrar();
   }
 }
 
-function criarBancoDoEnv(env: Env): Banco {
+function criarBancoDoEnv(env: Env): BancoVerificavel {
   const logger = new Logger('Banco');
   return criarBanco({
     conexao: env.postgres,

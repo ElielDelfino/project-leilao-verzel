@@ -91,3 +91,38 @@ describe('ErroApi', () => {
     );
   });
 });
+
+// specs/003 §Rate limit e specs/001 §Erros: o 429 sai sempre com Retry-After (segundos, ≥ 1).
+describe('ErroApi: Retry-After', () => {
+  it('guarda retryAfterSegundos quando informado', () => {
+    const erro = new ErroApi({
+      codigo: 'MUITAS_TENTATIVAS',
+      status: 429,
+      mensagem: 'x',
+      retryAfterSegundos: 42,
+    });
+
+    expect(erro.retryAfterSegundos).toBe(42);
+  });
+
+  it('fica indefinido quando não informado', () => {
+    const erro = new ErroApi({ codigo: 'MUITAS_TENTATIVAS', status: 429, mensagem: 'x' });
+
+    expect(erro.retryAfterSegundos).toBeUndefined();
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'recusa retryAfterSegundos %d (precisa ser inteiro ≥ 1)',
+    (segundos) => {
+      expect(
+        () =>
+          new ErroApi({
+            codigo: 'MUITAS_TENTATIVAS',
+            status: 429,
+            mensagem: 'x',
+            retryAfterSegundos: segundos,
+          }),
+      ).toThrow(RangeError);
+    },
+  );
+});
