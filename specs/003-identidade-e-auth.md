@@ -19,7 +19,7 @@ Dois papéis com permissões disjuntas. Sem recuperação de senha (fora de esco
 - Access token JWT HS256 (15 min, biblioteca `jose` 6.2.13, dependência de produção; ADR 0027) no cookie `access_token`, assinado com os 32 bytes decodificados de `JWT_SECRET` (base64url canônico sem padding, 43 caracteres; formato e origem em specs/014 §Segredos, ADR 0023). Refresh token opaco (256 bits) no cookie `refresh_token`; no banco só fica o SHA-256. Cada uso gera um novo token na mesma família; reuso de um token já substituído revoga a família inteira.
 - CSRF: cookie `csrf_token` (não httpOnly) + header `X-CSRF-Token` obrigatório em POST/PUT/PATCH/DELETE, inclusive cadastro e login; comparação em tempo constante. `GET /api/auth/csrf` (sem autenticação) emite um `csrf_token` novo; a SPA a chama antes do primeiro POST só quando o cookie `csrf_token` não existir.
 - Logout: lê o `refresh_token`, revoga a família dele (se houver) e expira os três cookies com os mesmos `Path` da emissão. Responde 204 mesmo sem sessão.
-- Guards: `@Papel('licitante')`, `@Papel('leiloeiro')`, `@Publico()`. Rota restrita a outro papel → 403 `PAPEL_NAO_PERMITIDO` (ex.: leiloeiro em `POST /api/carteira/depositos`); o lance tem código próprio, `LEILOEIRO_NAO_PODE_LANCAR` (specs/007). Recurso de outro usuário → 404 (não 403), para não vazar existência.
+- Guards: `@Papel('licitante')`, `@Papel('leiloeiro')`, `@Publico()`, `@SessaoOpcional()` (rota pública que, havendo sessão válida, identifica o usuário; ver abaixo). Rota restrita a outro papel → 403 `PAPEL_NAO_PERMITIDO` (ex.: leiloeiro em `POST /api/carteira/depositos`); o lance tem código próprio, `LEILOEIRO_NAO_PODE_LANCAR` (specs/007). Recurso de outro usuário → 404 (não 403), para não vazar existência.
 - Corpo com campo desconhecido → 422 `DADOS_INVALIDOS`.
 - Socket.IO: o handshake lê o cookie `access_token`; conexão sem token é aceita como anônima (só leitura).
 - Job diário remove refresh tokens expirados há mais de 1 dia.
@@ -34,6 +34,8 @@ Toda rota aplica as verificações nesta ordem e para na primeira que falhar (AD
 6. regra de negócio (`EMAIL_EM_USO`, `CREDENCIAIS_INVALIDAS`, `SALDO_INSUFICIENTE` etc.).
 
 Rota `@Publico()` (cadastro, login, csrf, refresh, logout) pula as etapas 2 e 3. Consequência: requisição com corpo inválido não conta no rate limit (etapa 4 antes da 5).
+
+Rota `@SessaoOpcional()` (hoje `GET /api/lotes/{id}`, specs/006) também pula a etapa 3 e faz da etapa 2 uma leitura sem recusa: com cookie `access_token` válido, o usuário fica disponível à rota; com cookie ausente, malformado, de assinatura inválida ou expirado, a requisição segue como anônima. Nunca responde 401 (`NAO_AUTENTICADO`), nunca dispara o refresh no servidor e nunca troca nem apaga cookies. `@Publico()` continua sem ler o cookie.
 
 ### Rate limit
 Um contador por chave no Redis, implementado pela própria API (sem `@fastify/rate-limit`, que fica para o limite global da tarefa 020; ADR 0027):
@@ -88,6 +90,7 @@ O 409 `EMAIL_EM_USO` do cadastro revela se um e-mail já tem conta. O RNF-04 lim
 - [ ] RNF-01 (teste de unidade com espião): toda chamada a `crypto.argon2` usa o algoritmo `argon2id`, `memory` 19456, `passes` 2 e `parallelism` 1, tanto no cadastro quanto na verificação do login e do hash dummy; a API não depende do pacote `argon2`.
 - [ ] Formato do hash (teste de integração): depois de um cadastro, o `senha_hash` gravado casa com `^\$argon2id\$v=19\$m=19456,t=2,p=1\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$` (sal e hash em base64 sem padding), e o login com a senha certa passa e com a errada falha usando só o que está na string.
 - [ ] Corpo com campo desconhecido → 422 `DADOS_INVALIDOS`.
+- [ ] `@SessaoOpcional()` (teste de integração em `GET /api/lotes/{id}`): sem cookie, com cookie malformado, com JWT de assinatura errada e com JWT expirado → 200 como anônimo (`suaPosicao` `null`), sem `Set-Cookie`; com JWT válido → o usuário é identificado.
 
 ## Fora de escopo
 Recuperação de senha, verificação de e-mail, OAuth, 2FA, exclusão de conta.

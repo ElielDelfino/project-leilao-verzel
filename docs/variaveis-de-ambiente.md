@@ -23,6 +23,10 @@ A API valida estas variáveis com Zod no boot (`apps/api/src/config/env.ts`). Fa
 |---|---|---|---|---|
 | `API_PORT` | inteiro de 1 a 65535 | nenhum (obrigatória) | `13000` (`.env`) | tarefa 004 |
 | `LOG_LEVEL` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` ou `silent` | `info` | ausente (usa o default) | tarefa 004 |
+| `SCRYFALL_USER_AGENT` | texto não vazio, `Nome/versão` (header `User-Agent` das chamadas à Scryfall, specs/005) | nenhum (obrigatória) | `LeilaoVerzel/0.1` (`.env`) | F2 (módulo `catalogo`) |
+| `SCRYFALL_BASE_URL` | URL absoluta `http(s)://host[:porta]`, sem barra final | `https://api.scryfall.com` | ausente (usa o default) | F2 (módulo `catalogo`) |
+
+`SCRYFALL_BASE_URL` existe só para teste e e2e: aponta a API para uma Scryfall falsa local (specs/005, critérios de aceite). Em dev comum e em produção, não defina. Quando definida, a origem dela (esquema, host e porta) também entra na lista de origens permitidas para baixar a imagem do snapshot, além de `https` e `*.scryfall.io` (specs/005 §Snapshot).
 
 ### Conexão com Postgres e Redis (specs/014 §Conexão da API com Postgres e Redis)
 
