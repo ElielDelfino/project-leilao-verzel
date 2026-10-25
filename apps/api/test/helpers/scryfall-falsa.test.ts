@@ -9,7 +9,21 @@ import {
   ID_CARTA_SIMPLES,
 } from './fixtures-scryfall/cartas.js';
 import { LIMITE_IMAGEM_BYTES } from './fixtures-scryfall/imagens.js';
-import { iniciarScryfallFalsa, type ScryfallFalsa } from './scryfall-falsa.js';
+import {
+  iniciarScryfallFalsa,
+  portaBloqueadaPeloFetch,
+  type ScryfallFalsa,
+} from './scryfall-falsa.js';
+
+describe('portaBloqueadaPeloFetch', () => {
+  it.each([1, 6000, 6665, 6669, 6697, 10080])('bloqueia a porta %i', (porta) => {
+    expect(portaBloqueadaPeloFetch(porta)).toBe(true);
+  });
+
+  it.each([80, 3000, 6670, 13000, 15173, 40000])('libera a porta %i', (porta) => {
+    expect(portaBloqueadaPeloFetch(porta)).toBe(false);
+  });
+});
 
 let falsa: ScryfallFalsa | undefined;
 
