@@ -234,6 +234,17 @@ export function operacoesDoContrato(tag?: string): { metodo: string; caminho: st
   return operacoes;
 }
 
+const METODOS_SEM_CSRF = new Set(['get', 'head', 'options']);
+
+/**
+ * Se a operação exige CSRF (specs/003: todo método fora de GET/HEAD/OPTIONS). Lança se o contrato
+ * não declara esse método nesse caminho, em vez de a matriz assumir um valor à mão (LOW da 043).
+ */
+export function exigeCsrf(metodo: string, caminho: string): boolean {
+  acharOperacao(metodo, caminho);
+  return !METODOS_SEM_CSRF.has(metodo.toLowerCase());
+}
+
 /** Todo schema `type: object` do contrato sem `additionalProperties` explícito (JSON pointer). */
 export function objetosSemAdditionalProperties(): string[] {
   const achados: string[] = [];
