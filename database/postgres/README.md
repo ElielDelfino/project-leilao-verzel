@@ -104,8 +104,7 @@ copiar essa pasta mantendo a mesma posição relativa.
 - FKs para `users(id)` sem `CASCADE`. As de `ledger_entries` e `wallet_balances` estão só no SQL
   (escritas à mão): `users` é de identidade, e o `schema.ts` de carteira não importa outro módulo
   (specs/001 §Módulos), então o snapshot do drizzle-kit não as conhece.
-- **Sem FK por enquanto:** `ledger_entries.lote_id` e `ledger_entries.lance_id`. Entram numa
-  migration nova quando `lots` (F2) e `bids` (F3) existirem, com índice.
+- `ledger_entries.lote_id` e `ledger_entries.lance_id` ganham FK na 0003 (D9 da ADR 0031).
 - Papel `leilao_api`, privilégios e `REVOKE CREATE ON SCHEMA public FROM PUBLIC` (§Papéis).
 
 ## Migration 0002 (`0002_catalogo_lotes.sql`)
@@ -132,7 +131,57 @@ Só cria tabelas (tarefa 051). PKs `uuid` com `uuidv7()`; dinheiro em `bigint` (
   `snapshot_id` → `card_snapshots(id)`. Declarar `.references` no `schema.ts` faria `lotes`
   importar `identidade` e `catalogo` (specs/001 §Módulos). `lider_id` e `vencedor_id` ficam sem
   índice: `users` nunca tem DELETE, então a FK não varre `lots`.
-- **Ainda sem FK:** `ledger_entries.lote_id → lots(id)` (migration futura, com índice).
+
+## Migration 0003 (`0003_lances_integridade.sql`)
+
+Tarefa 073 (specs/007 §Dados, specs/008 §Dados, ADR 0031). Cria três tabelas append-only do
+módulo `lances` e acrescenta duas FKs a `ledger_entries`; não altera nem remove coluna.
+
+- `bids` (lance aceito, um elo da hash chain): `seq >= 1`; `valor_centavos` de 100 a 2^53 − 1;
+  `hash_anterior` e `hash` com 32 bytes; `assinatura` com 64; `key_id` com 16 hex minúsculos;
+  `criado_em` `timestamptz(3)` **sem default** (é o instante assinado, lido uma vez na transação);
+  `idempotency_key` obrigatória; `pseudonimo` casa com `^Licitante #[0-9a-f]{6}$` (specs/008
+  §Técnica). Uniques `(lote_id, seq)` e `(licitante_id, idempotency_key)`
+  (a chave é por licitante, em qualquer lote); índice `(licitante_id, lote_id)` para
+  `GET /api/me/lances`. O histórico e a auditoria (`where lote_id = ? order by seq desc`) usam o
+  índice do unique `(lote_id, seq)` por varredura reversa: um índice `(lote_id, seq DESC)` seria
+  redundante e só encareceria o INSERT.
+- `lot_seals` (selo do lote, PK `lote_id`): `status` `text` em (`encerrado`, `cancelado`);
+  `total_lances >= 0`; `hash_final` com 32 bytes; `assinatura` com 64; `key_id` com 16 hex;
+  `selado_em` `timestamptz(3)`; `valor_arremate_centavos` nulo ou de 100 a 2^53 − 1.
+  `vencedor_pseudonimo` e `valor_arremate_centavos` são nulos juntos e só não são nulos em lote
+  `encerrado` com `total_lances > 0` (specs/008 §Forma canônica). `vencedor_pseudonimo`, quando
+  não nulo, tem o mesmo formato de `bids.pseudonimo`.
+- `signing_keys` (chaves públicas que já assinaram, PK `key_id`): `chave_publica` com 32 bytes;
+  `key_id` igual aos 16 primeiros hex de `sha256(chave_publica)` (CHECK); `ativa_desde`
+  `timestamptz(3)` com default `clock_timestamp()`, que o `INSERT ... ON CONFLICT (key_id) DO
+  NOTHING` do boot não altera.
+- Triggers `<tabela>_append_only` (linha, UPDATE ou DELETE) e `<tabela>_sem_truncate` com
+  `impedir_alteracao()` nas três: até o dono recebe 23001. Um `TRUNCATE` de `bids` ou
+  `signing_keys` sozinho falha antes, na checagem de FK (0A000).
+- FKs `bids.key_id` e `lot_seals.key_id` → `signing_keys(key_id)` declaradas no `schema.ts` (mesmo
+  módulo). Só no SQL, sem `CASCADE`: `bids.lote_id` e `lot_seals.lote_id` → `lots(id)`,
+  `bids.licitante_id` → `users(id)` e, D9, `ledger_entries.lote_id` → `lots(id)` e
+  `ledger_entries.lance_id` → `bids(id)`, imediata: a transação do lance grava `bids` antes do
+  ledger. Sem índice nas do ledger e nas de `key_id`: o pai nunca é apagado pela API (`bids` e
+  `signing_keys` são append-only, `lots` não tem DELETE), e nenhuma consulta filtra por elas.
+
+**Limite: o banco não impõe a cadeia.** Os CHECKs validam cada linha isolada; nenhum confere
+uma linha contra outra. O banco aceita, portanto: `seq` com buraco; `hash_anterior` diferente do
+`hash` do lance anterior; lance 1 que não parte da gênese; selo cujo `total_lances` ou
+`hash_final` não bate com os lances do lote; INSERT em `bids` depois do `lot_seals` do lote.
+
+- A defesa é a verificação do histórico (specs/008), feita por qualquer pessoa, mais a âncora
+  externa do comprovante. A ordem na gravação vem do `anexar`, chamado sob o `FOR UPDATE` do
+  lote na transação do lance (tarefa 079).
+- Um trigger `BEFORE INSERT` em `bids` que confira `seq`, `hash_anterior` e a ausência de selo
+  fica como hardening da F5.
+- Uma API comprometida, que tem INSERT em `signing_keys`, pode registrar uma chave própria e
+  anexar elos assinados com ela. O banco não distingue. As assinaturas conferem, porque a
+  verificação lê as chaves de `signing_keys`; o rastro é uma chave a mais em
+  `GET /api/auditoria/chaves` e a troca de `key_id` no meio da cadeia, visíveis ao auditar.
+  Contra reassinatura de cadeia já selada, a âncora é o comprovante do vencedor (specs/008
+  §Limitações conhecidas).
 
 ## Papéis (D2 e D3 da tarefa 036)
 
@@ -163,7 +212,7 @@ Só cria tabelas (tarefa 051). PKs `uuid` com `uuidv7()`; dinheiro em `bigint` (
   | `ledger_entries` | SELECT, INSERT |
   | `card_snapshots` | SELECT, INSERT |
   | `lots` | SELECT, INSERT; UPDATE só em `fim_em`, `status`, `lance_atual_centavos`, `lider_id`, `total_lances`, `vencedor_id`, `valor_arremate_centavos`, `encerrado_em`, `cancelado_em` |
-  | `bids`, `lot_seals` (F3) | SELECT, INSERT |
+  | `bids`, `lot_seals`, `signing_keys` | SELECT, INSERT (append-only) |
 
 - A matriz é testada (`apps/api/test/db/papeis.test.ts`): toda tabela nova em `public` precisa
   entrar em `MATRIZ` (com `[]` se a API não a acessa) e ganhar os `GRANT`s na própria migration.
@@ -199,7 +248,8 @@ nele e o apaga no fim.
   e não vazio. O valor (`local` ou `testcontainers`, specs/013) não escolhe banco nem muda a
   conexão, que vem sempre de `POSTGRES_*` e `DB_PASSWORD` (ou `DB_PASSWORD_FILE`).
 - `papeis.test.ts` roda no banco de teste do worktree (já com as migrations), cada caso numa
-  transação desfeita no fim. `catalogo-lotes.test.ts` (migration 0002) segue o mesmo modelo.
+  transação desfeita no fim. `catalogo-lotes.test.ts` (migration 0002) e
+  `lances-integridade.test.ts` (migration 0003) seguem o mesmo modelo.
 - `restricoes-snapshot.test.ts` compara o banco migrado com o snapshot da última migration
   (`meta/<idx>_snapshot.json`): as restrições `p`, `u`, `c` e `f` de `public` precisam ser as do
   snapshot mais as FKs escritas à mão (listadas em `FKS_SO_NO_SQL`), e os índices que não

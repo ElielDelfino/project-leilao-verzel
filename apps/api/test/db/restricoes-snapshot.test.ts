@@ -40,6 +40,16 @@ const FKS_SO_NO_SQL: Readonly<Record<string, FkManual>> = {
   },
   lots_lider_id_users_id_fk: { tabela: 'lots', coluna: 'lider_id', alvo: 'users' },
   lots_vencedor_id_users_id_fk: { tabela: 'lots', coluna: 'vencedor_id', alvo: 'users' },
+  // Migration 0003 (tarefa 073), inclusive as do ledger (D9 da ADR 0031).
+  bids_lote_id_lots_id_fk: { tabela: 'bids', coluna: 'lote_id', alvo: 'lots' },
+  bids_licitante_id_users_id_fk: { tabela: 'bids', coluna: 'licitante_id', alvo: 'users' },
+  lot_seals_lote_id_lots_id_fk: { tabela: 'lot_seals', coluna: 'lote_id', alvo: 'lots' },
+  ledger_entries_lote_id_lots_id_fk: { tabela: 'ledger_entries', coluna: 'lote_id', alvo: 'lots' },
+  ledger_entries_lance_id_bids_id_fk: {
+    tabela: 'ledger_entries',
+    coluna: 'lance_id',
+    alvo: 'bids',
+  },
 };
 
 interface TabelaDoSnapshot {

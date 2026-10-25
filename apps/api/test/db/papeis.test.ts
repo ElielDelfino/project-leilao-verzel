@@ -16,10 +16,10 @@ const AMBIENTE = ambienteDeTeste(process.env);
 const PAPEL_DA_API = 'leilao_api';
 
 /**
- * Tabelas append-only (specs/008). A F3 acrescenta 'bids' e 'lot_seals'; cada uma precisa ligar
- * os dois triggers com public.impedir_alteracao().
+ * Tabelas append-only (specs/008, ADR 0031); cada uma precisa ligar os dois triggers com
+ * public.impedir_alteracao(). bids, lot_seals e signing_keys vêm da 0003 (tarefa 073).
  */
-const TABELAS_APPEND_ONLY = ['ledger_entries'] as const;
+const TABELAS_APPEND_ONLY = ['ledger_entries', 'bids', 'lot_seals', 'signing_keys'] as const;
 
 /**
  * Matriz D3 da tarefa 036: privilégios efetivos de leilao_api em cada tabela de public. Toda
@@ -34,6 +34,10 @@ const MATRIZ: Readonly<Record<string, readonly string[]>> = {
   // com UPDATE só por coluna (COLUNAS_COM_UPDATE).
   card_snapshots: ['INSERT', 'SELECT'],
   lots: ['INSERT', 'SELECT'],
+  // Tarefa 073 (ADR 0026, ADR 0031): append-only, só SELECT e INSERT.
+  bids: ['INSERT', 'SELECT'],
+  lot_seals: ['INSERT', 'SELECT'],
+  signing_keys: ['INSERT', 'SELECT'],
 };
 
 /**

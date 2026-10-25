@@ -22,6 +22,13 @@
       "when": 1792938118271,
       "tag": "0002_catalogo_lotes",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792951313317,
+      "tag": "0003_lances_integridade",
+      "breakpoints": true
     }
   ]
 }
