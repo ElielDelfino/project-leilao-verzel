@@ -10,5 +10,15 @@ export {
   type StatusGravadoDoLote,
   travarLote,
 } from './interface-para-lances.js';
+export {
+  cancelarLote,
+  candidatosAoEncerramento,
+  type CodigoDoErroDeLote,
+  encerrarLote,
+  ErroDeLote,
+  iniciarLotesPendentes,
+  type ResultadoDoEncerramento,
+  travarLoteVencido,
+} from './interface-para-liquidacao.js';
 export { LotesModule } from './lotes.module.js';
 export type { StatusDoLote } from './repositorio.js';
