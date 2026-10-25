@@ -26,7 +26,9 @@ Em produção, o Caddy termina o TLS, serve a SPA estática e faz proxy de `/api
 | Infra | `infra/` | Caddy, compose de produção, scripts de deploy e backup |
 
 ## Módulos da API (monolito modular — ADR 0003)
-Cada módulo expõe uma interface pública (`index.ts`) e nada mais; o `eslint-plugin-boundaries` impede imports internos entre módulos. Nenhum módulo lê as tabelas de outro. Operações atômicas entre módulos recebem a mesma transação (`tx`) pelas interfaces.
+Cada módulo fica em `apps/api/src/modules/<nome>/`, com `<nome>` igual ao da tabela abaixo, e expõe uma interface pública em `apps/api/src/modules/<nome>/index.ts` e nada mais. Nenhum módulo lê as tabelas de outro. Operações atômicas entre módulos recebem a mesma transação (`tx`) pelas interfaces.
+
+Regra de import (`eslint-plugin-boundaries`, erro de lint): um módulo só importa outro **pelo `index.ts`** e **só se a aresta estiver na ordem de dependência abaixo**, inclusive para `import type`; pasta de `modules/` fora da tabela não importa nem é importada. Imports dentro do mesmo módulo, de código fora de `modules/` (como `apps/api/src/common/`) e de pacotes externos não passam pela regra.
 
 | Módulo | Dono das tabelas | Spec |
 |---|---|---|
@@ -38,7 +40,22 @@ Cada módulo expõe uma interface pública (`index.ts`) e nada mais; o `eslint-p
 | `tempo-real` | — (rooms Socket.IO) | 009 |
 | `liquidacao` | `receipts` | 010, 011 |
 
-Ordem de dependência permitida: `lances → lotes, carteira, catalogo, identidade`; `liquidacao → lances, lotes, carteira`; `tempo-real` só consome eventos de domínio (EventEmitter interno, publicados após o COMMIT). Ciclos são proibidos.
+Ordem de dependência permitida (`A → B`: A importa a interface pública de B; ADR 0025):
+
+| Módulo | Importa |
+|---|---|
+| `identidade`, `carteira`, `catalogo` | — |
+| `lotes` | `catalogo` |
+| `lances` | `lotes`, `carteira`, `catalogo`, `identidade` |
+| `liquidacao` | `lances`, `lotes`, `carteira`, `catalogo` |
+| `tempo-real` | `lotes`, `lances`, `identidade` |
+
+Ciclos são proibidos (o grafo acima é acíclico: `lotes` não importa `lances` nem `carteira`). Além das arestas, `tempo-real` consome os eventos de domínio (EventEmitter interno, publicados após o COMMIT).
+
+Consequências da tabela:
+- **Cancelamento de lote** é de `liquidacao`, não de `lotes`: uma transação com lote `FOR UPDATE` → `carteira.estornar` → `lances.selar` (status `cancelado`) → status `cancelado` (specs/010 §Cancelamento). `lotes` expõe a `liquidacao` as operações de travar o lote e de mudar o status.
+- **Guards** `@Papel` e `@Publico` ficam em `apps/api/src/common/auth/` (só metadados); o guard global é registrado por `identidade` via `APP_GUARD`, sem aresta entre módulos.
+- **Posição do usuário** (`ganhando`, `superado`, `venceu`, `perdeu`, `sem_lance`): `lotes` usa só as colunas de `lots`; `lances` calcula as cinco (specs/007 §Posição).
 
 ## Integrações externas
 | Integração | Uso | Se falhar |
@@ -104,4 +121,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023
+- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023, 0025

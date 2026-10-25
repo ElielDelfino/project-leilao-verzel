@@ -1,7 +1,7 @@
 # 009 — Tempo real
 
 Status: aprovada
-Depende de: 001, 007
+Depende de: 001, 006, 007
 
 ## Requisitos
 - RF-01 A sala atualiza lance atual, histórico, posição, contagem regressiva e "ganhando/superado" sem recarregar.
@@ -14,7 +14,7 @@ Depende de: 001, 007
 - Handshake autenticado pelo cookie `access_token` (specs/003); sem cookie = anônimo (só leitura).
 - Rooms: `lote:{id}` (público) e `usuario:{id}` (privado, entrada automática quando autenticado).
 - Cliente → servidor: `entrar_lote {loteId}` com ack `{estado}`, `sair_lote {loteId}`.
-- `estado` = `{lote, ultimosLances (50), agoraServidor, seuPseudonimo?, suaPosicao?}`. O cliente usa `agoraServidor` para corrigir o relógio da contagem regressiva e compara `seuPseudonimo` com o líder para mostrar "ganhando/superado".
+- `estado` = `{lote, ultimosLances (50), agoraServidor, seuPseudonimo?, suaPosicao?}`. `tempo-real` monta o estado com `lotes` (lote), `lances` (últimos lances, pseudônimo e `suaPosicao`) e `identidade` (autenticação do handshake). `suaPosicao` é uma de `ganhando` | `superado` | `venceu` | `perdeu` | `sem_lance` (specs/007 §Posição do usuário no lote) e só vem para autenticado. O cliente usa `agoraServidor` para corrigir o relógio da contagem regressiva e compara `seuPseudonimo` com o líder para mostrar "ganhando/superado".
 - Eventos só são publicados **depois do COMMIT**. Se o processo cair entre o COMMIT e a publicação, o cliente se recupera no resync.
 - Reconexão: o cliente refaz `entrar_lote` e substitui o estado local (resync). Se nenhum evento chegar em 30 s numa sala ao vivo, o cliente faz um resync preventivo.
 
@@ -27,7 +27,7 @@ Depende de: 001, 007
 | `fim_estendido` | `lote:{id}` | `{loteId, fimEm}` |
 | `lote_iniciado` | `lote:{id}` | `{loteId}` |
 | `lote_encerrado` | `lote:{id}` | `{loteId, vencedorPseudonimo?, valorArremateCentavos?}` |
-| `lote_cancelado` | `lote:{id}` | `{loteId}` |
+| `lote_cancelado` | `lote:{id}` | `{loteId}` (publicado por `liquidacao` depois do COMMIT do cancelamento, specs/010) |
 | `voce_foi_superado` | `usuario:{id}` | `{loteId, valorCentavos}` |
 | `saldo_atualizado` | `usuario:{id}` | `{totalCentavos, comprometidoCentavos, disponivelCentavos}` |
 | `lote_arrematado` | `usuario:{id}` | `{loteId, codigoComprovante}` |
@@ -43,4 +43,4 @@ Nenhum dado persistido.
 Lance pelo socket; chat; presença ("quem está na sala").
 
 ## Decisões relacionadas
-- decisions/0004-tempo-real-socketio-e-lance-rest.md, 0010-redis.md
+- decisions/0004-tempo-real-socketio-e-lance-rest.md, 0010-redis.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md

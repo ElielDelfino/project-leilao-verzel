@@ -33,7 +33,7 @@ Regras verificadas na documentação da Scryfall em 2026-10-24:
 ## Interfaces e contratos
 - `GET /api/catalogo/cartas?q=&pagina=` (leiloeiro) → `{cartas: [{scryfallId, nome, colecao, raridade, tipo, artista, imagemUrl}], meta}` · 503
 - `GET /api/imagens/{snapshotId}` (público)
-- Interface interna: `catalogo.criarSnapshot(tx, scryfallId) → snapshotId`
+- Interface interna: `catalogo.criarSnapshot(tx, scryfallId) → snapshotId`; `catalogo.obterSnapshot(snapshotId)` devolve os campos do snapshot sem a imagem (usada por `lotes` no detalhe do lote e por `liquidacao` no comprovante; a imagem sai por `GET /api/imagens/{snapshotId}`).
 
 ## Dados
 - `card_snapshots(id uuid pk, scryfall_id uuid, nome, colecao, raridade, tipo, texto_oracle, artista, dados jsonb, imagem bytea, imagem_mime, imagem_sha256 bytea, criado_em)`
