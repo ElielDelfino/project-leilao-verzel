@@ -7,6 +7,10 @@ import { io, Manager, type Socket } from 'socket.io-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { emitirAccessToken } from '../../../src/modules/identidade/tokens.js';
+import {
+  type EstadoDaSala,
+  MontadorDoEstado,
+} from '../../../src/modules/tempo-real/estado-da-sala.js';
 import { GatewayDoLeilao } from '../../../src/modules/tempo-real/gateway-do-leilao.js';
 import { criarAppDeTeste, ENV_DE_TESTE } from '../../helpers/app-de-teste.js';
 
@@ -29,10 +33,39 @@ interface OpcoesDoCliente {
 const apps: NestFastifyApplication[] = [];
 const sockets: Socket[] = [];
 
+const PSEUDONIMO_SIMULADO = 'Licitante #a1b2c3';
+
+/** Estado válido no asyncapi para qualquer lote; o autenticado recebe pseudônimo e posição. */
+function estadoSimulado(loteId: string, usuarioId: string | undefined): EstadoDaSala {
+  const base: EstadoDaSala = {
+    lote: {
+      id: loteId,
+      status: 'ao_vivo',
+      inicioEm: '2026-10-25T10:00:00.000Z',
+      fimEm: '2026-10-25T14:00:00.000Z',
+      fimOriginalEm: '2026-10-25T14:00:00.000Z',
+      lanceInicialCentavos: 1000,
+      incrementoMinimoCentavos: 100,
+      lanceAtualCentavos: null,
+      totalLances: 0,
+      valorArremateCentavos: null,
+    },
+    ultimosLances: [],
+    agoraServidor: '2026-10-25T12:00:00.000Z',
+  };
+  return usuarioId === undefined
+    ? base
+    : { ...base, seuPseudonimo: PSEUDONIMO_SIMULADO, suaPosicao: 'sem_lance' };
+}
+
 async function subirApp(
   opcoes: Parameters<typeof criarAppDeTeste>[0] = {},
 ): Promise<{ app: NestFastifyApplication; url: string }> {
   const app = await criarAppDeTeste(opcoes);
+  // Banco falso: o estado do lote vem de um montador simulado (a montagem real tem integração).
+  vi.spyOn(app.get(MontadorDoEstado), 'montar').mockImplementation((loteId, usuarioId) =>
+    Promise.resolve(estadoSimulado(loteId, usuarioId)),
+  );
   await app.listen({ port: 0, host: '127.0.0.1' });
   apps.push(app);
   const { port } = app.getHttpServer().address() as AddressInfo;
@@ -163,6 +196,7 @@ async function sincronizar(socket: Socket): Promise<void> {
 afterEach(async () => {
   for (const socket of sockets.splice(0)) socket.close();
   for (const app of apps.splice(0)) await app.close();
+  vi.restoreAllMocks();
 });
 
 describe('gateway do leilão: transporte e origem', () => {
