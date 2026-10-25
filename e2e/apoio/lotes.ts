@@ -29,8 +29,12 @@ export interface EstadoDaScryfallFalsa {
   total: number;
 }
 
-/** Chave do circuito da Scryfall no Redis (`${prefixo}circuito`, prefixo `scryfall:`). */
-const CHAVE_DO_CIRCUITO = 'scryfall:circuito';
+/**
+ * Prefixo Redis da Scryfall que a API do e2e usa (SCRYFALL_REDIS_PREFIX em playwright.config.ts,
+ * task 099). Mesma regra fechada da env da API; qualquer outro valor (inclusive o `scryfall:` de
+ * produção e dev) é recusado, para o e2e nunca apagar chaves que não são dele.
+ */
+const PREFIXO_REDIS_DO_E2E = /^scryfall:e2e[a-z0-9-]*:$/;
 const HORAS_DE_DURACAO = 2;
 const MS_POR_HORA = 3_600_000;
 
@@ -69,8 +73,19 @@ export async function zerarContadorDaScryfallFalsa(): Promise<void> {
   await enviarControle({ zerar: true });
 }
 
+/** Chave do circuito da Scryfall da API do e2e (`${prefixo}circuito`), com o prefixo validado. */
+export function chaveDoCircuitoDoE2e(): string {
+  const prefixo = variavel('E2E_SCRYFALL_PREFIXO_REDIS');
+  if (!PREFIXO_REDIS_DO_E2E.test(prefixo)) {
+    throw new Error('e2e: prefixo Redis da Scryfall fora do formato scryfall:e2e…:');
+  }
+  return `${prefixo}circuito`;
+}
+
 /** Volta ao estado limpo: modo `ok`, contador zerado e circuito fechado (só a chave dele). */
 export async function restaurarScryfall(): Promise<void> {
+  // Valida o prefixo antes de qualquer efeito.
+  const chaveDoCircuito = chaveDoCircuitoDoE2e();
   await enviarControle({ modo: 'ok', zerar: true });
   const cliente = createClient({
     socket: { host: variavel('REDIS_HOST'), port: Number(variavel('REDIS_PORT')) },
@@ -78,7 +93,7 @@ export async function restaurarScryfall(): Promise<void> {
   });
   await cliente.connect();
   try {
-    await cliente.del(CHAVE_DO_CIRCUITO);
+    await cliente.del(chaveDoCircuito);
   } finally {
     cliente.destroy();
   }
