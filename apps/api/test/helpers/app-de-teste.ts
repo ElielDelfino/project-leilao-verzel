@@ -19,6 +19,11 @@ import {
   type VerificacaoDeProntidao,
 } from '../../src/health/prontidao.js';
 import { criarLogger, LoggerNestPino } from '../../src/logger/logger.js';
+import {
+  LIMITES_DO_TEMPO_REAL,
+  LIMITES_PADRAO,
+  type LimitesDoTempoReal,
+} from '../../src/modules/tempo-real/limites.js';
 import type { ClienteRedis, ClienteRedisComCatalogo } from '../../src/redis/cliente.js';
 import { criarConexaoDoRedis } from '../../src/redis/conexao.js';
 import { CLIENTE_REDIS } from '../../src/redis/redis.module.js';
@@ -126,6 +131,9 @@ export function redisFalso(): ClienteRedisComCatalogo & { readonly encerrado: ()
     gravarComTtl: rejeitar,
     ttlRestanteMs: rejeitar,
     executarLua: rejeitar,
+    duplicarParaPubSub: () => {
+      throw new Error(SEM_INFRA);
+    },
     encerrar: () => {
       encerrado = true;
       return Promise.resolve();
@@ -156,6 +164,8 @@ export interface OpcoesDoAppDeTeste {
   readonly prefixoDoLimite?: string;
   /** Prefixo Redis da Scryfall (sob `scryfall:t`); sem ele, cada app recebe um novo. */
   readonly prefixoDaScryfall?: string;
+  /** Limites do Socket.IO trocados dos de produção; o que não vier segue o padrão (LIMITES_PADRAO). */
+  readonly limitesDoTempoReal?: Partial<LimitesDoTempoReal>;
   /** Módulos só de teste (por exemplo, rotas que lançam erros). */
   readonly modulosExtras?: readonly Type[];
   /** Captura os logs JSON; quando presente, o nível passa a ser "info". */
@@ -186,6 +196,11 @@ export async function criarAppDeTeste(
       .useValue(opcoes.redis ?? redisFalso())
       .overrideProvider(CONTADOR_DE_JANELA)
       .useValue(opcoes.contador ?? contadorFalso());
+  }
+  if (opcoes.limitesDoTempoReal !== undefined) {
+    construtor = construtor
+      .overrideProvider(LIMITES_DO_TEMPO_REAL)
+      .useValue({ ...LIMITES_PADRAO, ...opcoes.limitesDoTempoReal });
   }
   if (opcoes.prefixoDoLimite !== undefined) {
     construtor = construtor.overrideProvider(PREFIXO_DO_LIMITE).useValue(opcoes.prefixoDoLimite);
