@@ -33,10 +33,23 @@ Depende de: 004, 006, 008
 - Idempotência: unique `(licitante_id, idempotency_key)`; uma repetição devolve a resposta original (200).
 - "Agora" é o relógio do Postgres (`clock_timestamp()`) dentro da transação, nunca o do cliente.
 
+### Posição do usuário no lote
+Calculada por `lances` (`bids` do próprio módulo + colunas de `lots` lidas pela interface de `lotes`). Valores (ADR 0025):
+
+| posição | condição |
+|---|---|
+| `ganhando` | lote ao vivo e `lider_id` = usuário |
+| `superado` | lote ao vivo, usuário com ao menos um lance no lote e `lider_id` ≠ usuário |
+| `venceu` | lote encerrado e `vencedor_id` = usuário |
+| `perdeu` | usuário com ao menos um lance no lote e o lote encerrado com outro vencedor ou cancelado |
+| `sem_lance` | usuário sem lance no lote (inclui lote agendado) |
+
+Onde aparece: `GET /api/me/lances` (`posicao`, sempre um dos quatro valores com lance) e o ack de `entrar_lote` (`suaPosicao`, specs/009). `GET /api/lotes/{id}` não chama `lances`: devolve só `ganhando` ou `venceu`, das colunas de `lots` (specs/006).
+
 ## Interfaces e contratos
 - `POST /api/lotes/{id}/lances` → 201 `{lance, lote: {lanceAtualCentavos, fimEm, totalLances}}`
 - `GET /api/lotes/{id}/lances?pagina=` (público, pseudonimizado)
-- `GET /api/me/lances` (licitante) → lotes em que deu lance, com a posição atual
+- `GET /api/me/lances` (licitante) → lotes em que deu lance, com a posição atual (`posicao`: `ganhando` | `superado` | `venceu` | `perdeu`; §Posição do usuário no lote)
 
 ## Dados
 - `bids(id uuid pk, lote_id fk, seq int, licitante_id fk, pseudonimo text, valor_centavos bigint, criado_em timestamptz(3), hash_anterior bytea, hash bytea, assinatura bytea, key_id text, idempotency_key uuid)`; unique `(lote_id, seq)`, unique `(licitante_id, idempotency_key)`; trigger append-only.
@@ -44,6 +57,7 @@ Depende de: 004, 006, 008
 
 ## Critérios de aceite
 - [ ] Cada um dos 6 códigos de recusa tem teste de integração.
+- [ ] A posição devolvida segue a tabela de §Posição do usuário no lote nos cinco casos (teste de integração, um por valor).
 - [ ] 50 lances simultâneos no mesmo lote: seq contígua, sem dois líderes, ledger reconciliado.
 - [ ] Lance a 1 min do fim estende para agora + 2 min; lance a 3 min não estende.
 

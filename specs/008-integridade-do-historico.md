@@ -13,7 +13,7 @@ Qualquer alteração, remoção ou inserção posterior no histórico, mesmo dir
   `{loteId, seq, pseudonimo, valorCentavos, criadoEm (ISO 8601 UTC, ms), hashAnterior (hex)}`.
 - `hash = SHA-256(canônico)`. Gênese: `hashAnterior = SHA-256("leilao-verzel:genesis:" + loteId)`.
 - `assinatura = Ed25519(chavePrivada, hash)`. A chave privada **existe só no ambiente da API** (Secret Manager, entregue em arquivo em produção: specs/014 §Segredos), nunca no banco; `key_id` identifica a chave para permitir rotação (§Chaves).
-- Selo (`lot_seals`) gerado quando o lote é encerrado ou cancelado: canônico de `{loteId, status, totalLances, hashFinal, vencedorPseudonimo, valorArremateCentavos, seladoEm}` assinado. O selo vai no comprovante.
+- Selo (`lot_seals`) gerado quando o lote é encerrado ou cancelado: canônico de `{loteId, status, totalLances, hashFinal, vencedorPseudonimo, valorArremateCentavos, seladoEm}` assinado. O selo vai no comprovante. É gravado por `lances.selar(tx, ...)`, chamado por `liquidacao` na mesma transação do encerramento ou do cancelamento (specs/010).
 - Pseudônimo: `"Licitante #" + hex(HMAC-SHA256(PSEUDONYM_HMAC_KEY, loteId + ":" + userId))[0..6]`. É estável dentro do lote e diferente entre lotes, então não dá para ligar um licitante entre lotes.
 - Defesa adicional: triggers impedem UPDATE/DELETE em `bids` e `lot_seals` (um superusuário pode removê-los, e a detecção continua valendo).
 

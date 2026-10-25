@@ -6,7 +6,7 @@ Depende de: 008, 010
 ## Requisitos
 - RF-01 Página pública, sem login, com o histórico completo de lances de um lote e o veredito "íntegro" ou "adulterado".
 - RF-02 Comprovante de arremate com link compartilhável, sem dados pessoais.
-- RF-03 "Meus arremates": lotes em que o licitante deu lance (com a posição) e lotes vencidos (com o comprovante).
+- RF-03 "Meus arremates": lotes em que o licitante deu lance (com a posição: `ganhando`, `superado`, `venceu` ou `perdeu`, calculada por `lances`, specs/007 §Posição do usuário no lote) e lotes vencidos (com o comprovante).
 
 ## Comportamento
 - Auditoria (`/auditoria/{loteId}`): tabela de lances pseudonimizados, selo, veredito do servidor e botão "verificar no meu navegador", que repete a verificação localmente (specs/008). Problemas mostram o seq e o tipo (ex.: "lance #4: hash não confere").
@@ -17,7 +17,7 @@ Depende de: 008, 010
 - `GET /api/auditoria/lotes/{id}`, `GET /api/auditoria/chaves` (specs/008)
 - `GET /api/comprovantes/{codigo}` (público) · 404
 - `GET /api/me/arremates` (licitante) → `[{lote, valorCentavos, codigoComprovante, emitidoEm}]`
-- `GET /api/me/lances` (specs/007)
+- `GET /api/me/lances` (specs/007; implementado por `lances`). `GET /api/me/arremates` e `GET /api/comprovantes/{codigo}` são de `liquidacao`, que obtém o lote por `lotes` e a carta por `catalogo` (specs/001).
 
 ## Critérios de aceite
 - [ ] Após `pnpm demo:adulterar`, a página mostra "adulterado" com o seq correto.

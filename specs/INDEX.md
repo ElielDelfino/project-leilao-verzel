@@ -13,7 +13,7 @@ Fonte da verdade do projeto. Carregue cada spec sob demanda.
 | [006-lotes.md](006-lotes.md) | Lotes | criação, vitrine, filtros, cancelamento com estorno, painel | 003, 004, 005 | aprovada |
 | [007-lances-e-regras.md](007-lances-e-regras.md) | Lances e regras | transação do lance, recusas, anti-sniping | 004, 006, 008 | aprovada |
 | [008-integridade-do-historico.md](008-integridade-do-historico.md) | Integridade do histórico | hash chain, Ed25519, selo, verificação | 001 | aprovada |
-| [009-tempo-real.md](009-tempo-real.md) | Tempo real | Socket.IO, rooms, eventos, resync | 001, 007 | aprovada |
+| [009-tempo-real.md](009-tempo-real.md) | Tempo real | Socket.IO, rooms, eventos, resync | 001, 006, 007 | aprovada |
 | [010-encerramento-e-liquidacao.md](010-encerramento-e-liquidacao.md) | Encerramento e liquidação | job de 1 s, liquidação, comprovante | 004, 006, 007, 008 | aprovada |
 | [011-auditoria-e-comprovante.md](011-auditoria-e-comprovante.md) | Auditoria e comprovante | página pública, comprovante, meus arremates | 008, 010 | aprovada |
 | [012-frontend-telas.md](012-frontend-telas.md) | Frontend: telas | rotas, mensagens, dark mode, acessibilidade | 003–011 | aprovada |
