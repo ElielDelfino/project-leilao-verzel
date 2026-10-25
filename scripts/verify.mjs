@@ -265,32 +265,57 @@ export function testesExplicitos(raiz, pacotes, arquivos, diretorioAtual) {
 
 // ---------------------------------------------------------------- git
 
-function git(args) {
-  const r = spawnSync('git', args, { cwd: RAIZ, encoding: 'utf8' });
+function git(args, cwd = RAIZ) {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (r.status !== 0) {
     throw new Error(`git ${args.join(' ')} falhou: ${(r.stderr || r.error?.message || '').trim()}`);
   }
   return r.stdout;
 }
 
-function baseDaComparacao(base) {
+/** Merge-base de HEAD com `ref`, ou undefined se a ref não existe (ou não há histórico comum). */
+function mergeBase(ref, cwd) {
+  const r = spawnSync('git', ['merge-base', 'HEAD', ref], { cwd, encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : undefined;
+}
+
+function ehAncestral(antigo, recente, cwd) {
+  return spawnSync('git', ['merge-base', '--is-ancestor', antigo, recente], { cwd }).status === 0;
+}
+
+/**
+ * Base da comparação do quick: `--base <ref>`, ou o merge-base de HEAD com `main` e `origin/main`.
+ * Quando os dois existem e divergem, vale o mais antigo (compara com mais arquivos, nunca com
+ * menos) e devolve um `aviso`.
+ */
+export function baseDaComparacao(base, cwd = RAIZ) {
   const candidatos = base ? [base] : ['main', 'origin/main'];
-  for (const ref of candidatos) {
-    const r = spawnSync('git', ['merge-base', 'HEAD', ref], { cwd: RAIZ, encoding: 'utf8' });
-    if (r.status === 0) return { ref, sha: r.stdout.trim() };
+  const achados = candidatos
+    .map((ref) => ({ ref, sha: mergeBase(ref, cwd) }))
+    .filter((c) => c.sha !== undefined);
+  if (achados.length === 0) {
+    throw new Error(
+      `não achei o merge-base de HEAD com ${candidatos.join(' nem ')}; use --base <ref>`,
+    );
   }
-  throw new Error(
-    `não achei o merge-base de HEAD com ${candidatos.join(' nem ')}; use --base <ref>`,
-  );
+  const [primeiro, segundo] = achados;
+  if (segundo === undefined || primeiro.sha === segundo.sha) return primeiro;
+  const maisAntigo = ehAncestral(primeiro.sha, segundo.sha, cwd) ? primeiro : segundo;
+  return {
+    ...maisAntigo,
+    aviso:
+      `${primeiro.ref} (${primeiro.sha.slice(0, 7)}) e ${segundo.ref} (${segundo.sha.slice(0, 7)}) ` +
+      `divergem; usando o mais antigo (${maisAntigo.ref})`,
+  };
 }
 
 /** Alterados desde a base: commits, staged, não staged, novos não ignorados e apagados. */
-function arquivosAlterados(sha) {
+export function arquivosAlterados(sha, cwd = RAIZ) {
   // -z: caminhos crus separados por NUL. Sem ele, nomes com acento ou espaço saem entre aspas e
   // com escapes em octal ("a\303\247\303\243o x.ts") e não casam com nenhum arquivo.
   const caminhos = (saida) => saida.split('\0').filter(Boolean);
-  const diff = caminhos(git(['diff', '--name-only', '--no-renames', '-z', sha]));
-  const novos = caminhos(git(['ls-files', '--others', '--exclude-standard', '-z']));
+  const diff = caminhos(git(['diff', '--name-only', '--no-renames', '-z', sha], cwd));
+  const novos = caminhos(git(['ls-files', '--others', '--exclude-standard', '-z'], cwd));
   return [...new Set([...diff, ...novos])].sort();
 }
 
@@ -431,8 +456,11 @@ function argsDoVitest(pasta, arquivos, nome) {
 async function passoTypecheckGuarda(v, pacotes) {
   await v.passo('typecheck: todo pacote TS tem script', () => {
     const sem = pacotesSemTypecheck(pacotes);
-    if (sem.length > 0) {
-      process.stderr.write(`Pacotes com TypeScript sem script "typecheck": ${sem.join(', ')}\n`);
+    for (const nome of sem) {
+      const pasta = pacotes.find((p) => p.nome === nome)?.pasta;
+      process.stderr.write(
+        `O pacote ${nome} (${pasta}) tem TypeScript mas não tem o script "typecheck" no package.json.\n`,
+      );
     }
     return sem.length === 0;
   });
@@ -473,6 +501,11 @@ async function quick(opcoes, env) {
   const presentes = alterados.filter(existe);
   process.stdout.write(
     `verify:quick: ${alterados.length} arquivo(s) alterado(s) desde ${base.ref} (${base.sha.slice(0, 7)})\n`,
+  );
+  if (base.aviso) process.stdout.write(`aviso: ${base.aviso}\n`);
+  // specs/013 §Modo local: o banco de teste é do worktree; dois verify no mesmo worktree se atropelam.
+  process.stdout.write(
+    'aviso: rode um verify por vez em cada worktree (o banco de teste é um só).\n',
   );
   // Testes explícitos substituem os ligados ao que mudou; arquivo inexistente falha já aqui.
   const explicitos =
@@ -539,7 +572,7 @@ async function full(opcoes, env) {
   await passoTypecheckGuarda(v, pacotes);
   await v.passo('typecheck', () => executar('pnpm', ['run', 'typecheck'], { env }));
   await v.passo('testes de scripts', () => executar('pnpm', ['run', 'test:scripts'], { env }));
-  // Banco: o leilao_test local via TEMPLATE. O banco isolado com Testcontainers (specs/013)
+  // Banco: o leilao_test_<sufixo> do worktree via TEMPLATE. O Testcontainers (specs/013)
   // depende de um pedido ao infra (allowBuilds no pnpm-workspace.yaml); veja a tarefa 011.
   await passoTestes(v, pacotes, 'todos', { nome: undefined, semTestes: '' }, env);
   for (const script of ['contracts:lint', 'contracts:check']) {
