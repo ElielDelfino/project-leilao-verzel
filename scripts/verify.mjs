@@ -286,9 +286,11 @@ function baseDaComparacao(base) {
 
 /** Alterados desde a base: commits, staged, não staged, novos não ignorados e apagados. */
 function arquivosAlterados(sha) {
-  const linhas = (saida) => saida.split('\n').filter(Boolean);
-  const diff = linhas(git(['diff', '--name-only', '--no-renames', sha]));
-  const novos = linhas(git(['ls-files', '--others', '--exclude-standard']));
+  // -z: caminhos crus separados por NUL. Sem ele, nomes com acento ou espaço saem entre aspas e
+  // com escapes em octal ("a\303\247\303\243o x.ts") e não casam com nenhum arquivo.
+  const caminhos = (saida) => saida.split('\0').filter(Boolean);
+  const diff = caminhos(git(['diff', '--name-only', '--no-renames', '-z', sha]));
+  const novos = caminhos(git(['ls-files', '--others', '--exclude-standard', '-z']));
   return [...new Set([...diff, ...novos])].sort();
 }
 
@@ -483,7 +485,10 @@ async function quick(opcoes, env) {
   if (presentes.length === 0) v.pular('formato', 'nada alterado');
   else {
     await v.passo('formato', () =>
-      executar('pnpm', ['exec', 'prettier', '--check', '--ignore-unknown', ...presentes], { env }),
+      // `--`: um arquivo começando com "-" não vira opção.
+      executar('pnpm', ['exec', 'prettier', '--check', '--ignore-unknown', '--', ...presentes], {
+        env,
+      }),
     );
   }
 
@@ -491,7 +496,7 @@ async function quick(opcoes, env) {
   if (lintaveis.length === 0) v.pular('lint', 'nenhum JS/TS alterado');
   else {
     await v.passo('lint', () =>
-      executar('pnpm', ['exec', 'eslint', '--no-warn-ignored', ...lintaveis], { env }),
+      executar('pnpm', ['exec', 'eslint', '--no-warn-ignored', '--', ...lintaveis], { env }),
     );
   }
 
