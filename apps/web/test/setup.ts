@@ -3,9 +3,13 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 
+import { usarServidorDeMocks } from './apoio/servidor';
+
 // Todo render (inclusive renderHook) roda dentro de <StrictMode>, como em src/main.tsx: efeitos
 // montam, desmontam e montam de novo, e updaters de estado rodam duas vezes.
 configure({ reactStrictMode: true });
+
+usarServidorDeMocks();
 
 beforeEach(() => {
   // O jsdom cria um <html> vazio; em produção o lang vem do index.html (test/index-html.test.ts).

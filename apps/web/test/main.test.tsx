@@ -49,12 +49,12 @@ describe('main.tsx', () => {
 
   it('sob StrictMode, trocar de pathname foca o <main> e o tema alterna uma vez por clique', async () => {
     simularPreferenciaDoSistema(false);
-    window.history.replaceState(null, '', '/carteira');
+    window.history.replaceState(null, '', '/cadastro');
     criarElementoRaiz();
     const usuario = userEvent.setup();
 
     await act(() => import('../src/main'));
-    await screen.findByRole('heading', { level: 1, name: 'Carteira' });
+    await screen.findByRole('heading', { level: 1, name: 'Cadastro' });
     expect(document.activeElement).toBe(document.body);
 
     await usuario.click(screen.getByRole('link', { name: 'Casa de Leilões' }));
