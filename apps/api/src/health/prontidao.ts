@@ -73,7 +73,21 @@ export class ServicoDeProntidao {
     private readonly verificacoes: readonly VerificacaoDeProntidao[],
   ) {}
 
-  async verificar(): Promise<ResultadoDaProntidao> {
+  #emAndamento: Promise<ResultadoDaProntidao> | undefined;
+
+  /**
+   * Single-flight (revisão da 017): chamadas concorrentes recebem a mesma rodada em andamento,
+   * para que várias requisições ao /ready não esgotem o pool do Postgres. Terminada a rodada, a
+   * próxima chamada verifica de novo.
+   */
+  verificar(): Promise<ResultadoDaProntidao> {
+    this.#emAndamento ??= this.executar().finally(() => {
+      this.#emAndamento = undefined;
+    });
+    return this.#emAndamento;
+  }
+
+  private async executar(): Promise<ResultadoDaProntidao> {
     // Falha fechada: sem nenhuma verificação registrada, nada foi comprovado.
     if (this.verificacoes.length === 0) {
       this.logger.warn('nenhuma verificação de prontidão registrada');

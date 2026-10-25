@@ -1,5 +1,6 @@
 import { Controller, Get, HttpStatus, Inject } from '@nestjs/common';
 
+import { Publico } from '../common/auth/metadados.js';
 import { type RespostaDeSucesso, sucesso } from '../common/envelope.js';
 import { ErroApi } from '../common/erros/erro-api.js';
 import { ServicoDeProntidao } from './prontidao.js';
@@ -11,6 +12,7 @@ interface EstadoDeSaude {
 const OK: EstadoDeSaude = { status: 'ok' };
 
 /** Health checks públicos (openapi.yaml: /api/health/live e /api/health/ready; ADR 0018). */
+@Publico()
 @Controller('health')
 export class HealthController {
   constructor(@Inject(ServicoDeProntidao) private readonly prontidao: ServicoDeProntidao) {}

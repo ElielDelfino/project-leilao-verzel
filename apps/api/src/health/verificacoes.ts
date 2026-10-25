@@ -1,23 +1,14 @@
 // Verificações reais do /api/health/ready (specs/014 §Observabilidade: Postgres + Redis).
-import { sql } from 'drizzle-orm';
-
-import type { Banco } from '../db/banco.js';
+import type { BancoVerificavel } from '../db/banco.js';
 import type { ClienteRedis } from '../redis/cliente.js';
 import type { VerificacaoDeProntidao } from './prontidao.js';
 
 /**
- * SELECT 1 pelo pool da API (db/banco.ts). O Banco ainda não aceita AbortSignal: o sinal só
- * impede abrir a consulta depois do tempo limite. Uma consulta já em curso fica limitada pelos
- * limites do pool (connectionTimeoutMillis de 5 s; statement_timeout de 10 s no servidor).
+ * SELECT 1 por banco.verificar (db/banco.ts, tarefa 037): com o sinal do tempo limite, a consulta
+ * é cancelada no servidor e a conexão descartada.
  */
-export function verificacaoDoPostgres(banco: Banco): VerificacaoDeProntidao {
-  return {
-    nome: 'postgres',
-    verificar: async (sinal) => {
-      sinal.throwIfAborted();
-      await banco.consultar((db) => db.execute(sql`select 1`));
-    },
-  };
+export function verificacaoDoPostgres(banco: BancoVerificavel): VerificacaoDeProntidao {
+  return { nome: 'postgres', verificar: (sinal) => banco.verificar(sinal) };
 }
 
 /** PING com o sinal do tempo limite, que cancela o comando ainda na fila do cliente. */

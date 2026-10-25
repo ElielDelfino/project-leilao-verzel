@@ -12,14 +12,25 @@ function segredo(): string {
   return randomBytes(32).toString('base64url');
 }
 
+// specs/014 §Conexão: a API conecta como o papel da API (POSTGRES_API_USER/DB_API_PASSWORD).
 const CONEXAO = {
   POSTGRES_HOST: '127.0.0.1',
   POSTGRES_PORT: '15432',
   POSTGRES_DB: 'leilao',
-  POSTGRES_USER: 'leilao',
+  POSTGRES_API_USER: 'leilao_api',
   REDIS_HOST: '127.0.0.1',
   REDIS_PORT: '16379',
+  WEB_ORIGIN: 'http://localhost:15173',
 } as const;
+
+/** Os 5 segredos que a API lê (specs/014 §Segredos; DB_PASSWORD é só do dono). */
+const SEGREDOS_DA_API = [
+  'DB_API_PASSWORD',
+  'REDIS_PASSWORD',
+  'JWT_SECRET',
+  'PSEUDONYM_HMAC_KEY',
+  'ED25519_PRIVATE_KEY',
+] as const;
 
 function envValido(
   extra: Record<string, string | undefined> = {},
@@ -27,10 +38,31 @@ function envValido(
   return {
     API_PORT: '13000',
     ...CONEXAO,
-    DB_PASSWORD: segredo(),
+    DB_API_PASSWORD: segredo(),
     REDIS_PASSWORD: segredo(),
+    JWT_SECRET: segredo(),
+    PSEUDONYM_HMAC_KEY: segredo(),
+    ED25519_PRIVATE_KEY: segredo(),
     ...extra,
   };
+}
+
+/** O valor lido de cada segredo, onde o env o guarda. */
+function segredoLido(env: ReturnType<typeof carregarEnv>, nome: string): string {
+  switch (nome) {
+    case 'DB_API_PASSWORD':
+      return env.postgres.password;
+    case 'REDIS_PASSWORD':
+      return env.redis.password;
+    case 'JWT_SECRET':
+      return Buffer.from(env.segredos.chaveJwt).toString('base64url');
+    case 'PSEUDONYM_HMAC_KEY':
+      return Buffer.from(env.segredos.chavePseudonimo).toString('base64url');
+    case 'ED25519_PRIVATE_KEY':
+      return Buffer.from(env.segredos.sementeEd25519).toString('base64url');
+    default:
+      throw new Error(`segredo desconhecido: ${nome}`);
+  }
 }
 
 function mensagemDe(fn: () => unknown): string {
@@ -53,9 +85,10 @@ describe('carregarEnv (validação do env no boot)', () => {
       host: '127.0.0.1',
       port: 15432,
       database: 'leilao',
-      user: 'leilao',
+      user: 'leilao_api',
     });
     expect(env.redis).toMatchObject({ host: '127.0.0.1', port: 16379 });
+    expect(env.WEB_ORIGIN).toBe('http://localhost:15173');
   });
 
   it('usa LOG_LEVEL=info quando ausente', () => {
@@ -95,13 +128,13 @@ describe('carregarEnv (validação do env no boot)', () => {
   });
 });
 
-// specs/014 §Conexão da API com Postgres e Redis: as 8 variáveis são obrigatórias e sem default.
+// specs/014 §Conexão da API com Postgres e Redis: obrigatórias e sem default.
 describe('carregarEnv: conexão com Postgres e Redis (specs/014 §Conexão)', () => {
   it.each([
     'POSTGRES_HOST',
     'POSTGRES_PORT',
     'POSTGRES_DB',
-    'POSTGRES_USER',
+    'POSTGRES_API_USER',
     'REDIS_HOST',
     'REDIS_PORT',
   ])('não sobe sem %s e a mensagem cita só o nome', (nome) => {
@@ -110,7 +143,37 @@ describe('carregarEnv: conexão com Postgres e Redis (specs/014 §Conexão)', ()
     expect(mensagem).toContain(nome);
   });
 
-  it.each(['POSTGRES_HOST', 'POSTGRES_DB', 'POSTGRES_USER', 'REDIS_HOST'])(
+  it('a API não lê POSTGRES_USER nem DB_PASSWORD (são do dono; ADR 0026)', () => {
+    const senhaDoDono = segredo();
+
+    const mensagem = mensagemDe(() =>
+      carregarEnv(
+        envValido({
+          POSTGRES_API_USER: undefined,
+          DB_API_PASSWORD: undefined,
+          POSTGRES_USER: 'leilao',
+          DB_PASSWORD: senhaDoDono,
+        }),
+      ),
+    );
+
+    expect(mensagem).toContain('POSTGRES_API_USER');
+    expect(mensagem).toContain('DB_API_PASSWORD');
+    expect(mensagem).not.toContain(senhaDoDono);
+  });
+
+  it('com as variáveis do dono presentes, ainda usa só as da API', () => {
+    const senhaDaApi = segredo();
+
+    const env = carregarEnv(
+      envValido({ DB_API_PASSWORD: senhaDaApi, POSTGRES_USER: 'leilao', DB_PASSWORD: segredo() }),
+    );
+
+    expect(env.postgres.user).toBe('leilao_api');
+    expect(env.postgres.password).toBe(senhaDaApi);
+  });
+
+  it.each(['POSTGRES_HOST', 'POSTGRES_DB', 'POSTGRES_API_USER', 'REDIS_HOST'])(
     'recusa %s vazio',
     (nome) => {
       expect(mensagemDe(() => carregarEnv(envValido({ [nome]: '' })))).toContain(nome);
@@ -129,7 +192,7 @@ describe('carregarEnv: conexão com Postgres e Redis (specs/014 §Conexão)', ()
     },
   );
 
-  it.each(['DB_PASSWORD', 'REDIS_PASSWORD'])(
+  it.each(SEGREDOS_DA_API)(
     'não sobe sem %s nem %s_FILE e a mensagem cita os dois nomes',
     (nome) => {
       const mensagem = mensagemDe(() => carregarEnv(envValido({ [nome]: undefined })));
@@ -160,202 +223,235 @@ describe('carregarEnv: conexão com Postgres e Redis (specs/014 §Conexão)', ()
       'POSTGRES_HOST',
       'POSTGRES_PORT',
       'POSTGRES_DB',
-      'POSTGRES_USER',
-      'DB_PASSWORD',
+      'POSTGRES_API_USER',
       'REDIS_HOST',
       'REDIS_PORT',
-      'REDIS_PASSWORD',
+      'WEB_ORIGIN',
+      ...SEGREDOS_DA_API,
     ]) {
       expect(mensagem).toContain(nome);
     }
   });
 
-  it('a senha não aparece ao serializar ou inspecionar o env carregado', async () => {
-    const senhaDoBanco = segredo();
-    const senhaDoRedis = segredo();
+  it('nenhum segredo aparece ao serializar ou inspecionar o env carregado', async () => {
+    const valores = Object.fromEntries(SEGREDOS_DA_API.map((nome) => [nome, segredo()]));
     const { inspect } = await import('node:util');
 
-    const env = carregarEnv(envValido({ DB_PASSWORD: senhaDoBanco, REDIS_PASSWORD: senhaDoRedis }));
+    const env = carregarEnv(envValido(valores));
 
-    expect(env.postgres.password).toBe(senhaDoBanco);
-    expect(env.redis.password).toBe(senhaDoRedis);
+    for (const nome of SEGREDOS_DA_API) {
+      expect(segredoLido(env, nome)).toBe(valores[nome]);
+    }
+    const hexDosSegredos = SEGREDOS_DA_API.map((nome) =>
+      Buffer.from(valores[nome] ?? '', 'base64url').toString('hex'),
+    );
     for (const texto of [
       JSON.stringify(env),
       inspect(env, { depth: 5 }),
       String(Object.keys(env)),
     ]) {
-      expect(texto).not.toContain(senhaDoBanco);
-      expect(texto).not.toContain(senhaDoRedis);
+      for (const nome of SEGREDOS_DA_API) {
+        expect(texto).not.toContain(valores[nome]);
+      }
+      for (const hex of hexDosSegredos) {
+        expect(texto.replace(/[^0-9a-f]/g, '')).not.toContain(hex);
+      }
     }
+  });
+
+  it('a chave do JWT são os 32 bytes decodificados de JWT_SECRET (specs/003)', () => {
+    const valor = segredo();
+
+    const env = carregarEnv(envValido({ JWT_SECRET: valor }));
+
+    expect(env.segredos.chaveJwt).toHaveLength(32);
+    expect(Buffer.from(env.segredos.chaveJwt).equals(Buffer.from(valor, 'base64url'))).toBe(true);
+  });
+});
+
+// specs/003 §Cookies e specs/014 §Conexão: WEB_ORIGIN é obrigatória e decide o Secure.
+describe('carregarEnv: WEB_ORIGIN', () => {
+  it('não sobe sem WEB_ORIGIN', () => {
+    expect(mensagemDe(() => carregarEnv(envValido({ WEB_ORIGIN: undefined })))).toContain(
+      'WEB_ORIGIN',
+    );
+  });
+
+  it.each(['', 'localhost:15173', 'ftp://exemplo.com', 'javascript:alert(1)', 'https://'])(
+    'recusa WEB_ORIGIN=%j',
+    (valor) => {
+      expect(mensagemDe(() => carregarEnv(envValido({ WEB_ORIGIN: valor })))).toContain(
+        'WEB_ORIGIN',
+      );
+    },
+  );
+
+  it.each([
+    ['http://localhost:15173', false],
+    ['https://10-0-0-1.sslip.io', true],
+  ])('WEB_ORIGIN=%s → cookiesSeguros=%s', (valor, seguro) => {
+    expect(carregarEnv(envValido({ WEB_ORIGIN: valor })).cookiesSeguros).toBe(seguro);
   });
 });
 
 // specs/014 §Leitura e ADR 0023: exatamente uma de <VAR> e <VAR>_FILE; forma canônica.
-describe.each(['DB_PASSWORD', 'REDIS_PASSWORD'])(
-  'carregarEnv: segredo %s (specs/014 §Leitura)',
-  (nome) => {
-    const arquivoDaVar = `${nome}_FILE`;
-    let pasta: string;
+describe.each(SEGREDOS_DA_API)('carregarEnv: segredo %s (specs/014 §Leitura)', (nome) => {
+  const arquivoDaVar = `${nome}_FILE`;
+  let pasta: string;
 
-    beforeEach(() => {
-      pasta = mkdtempSync(join(tmpdir(), 'leilao-segredos-'));
-    });
+  beforeEach(() => {
+    pasta = mkdtempSync(join(tmpdir(), 'leilao-segredos-'));
+  });
 
-    afterEach(() => {
-      chmodSync(pasta, 0o700);
-      rmSync(pasta, { recursive: true, force: true });
-    });
+  afterEach(() => {
+    chmodSync(pasta, 0o700);
+    rmSync(pasta, { recursive: true, force: true });
+  });
 
-    function gravar(conteudo: string | Buffer, modo = 0o600): string {
-      const caminho = join(pasta, 'segredo');
-      writeFileSync(caminho, conteudo, { mode: modo });
-      chmodSync(caminho, modo);
-      return caminho;
-    }
+  function gravar(conteudo: string | Buffer, modo = 0o600): string {
+    const caminho = join(pasta, 'segredo');
+    writeFileSync(caminho, conteudo, { mode: modo });
+    chmodSync(caminho, modo);
+    return caminho;
+  }
 
-    function semAVariavel(
-      extra: Record<string, string | undefined>,
-    ): Record<string, string | undefined> {
-      return envValido({ [nome]: undefined, ...extra });
-    }
+  function semAVariavel(
+    extra: Record<string, string | undefined>,
+  ): Record<string, string | undefined> {
+    return envValido({ [nome]: undefined, ...extra });
+  }
 
-    function senhaLida(env: ReturnType<typeof carregarEnv>): string {
-      return nome === 'DB_PASSWORD' ? env.postgres.password : env.redis.password;
-    }
+  function senhaLida(env: ReturnType<typeof carregarEnv>): string {
+    return segredoLido(env, nome);
+  }
 
-    it(`lê o valor de ${nome}`, () => {
-      const valor = segredo();
+  it(`lê o valor de ${nome}`, () => {
+    const valor = segredo();
 
-      expect(senhaLida(carregarEnv(envValido({ [nome]: valor })))).toBe(valor);
-    });
+    expect(senhaLida(carregarEnv(envValido({ [nome]: valor })))).toBe(valor);
+  });
 
-    it(`lê o valor do arquivo de ${arquivoDaVar}`, () => {
-      const valor = segredo();
+  it(`lê o valor do arquivo de ${arquivoDaVar}`, () => {
+    const valor = segredo();
 
-      const env = carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(valor) }));
+    const env = carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(valor) }));
 
-      expect(senhaLida(env)).toBe(valor);
-    });
+    expect(senhaLida(env)).toBe(valor);
+  });
 
-    it(`não sobe com ${nome} e ${arquivoDaVar} juntos`, () => {
-      const valor = segredo();
+  it(`não sobe com ${nome} e ${arquivoDaVar} juntos`, () => {
+    const valor = segredo();
 
-      const mensagem = mensagemDe(() =>
-        carregarEnv(envValido({ [nome]: valor, [arquivoDaVar]: gravar(valor) })),
-      );
-
-      expect(mensagem).toContain(nome);
-      expect(mensagem).toContain(arquivoDaVar);
-      expect(mensagem).not.toContain(valor);
-    });
-
-    it(`não sobe com ${nome} vazio junto de ${arquivoDaVar} (as duas estão definidas)`, () => {
-      expect(
-        mensagemDe(() => carregarEnv(envValido({ [nome]: '', [arquivoDaVar]: gravar(segredo()) }))),
-      ).toContain(arquivoDaVar);
-    });
-
-    it(`não sobe com ${arquivoDaVar} apontando para arquivo inexistente`, () => {
-      const caminho = join(pasta, 'nao-existe');
-
-      const mensagem = mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: caminho })));
-
-      expect(mensagem).toContain(arquivoDaVar);
-      expect(mensagem).not.toContain(caminho);
-    });
-
-    it.skipIf(process.getuid?.() === 0)(
-      `não sobe com o arquivo de ${arquivoDaVar} ilegível`,
-      () => {
-        const valor = segredo();
-        const caminho = gravar(valor, 0o000);
-
-        const mensagem = mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: caminho })));
-
-        expect(mensagem).toContain(arquivoDaVar);
-        expect(mensagem).not.toContain(valor);
-      },
+    const mensagem = mensagemDe(() =>
+      carregarEnv(envValido({ [nome]: valor, [arquivoDaVar]: gravar(valor) })),
     );
 
-    it(`não sobe com ${arquivoDaVar} apontando para um diretório`, () => {
-      expect(mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: pasta })))).toContain(
-        arquivoDaVar,
-      );
-    });
+    expect(mensagem).toContain(nome);
+    expect(mensagem).toContain(arquivoDaVar);
+    expect(mensagem).not.toContain(valor);
+  });
 
-    it(`não sobe com ${arquivoDaVar} apontando para um dispositivo (não lê /dev/zero)`, () => {
-      expect(
-        mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: '/dev/zero' }))),
-      ).toContain(arquivoDaVar);
-    });
+  it(`não sobe com ${nome} vazio junto de ${arquivoDaVar} (as duas estão definidas)`, () => {
+    expect(
+      mensagemDe(() => carregarEnv(envValido({ [nome]: '', [arquivoDaVar]: gravar(segredo()) }))),
+    ).toContain(arquivoDaVar);
+  });
 
-    it(`não sobe com ${arquivoDaVar} relativo (specs/014: caminho absoluto)`, () => {
-      expect(
-        mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: 'segredos/db_password' }))),
-      ).toContain(arquivoDaVar);
-    });
+  it(`não sobe com ${arquivoDaVar} apontando para arquivo inexistente`, () => {
+    const caminho = join(pasta, 'nao-existe');
 
-    it(`recusa quebra de linha no fim do arquivo de ${arquivoDaVar}`, () => {
-      const valor = segredo();
+    const mensagem = mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: caminho })));
 
-      const mensagem = mensagemDe(() =>
-        carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(`${valor}\n`) })),
-      );
+    expect(mensagem).toContain(arquivoDaVar);
+    expect(mensagem).not.toContain(caminho);
+  });
 
-      expect(mensagem).toContain(arquivoDaVar);
-      expect(mensagem).not.toContain(valor);
-    });
+  it.skipIf(process.getuid?.() === 0)(`não sobe com o arquivo de ${arquivoDaVar} ilegível`, () => {
+    const valor = segredo();
+    const caminho = gravar(valor, 0o000);
 
-    it(`recusa arquivo de ${arquivoDaVar} vazio`, () => {
-      expect(mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: gravar('') })))).toContain(
-        arquivoDaVar,
-      );
-    });
+    const mensagem = mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: caminho })));
 
-    // Exemplos fora da forma canônica: tamanho, alfabeto, padding, quebra de linha e um último
-    // caractere com bits extras (decodifica para os mesmos 32 bytes, mas recodificar muda o texto).
-    const canonico = randomBytes(32).toString('base64url');
-    const naoCanonicos: readonly [string, string][] = [
-      ['42 caracteres', canonico.slice(0, 42)],
-      ['44 caracteres', `${canonico}A`],
-      ['com padding', `${canonico.slice(0, 42)}=`],
-      ['alfabeto base64 padrão (+ e /)', `${canonico.slice(0, 41)}+/`],
-      ['com espaço no fim', `${canonico} `],
-      ['com quebra de linha no fim', `${canonico}\n`],
-      ['vazio', ''],
-    ];
+    expect(mensagem).toContain(arquivoDaVar);
+    expect(mensagem).not.toContain(valor);
+  });
 
-    it.each(naoCanonicos)(`recusa ${nome} %s`, (_, valor) => {
-      const mensagem = mensagemDe(() => carregarEnv(envValido({ [nome]: valor })));
+  it(`não sobe com ${arquivoDaVar} apontando para um diretório`, () => {
+    expect(mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: pasta })))).toContain(
+      arquivoDaVar,
+    );
+  });
 
-      expect(mensagem).toContain(nome);
-      if (valor !== '') {
-        expect(mensagem).not.toContain(valor.trim());
-      }
-    });
+  it(`não sobe com ${arquivoDaVar} apontando para um dispositivo (não lê /dev/zero)`, () => {
+    expect(mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: '/dev/zero' })))).toContain(
+      arquivoDaVar,
+    );
+  });
 
-    it(`recusa ${nome} de 43 caracteres cuja recodificação difere do texto`, () => {
-      // 43 caracteres levam 258 bits; os 2 últimos sobram. 'B' liga um deles: decodifica para os
-      // mesmos 32 bytes zero de 'AAA...A', mas recodificar devolve 'A' no fim.
-      const comBitsExtras = `${'A'.repeat(42)}B`;
-      expect(Buffer.from(comBitsExtras, 'base64url')).toHaveLength(32);
-      expect(Buffer.from(comBitsExtras, 'base64url').toString('base64url')).not.toBe(comBitsExtras);
+  it(`não sobe com ${arquivoDaVar} relativo (specs/014: caminho absoluto)`, () => {
+    expect(
+      mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: 'segredos/db_password' }))),
+    ).toContain(arquivoDaVar);
+  });
 
-      const mensagem = mensagemDe(() => carregarEnv(envValido({ [nome]: comBitsExtras })));
+  it(`recusa quebra de linha no fim do arquivo de ${arquivoDaVar}`, () => {
+    const valor = segredo();
 
-      expect(mensagem).toContain(nome);
-      expect(mensagem).not.toContain(comBitsExtras);
-    });
+    const mensagem = mensagemDe(() =>
+      carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(`${valor}\n`) })),
+    );
 
-    it(`valor fora da forma canônica no arquivo cita ${arquivoDaVar}, não o valor`, () => {
-      const valor = `${canonico.slice(0, 42)}=`;
+    expect(mensagem).toContain(arquivoDaVar);
+    expect(mensagem).not.toContain(valor);
+  });
 
-      const mensagem = mensagemDe(() =>
-        carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(valor) })),
-      );
+  it(`recusa arquivo de ${arquivoDaVar} vazio`, () => {
+    expect(mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: gravar('') })))).toContain(
+      arquivoDaVar,
+    );
+  });
 
-      expect(mensagem).toContain(arquivoDaVar);
-      expect(mensagem).not.toContain(canonico.slice(0, 42));
-    });
-  },
-);
+  // Exemplos fora da forma canônica: tamanho, alfabeto, padding, quebra de linha e um último
+  // caractere com bits extras (decodifica para os mesmos 32 bytes, mas recodificar muda o texto).
+  const canonico = randomBytes(32).toString('base64url');
+  const naoCanonicos: readonly [string, string][] = [
+    ['42 caracteres', canonico.slice(0, 42)],
+    ['44 caracteres', `${canonico}A`],
+    ['com padding', `${canonico.slice(0, 42)}=`],
+    ['alfabeto base64 padrão (+ e /)', `${canonico.slice(0, 41)}+/`],
+    ['com espaço no fim', `${canonico} `],
+    ['com quebra de linha no fim', `${canonico}\n`],
+    ['vazio', ''],
+  ];
+
+  it.each(naoCanonicos)(`recusa ${nome} %s`, (_, valor) => {
+    const mensagem = mensagemDe(() => carregarEnv(envValido({ [nome]: valor })));
+
+    expect(mensagem).toContain(nome);
+    if (valor !== '') {
+      expect(mensagem).not.toContain(valor.trim());
+    }
+  });
+
+  it(`recusa ${nome} de 43 caracteres cuja recodificação difere do texto`, () => {
+    // 43 caracteres levam 258 bits; os 2 últimos sobram. 'B' liga um deles: decodifica para os
+    // mesmos 32 bytes zero de 'AAA...A', mas recodificar devolve 'A' no fim.
+    const comBitsExtras = `${'A'.repeat(42)}B`;
+    expect(Buffer.from(comBitsExtras, 'base64url')).toHaveLength(32);
+    expect(Buffer.from(comBitsExtras, 'base64url').toString('base64url')).not.toBe(comBitsExtras);
+
+    const mensagem = mensagemDe(() => carregarEnv(envValido({ [nome]: comBitsExtras })));
+
+    expect(mensagem).toContain(nome);
+    expect(mensagem).not.toContain(comBitsExtras);
+  });
+
+  it(`valor fora da forma canônica no arquivo cita ${arquivoDaVar}, não o valor`, () => {
+    const valor = `${canonico.slice(0, 42)}=`;
+
+    const mensagem = mensagemDe(() => carregarEnv(semAVariavel({ [arquivoDaVar]: gravar(valor) })));
+
+    expect(mensagem).toContain(arquivoDaVar);
+    expect(mensagem).not.toContain(canonico.slice(0, 42));
+  });
+});

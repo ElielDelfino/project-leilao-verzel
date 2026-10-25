@@ -1,6 +1,7 @@
 // Montagem da aplicação HTTP compartilhada por main.ts (via servidor.ts) e pelos testes.
 import { randomUUID } from 'node:crypto';
 
+import fastifyCookie from '@fastify/cookie';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { LogController } from 'fastify';
 import type { Logger } from 'pino';
@@ -24,13 +25,17 @@ export const ROTULO_DO_REQUEST_ID = 'requestId';
  * que esta API não usa.
  */
 export function criarAdaptadorFastify(logger: Logger): FastifyAdapter {
-  return new FastifyAdapter({
+  const adaptador = new FastifyAdapter({
     loggerInstance: logger,
     logController: new LogController({ requestIdLogLabel: ROTULO_DO_REQUEST_ID }),
     requestIdHeader: false,
     genReqId: () => randomUUID(),
     frameworkErrors: responderErroDoRoteador,
   });
+  // Cookies (specs/003 §Cookies, ADR 0027): lê `request.cookies` no onRequest e escreve os
+  // Set-Cookie. Registrado antes de qualquer rota; o Fastify o carrega no ready().
+  void adaptador.getInstance().register(fastifyCookie);
+  return adaptador;
 }
 
 export function configurarApp(app: NestFastifyApplication): void {

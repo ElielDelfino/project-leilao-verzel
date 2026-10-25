@@ -20,7 +20,12 @@ export class FiltroDeExcecoes implements ExceptionFilter {
   catch(excecao: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const requisicao = http.getRequest<RequisicaoComLog>();
-    const { status, corpo } = traduzirExcecao(excecao, requisicao.log);
-    this.hospedeiroHttp.httpAdapter.reply(http.getResponse(), falha(corpo), status);
+    const { status, corpo, cabecalhos } = traduzirExcecao(excecao, requisicao.log);
+    const adaptador = this.hospedeiroHttp.httpAdapter;
+    const resposta: unknown = http.getResponse();
+    for (const [nome, valor] of Object.entries(cabecalhos ?? {})) {
+      adaptador.setHeader(resposta, nome, valor);
+    }
+    adaptador.reply(resposta, falha(corpo), status);
   }
 }

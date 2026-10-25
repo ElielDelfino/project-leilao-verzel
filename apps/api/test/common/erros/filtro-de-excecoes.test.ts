@@ -230,10 +230,12 @@ describe('filtro global de exceções (envelope de erro de specs/001 §Contratos
     expect(resposta.json()).toMatchObject({ sucesso: false, erro: { codigo: 'DADOS_INVALIDOS' } });
   });
 
-  it('POST com JSON válido continua funcionando', async () => {
+  it('POST com JSON válido continua funcionando (com o CSRF do double-submit, specs/003)', async () => {
+    const csrf = 'token-csrf-de-teste';
     const resposta = await app.inject({
       method: 'POST',
       url: '/api/teste-erros/eco',
+      headers: { cookie: `csrf_token=${csrf}`, 'x-csrf-token': csrf },
       payload: { valorCentavos: 1500 },
     });
 

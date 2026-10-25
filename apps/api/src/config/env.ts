@@ -6,6 +6,7 @@ import {
   type ConexaoDoBanco,
   ErroDeConfiguracaoDoBanco,
   lerConexaoDoBanco,
+  VARIAVEIS_DA_API,
 } from '../db/conexao.js';
 import { type ConexaoDoRedis, criarConexaoDoRedis } from '../redis/conexao.js';
 import { ehSegredoCanonico, resolverSegredo } from './segredos.js';
@@ -25,11 +26,20 @@ const texto = z.string().min(1);
 const segredo = z.string().refine(ehSegredoCanonico);
 
 /**
- * Segredos lidos de <VAR> ou <VAR>_FILE (specs/014 §Leitura). Nesta fase, só as senhas de
- * Postgres e Redis; JWT_SECRET, PSEUDONYM_HMAC_KEY e ED25519_PRIVATE_KEY entram na F1.
+ * Segredos que a API lê de <VAR> ou <VAR>_FILE (specs/014 §Leitura e §Conexão). A API conecta
+ * como o papel `leilao_api` (DB_API_PASSWORD) e não lê DB_PASSWORD, que é do dono (ADR 0026).
  */
-const SEGREDOS = ['DB_PASSWORD', 'REDIS_PASSWORD'] as const;
+const SEGREDOS = [
+  'DB_API_PASSWORD',
+  'REDIS_PASSWORD',
+  'JWT_SECRET',
+  'PSEUDONYM_HMAC_KEY',
+  'ED25519_PRIVATE_KEY',
+] as const;
 type NomeDoSegredo = (typeof SEGREDOS)[number];
+
+/** Origem da SPA: só http:// ou https:// seguido de host (specs/003 §Cookies, ADR 0027). */
+const origemWeb = z.string().regex(/^https?:\/\/[^\s/?#]+$/);
 
 // specs/014 §Conexão: todas obrigatórias e sem default no código; não há DATABASE_URL nem REDIS_URL.
 const esquemaDoEnv = z.object({
@@ -38,25 +48,60 @@ const esquemaDoEnv = z.object({
   POSTGRES_HOST: texto,
   POSTGRES_PORT: porta,
   POSTGRES_DB: texto,
-  POSTGRES_USER: texto,
-  DB_PASSWORD: segredo,
+  POSTGRES_API_USER: texto,
+  DB_API_PASSWORD: segredo,
   REDIS_HOST: texto,
   REDIS_PORT: porta,
   REDIS_PASSWORD: segredo,
+  JWT_SECRET: segredo,
+  PSEUDONYM_HMAC_KEY: segredo,
+  ED25519_PRIVATE_KEY: segredo,
+  WEB_ORIGIN: origemWeb,
 });
 
 type VariaveisDoEnv = z.infer<typeof esquemaDoEnv>;
 export type NivelDeLog = VariaveisDoEnv['LOG_LEVEL'];
 
 /**
- * Env já validado. As senhas só existem dentro de `postgres` e `redis`, como propriedade não
- * enumerável: um log ou JSON.stringify do env não as expõe.
+ * Chaves da API, já decodificadas (32 bytes cada; specs/014 §Segredos). As três propriedades
+ * são não enumeráveis: JSON.stringify, spread e util.inspect não as mostram.
+ */
+export interface SegredosDaApi {
+  /** Chave HS256 do access token: os 32 bytes de JWT_SECRET (specs/003). */
+  readonly chaveJwt: Uint8Array;
+  /** Chave HMAC-SHA256 dos pseudônimos (specs/008), de PSEUDONYM_HMAC_KEY. */
+  readonly chavePseudonimo: Uint8Array;
+  /** Seed Ed25519 (RFC 8032 §5.1.5) de ED25519_PRIVATE_KEY (specs/008). */
+  readonly sementeEd25519: Uint8Array;
+}
+
+/**
+ * Env já validado. Senhas e chaves só existem dentro de `postgres`, `redis` e `segredos`, como
+ * propriedade não enumerável: um log ou JSON.stringify do env não as expõe.
  */
 export interface Env {
   readonly API_PORT: number;
   readonly LOG_LEVEL: NivelDeLog;
   readonly postgres: ConexaoDoBanco;
   readonly redis: ConexaoDoRedis;
+  /** Origem da SPA (specs/014 §Conexão). */
+  readonly WEB_ORIGIN: string;
+  /** `Secure` nos cookies: WEB_ORIGIN começa com https:// (specs/003 §Cookies, ADR 0027). */
+  readonly cookiesSeguros: boolean;
+  readonly segredos: SegredosDaApi;
+}
+
+/** Monta SegredosDaApi com as chaves não enumeráveis. */
+export function criarSegredosDaApi(chaves: SegredosDaApi): SegredosDaApi {
+  const segredos = {};
+  for (const [nome, valor] of Object.entries(chaves)) {
+    Object.defineProperty(segredos, nome, { value: valor, enumerable: false });
+  }
+  return Object.freeze(segredos) as SegredosDaApi;
+}
+
+function decodificar(valor: string): Uint8Array {
+  return new Uint8Array(Buffer.from(valor, 'base64url'));
 }
 
 /** Token de injeção do env já validado. */
@@ -97,13 +142,16 @@ function falhar(problemas: readonly string[]): never {
 function montarEnv(dados: VariaveisDoEnv): Env {
   let postgres: ConexaoDoBanco;
   try {
-    postgres = lerConexaoDoBanco({
-      POSTGRES_HOST: dados.POSTGRES_HOST,
-      POSTGRES_PORT: String(dados.POSTGRES_PORT),
-      POSTGRES_DB: dados.POSTGRES_DB,
-      POSTGRES_USER: dados.POSTGRES_USER,
-      DB_PASSWORD: dados.DB_PASSWORD,
-    });
+    postgres = lerConexaoDoBanco(
+      {
+        POSTGRES_HOST: dados.POSTGRES_HOST,
+        POSTGRES_PORT: String(dados.POSTGRES_PORT),
+        POSTGRES_DB: dados.POSTGRES_DB,
+        POSTGRES_API_USER: dados.POSTGRES_API_USER,
+        DB_API_PASSWORD: dados.DB_API_PASSWORD,
+      },
+      VARIAVEIS_DA_API,
+    );
   } catch (erro: unknown) {
     if (erro instanceof ErroDeConfiguracaoDoBanco) {
       falhar(erro.variaveis);
@@ -118,6 +166,13 @@ function montarEnv(dados: VariaveisDoEnv): Env {
       { host: dados.REDIS_HOST, port: dados.REDIS_PORT },
       dados.REDIS_PASSWORD,
     ),
+    WEB_ORIGIN: dados.WEB_ORIGIN,
+    cookiesSeguros: dados.WEB_ORIGIN.startsWith('https://'),
+    segredos: criarSegredosDaApi({
+      chaveJwt: decodificar(dados.JWT_SECRET),
+      chavePseudonimo: decodificar(dados.PSEUDONYM_HMAC_KEY),
+      sementeEd25519: decodificar(dados.ED25519_PRIVATE_KEY),
+    }),
   };
 }
 

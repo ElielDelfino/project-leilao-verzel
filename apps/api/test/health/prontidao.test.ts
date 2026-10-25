@@ -41,6 +41,35 @@ describe('ServicoDeProntidao', () => {
     expect(avisos).not.toHaveBeenCalled();
   });
 
+  // Revisão da 017 (MEDIUM): chamadas concorrentes ao /ready não podem abrir uma consulta cada.
+  it('chamadas concorrentes compartilham a verificação em andamento (single-flight)', async () => {
+    let liberar = (): void => undefined;
+    const verificar = vi.fn(
+      () =>
+        new Promise<void>((resolver) => {
+          liberar = resolver;
+        }),
+    );
+    const servico = new ServicoDeProntidao([{ nome: 'postgres', verificar }]);
+
+    const chamadas = Array.from({ length: 10 }, () => servico.verificar());
+    liberar();
+    const resultados = await Promise.all(chamadas);
+
+    expect(verificar).toHaveBeenCalledTimes(1);
+    expect(resultados.every((r) => r.pronto)).toBe(true);
+  });
+
+  it('depois que a verificação termina, a próxima chamada verifica de novo', async () => {
+    const verificar = vi.fn(async () => {});
+    const servico = new ServicoDeProntidao([{ nome: 'postgres', verificar }]);
+
+    await servico.verificar();
+    await servico.verificar();
+
+    expect(verificar).toHaveBeenCalledTimes(2);
+  });
+
   it('não fica pronto quando uma verificação falha e informa qual', async () => {
     const servico = new ServicoDeProntidao([ok('postgres'), falha('redis')]);
 
