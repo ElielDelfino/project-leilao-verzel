@@ -29,14 +29,20 @@ Revisão: agentes globais `code-reviewer` (sempre), `security-reviewer` (auth, c
 - Trunk-based: `main` sempre implantável.
 - Uma branch curta por tarefa, `tipo/nnn-slug` (ex.: `feat/012-aceitar-lance`), num **git worktree** próprio.
 - Conventional Commits citando a tarefa: `feat(lances): aceita lance em transação (task 012)`.
-- PR obrigatório com CI verde (`verify:full`), squash merge, self-merge permitido após o `code-reviewer` sem CRITICAL/HIGH.
+- Merge local por lote, PR a cada 3 lotes (ADR 0030, que complementa a 0019 e a 0021):
+  - Cada tarefa entra na `main` local como um commit squash, com a mensagem do agente, depois do `code-reviewer` sem CRITICAL/HIGH (e dos demais revisores globais aplicáveis) e da aprovação humana do merge do lote.
+  - Ao fechar o lote, `pnpm verify:full` roda na `main` local (com `--e2e` se alguma tarefa do lote mexe em e2e) e vale como o CI do lote.
+  - A cada 3 lotes, ou quando o humano pedir: uma branch com os commits acumulados e um PR (título conforme o commitlint, subject em minúsculas). O CI roda uma vez; `gh pr checks` é lido em comando separado e só então o merge, por rebase, com um commit por tarefa; depois a `main` local é alinhada com a remota.
+  - O PR periódico é obrigatório: gitleaks, `audit` e CodeQL só rodam no CI.
+  - Push e PR só com aprovação humana.
+- Agentes de papel não fazem `git add` nem `git commit`; o orquestrador commita na branch da tarefa.
 - Conflito: quem faz merge depois faz rebase na `main` e roda `verify:quick` de novo.
 
 ## Fluxo das tarefas (`./tasks/`, fora do Git)
 1. Problemas encontrados por inspeção ou pedidos entre papéis viram uma nova tarefa, criada pelo orquestrador (template em AGENTS.md).
 2. O orquestrador escolhe tarefas `aberta` com todas as `depende-de` concluídas (arquivo removido), em lotes de até 3 sem `arquivos` sobrepostos, e pede aprovação humana.
 3. Ele marca `status: em-andamento` e `responsavel`, e entrega o texto integral da tarefa ao agente do papel (em worktree próprio, depois que existir git).
-4. O agente devolve o relatório no formato fixo; o orquestrador encaminha a revisão aos agentes globais e, com aprovação humana, faz o merge. Voltam ao agente no mesmo ciclo só CRITICAL, HIGH e MEDIUM que toque dinheiro, lance, integridade do histórico, auth ou segredos; o resto vai para o hardening da F5 ou para a nota da tarefa futura que mexe no mesmo código. Se o agente original passou de ~150 mil tokens de contexto, a correção vai para um agente novo do mesmo papel, no mesmo worktree, só com o relatório da revisão (ADR 0028).
+4. O agente devolve o relatório no formato fixo; o orquestrador commita na branch da tarefa, encaminha a revisão aos agentes globais e, com aprovação humana, faz o merge squash na `main` local; o `verify:full` do lote e o PR a cada 3 lotes seguem §Git e PR (ADR 0030). Voltam ao agente no mesmo ciclo só CRITICAL, HIGH e MEDIUM que toque dinheiro, lance, integridade do histórico, auth ou segredos; o resto vai para o hardening da F5 ou para a nota da tarefa futura que mexe no mesmo código. Se o agente original passou de ~150 mil tokens de contexto, a correção vai para um agente novo do mesmo papel, no mesmo worktree, só com o relatório da revisão (ADR 0028).
 5. Após o merge, o orquestrador remove o arquivo da tarefa. Tarefa descartada também é removida; se o descarte for uma decisão, vira ADR.
 6. No fim da fase, o spec-guardian redige as tarefas da fase seguinte e o orquestrador as grava em `tasks/`.
 
@@ -63,4 +69,4 @@ Pare e pergunte quando:
 Fora desses casos, siga a recomendação mais conservadora, registre-a na tarefa e prossiga.
 
 ## Decisões relacionadas
-- decisions/0019-organizacao-agentes-e-git.md, 0021-orquestracao-e-agentes-executores.md, 0028-modelo-e-esforco-por-papel.md
+- decisions/0019-organizacao-agentes-e-git.md, 0021-orquestracao-e-agentes-executores.md, 0028-modelo-e-esforco-por-papel.md, 0030-merge-local-por-lote.md
