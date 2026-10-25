@@ -46,7 +46,7 @@ Nota fiscal, revenda entre usuários, aplicativo nativo, recuperação de senha 
 | RNF-07 | Acessibilidade | WCAG 2.2 AA nas telas de RF-01 a RF-07 |
 | RNF-08 | Privacidade | auditoria e comprovante identificam licitantes só por pseudônimo; dados coletados: nome, e-mail, senha (hash argon2id) |
 | RNF-09 | Retenção | lances, ledger e comprovantes permanentes; logs 14 dias; refresh tokens expirados expurgados diariamente; cache da Scryfall 24 h |
-| RNF-10 | Encerramento | um lote é liquidado no máximo 1 s após o fim |
+| RNF-10 | Encerramento | um lote é liquidado em até 2 s após o fim (p95; varredura de 1 s mais a transação; ADR 0032, que complementa a 0008) |
 | RNF-11 | Custo | infraestrutura de produção com custo zero (free tier GCP) |
 
 ## Critérios de sucesso
@@ -56,4 +56,4 @@ Nota fiscal, revenda entre usuários, aplicativo nativo, recuperação de senha 
 - [ ] Teste de carga k6 atinge RNF-01 a RNF-03.
 
 ## Decisões relacionadas
-- decisions/0001-decisoes-iniciais.md, 0002-api-externa-scryfall.md, 0014-rnfs-de-demo.md
+- decisions/0001-decisoes-iniciais.md, 0002-api-externa-scryfall.md, 0014-rnfs-de-demo.md, 0032-complementos-da-f4.md
