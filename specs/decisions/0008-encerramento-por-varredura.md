@@ -12,4 +12,4 @@ Job interno a cada 1 s com `FOR UPDATE SKIP LOCKED` faz agendado → ao vivo e l
 - Cloud Tasks (se fosse Cloud Run): descartado com a ADR 0013.
 
 ## Consequências
-Latência de encerramento ≤ 1 s; seguro com N instâncias; custo de uma query leve por segundo.
+Latência de encerramento ≤ 1 s de espera pela varredura (complementada pela ADR 0032: a meta de encerramento passa a ≤ 2 s após `fim_em`, somando a transação); seguro com N instâncias; custo de uma query leve por segundo.

@@ -1,13 +1,14 @@
 # Contrato REST (OpenAPI 3.1). Fonte: specs/001 e specs/003–011. Dono: spec-guardian.
 # F1 (tarefa 009): rotas de specs/003 (auth) e specs/004 (carteira). F2 (tarefa 049): rotas de
 # specs/005 (catálogo, imagens) e specs/006 (lotes, painel). F3 (tarefa 070): rotas de specs/007
-# (lances) e specs/008 (auditoria). As demais fases acrescentam as suas.
+# (lances) e specs/008 (auditoria). F4 (tarefa 100): rotas de specs/006 e 010 (cancelamento) e de
+# specs/011 (comprovante, meus arremates). As demais fases acrescentam as suas.
 # Ponto de atenção: Centavos e Pseudonimo são duplicados em eventbus/socketio/asyncapi.yaml; mude os
 # dois juntos.
 openapi: 3.1.0
 info:
   title: Casa de Leilões API
-  version: 0.5.0
+  version: 0.6.0
   license: { name: MIT, identifier: MIT }
   description: |
     Envelope (specs/001 §Contratos): sucesso `{ sucesso: true, dados }`; erro
@@ -37,11 +38,13 @@ tags:
   - name: lotes
     description: Vitrine e detalhe do lote, públicos (specs/006).
   - name: painel
-    description: Criação de lotes, lista e resumo do leiloeiro (specs/006).
+    description: Criação e cancelamento de lotes, lista e resumo do leiloeiro (specs/006, specs/010).
   - name: lances
     description: Lance, histórico público do lote e lances do usuário (specs/007).
   - name: auditoria
     description: Cadeia de lances, veredito do servidor e chaves públicas, públicos (specs/008).
+  - name: comprovantes
+    description: Comprovante público de arremate e "Meus arremates" do licitante (specs/011).
 paths:
   /api/health/live:
     get:
@@ -594,7 +597,14 @@ paths:
         veredito `integro`). `selo` é null enquanto o lote não foi encerrado nem cancelado. O veredito
         reflete o banco no momento da consulta, por isso a resposta nunca é cacheada
         (`Cache-Control: no-store`). Lote inexistente, ou id que não é UUID, é 404 `NAO_ENCONTRADO`.
-        Só pseudônimos: nenhum nome, e-mail nem id de usuário.
+        Só pseudônimos: nenhum nome, e-mail nem id de usuário. Rate limit (specs/011 §Rate limit),
+        contado junto com `GET /api/auditoria/chaves`: **até a tarefa 020 (`trustProxy`, F5), só um
+        teto global de 600 requisições por minuto** (sem limite fino por IP: atrás do Caddy todos os
+        clientes teriam o mesmo IP; risco aceito, como em specs/003); **a partir da 020, 60 por minuto
+        por IP** (IPv6 agrupado por /64). Acima do limite, 429 `MUITAS_TENTATIVAS` com `Retry-After`.
+        O contador conta depois da validação de formato (id que não é UUID é 404 e não o consome).
+        Janela fixa: rajada de até 2 vezes o limite na virada. Redis fora: falha **aberta** (a
+        requisição passa, com aviso de log). Todas as respostas, inclusive os erros, são `no-store`.
       security: []
       parameters:
         - name: id
@@ -632,7 +642,9 @@ paths:
                   selo: null
                   veredito: integro
                   problemas: []
-        '404': { $ref: '#/components/responses/ErroNaoEncontrado' }
+        '404': { $ref: '#/components/responses/ErroNaoEncontradoNoStore' }
+        '429': { $ref: '#/components/responses/ErroMuitasTentativasNoStore' }
+        '503': { $ref: '#/components/responses/ErroIndisponivelNoStore' }
         default: { $ref: '#/components/responses/Erro' }
 
   /api/auditoria/chaves:
@@ -644,6 +656,10 @@ paths:
         Lê `signing_keys`, ordenada por `ativaDesde` crescente (desempate `keyId`); a chave antiga
         continua publicada depois de uma rotação. `Cache-Control: public, max-age=60`. O navegador que
         encontrar um `keyId` ausente da lista refaz a consulta uma vez antes de acusar problema.
+        Mesmo contador e mesmo regime de rate limit de `GET /api/auditoria/lotes/{id}` (teto global de
+        600 por minuto até a tarefa 020, 60 por minuto por IP depois; falha aberta se o Redis cair;
+        specs/011 §Rate limit). O 429 e o 503 saem com `Cache-Control: no-store`; só o 200 é
+        `public, max-age=60`.
       security: []
       responses:
         '200':
@@ -660,6 +676,8 @@ paths:
                     algoritmo: Ed25519
                     chavePublica: '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo'
                     ativaDesde: '2026-10-25T12:00:00.000Z'
+        '429': { $ref: '#/components/responses/ErroMuitasTentativasNoStore' }
+        '503': { $ref: '#/components/responses/ErroIndisponivelNoStore' }
         default: { $ref: '#/components/responses/Erro' }
 
   /api/painel/lotes:
@@ -741,6 +759,163 @@ paths:
                   dados: { $ref: '#/components/schemas/ResumoDoPainel' }
         '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
         '403': { $ref: '#/components/responses/ErroPapelNaoPermitido' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/painel/lotes/{id}/cancelamento:
+    post:
+      tags: [painel]
+      operationId: painelCancelarLote
+      summary: Cancela o lote do próprio leiloeiro, com estorno do líder (specs/006 RF-04, specs/010)
+      description: |
+        Só enquanto o lote está `agendado` ou `ao_vivo`; sem corpo. Antes da transação, nesta ordem:
+        CSRF (403 `CSRF_INVALIDO`), sessão (401), papel (403 `PAPEL_NAO_PERMITIDO`) e `id` que não é
+        UUID (404 `NAO_ENCONTRADO`). Uma transação, com o lote travado por `FOR UPDATE` antes das
+        carteiras (specs/010 §Cancelamento): lote inexistente ou de outro leiloeiro → 404
+        `NAO_ENCONTRADO` (os dois casos são indistinguíveis); status gravado `encerrado` ou
+        `cancelado`, ou horário do Postgres ≥ `fimEm` (o job ainda não encerrou o lote) → 409
+        `LOTE_ENCERRADO`. Com líder, estorna o comprometido dele e sela o histórico com status
+        `cancelado`; tudo ou nada. A resposta é o `Lote` lido depois do COMMIT (status `cancelado`).
+        O valor estornado é o `compromisso` lido sob o lock do lote, nunca um valor do cliente.
+        Repetir o pedido depois do sucesso → 409 `LOTE_ENCERRADO`. Contenção de lock além de 5 s
+        (`lock_timeout`) ou consulta além de 10 s (`statement_timeout`) → rollback e 503
+        `INDISPONIVEL` sem `detalhes`. Depois do COMMIT saem os eventos `lote_cancelado` e, se havia líder,
+        `saldo_atualizado` para ele (specs/009).
+      security:
+        - cookieAcesso: []
+          csrf: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '200':
+          description: Lote cancelado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/Lote' }
+              example:
+                sucesso: true
+                dados:
+                  id: '0198f3c0-7b1a-7c00-8000-000000000001'
+                  titulo: Black Lotus
+                  status: cancelado
+                  cartaNome: Black Lotus
+                  raridade: rare
+                  imagemUrl: /api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1
+                  inicioEm: '2026-10-27T14:00:00.000Z'
+                  fimEm: '2026-10-27T14:30:00.000Z'
+                  lanceInicialCentavos: 10000
+                  incrementoMinimoCentavos: 1500
+                  lanceAtualCentavos: 16500
+                  precoAtualCentavos: 16500
+                  totalLances: 2
+                  valorArremateCentavos: null
+                  criadoEm: '2026-10-27T13:50:00.000Z'
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroCsrfOuPapel' }
+        '404': { $ref: '#/components/responses/ErroNaoEncontrado' }
+        '409': { $ref: '#/components/responses/ErroLoteEncerradoNoCancelamento' }
+        '503': { $ref: '#/components/responses/ErroIndisponivel' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/comprovantes/{codigo}:
+    get:
+      tags: [comprovantes]
+      operationId: comprovanteObter
+      summary: Comprovante de arremate pelo código público, sem login (specs/011)
+      description: |
+        O acesso público é só pelo `codigo` (16 caracteres base62 aleatórios, cerca de 95 bits;
+        anti-IDOR). Código fora do formato `^[0-9A-Za-z]{16}$` e código inexistente respondem o mesmo
+        404 `NAO_ENCONTRADO`, sem pista de qual foi o caso. Nunca chama a Scryfall: a imagem é
+        `/api/imagens/{snapshotId}`. Só pseudônimo: nenhum nome, e-mail nem id de usuário. Nunca
+        cacheada: o 200 e os erros (404, 429, 503) saem com `Cache-Control: no-store`. Rate limit com
+        contador próprio, separado do da auditoria (specs/011 §Rate limit): **até a tarefa 020
+        (`trustProxy`, F5), só um teto global de 600 requisições por minuto** (sem limite fino por IP;
+        risco aceito, como em specs/003); **a partir da 020, 60 por minuto por IP** (IPv6 agrupado por
+        /64). Acima do limite, 429 `MUITAS_TENTATIVAS` com `Retry-After`. O contador conta depois da
+        validação de formato (código malformado é 404 e não o consome). Janela fixa: rajada de até 2
+        vezes o limite na virada. Redis fora: falha **aberta** (a requisição passa, com aviso de log).
+      security: []
+      parameters:
+        - name: codigo
+          in: path
+          required: true
+          description: '`codigo` do comprovante; o formato é validado pelo servidor (malformado → 404).'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Comprovante.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaComprovante' }
+              example:
+                sucesso: true
+                dados:
+                  codigo: k3Zt9QmW2xVbN7aD
+                  vencedorPseudonimo: 'Licitante #b04e7d'
+                  valorCentavos: 16500
+                  carta:
+                    nome: Black Lotus
+                    imagemUrl: /api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1
+                  hashFinal: '70110ba5cbdcbd8f62e443939427c9182717a6273e4b5b2bea997034a5427e93'
+                  assinaturaSelo: 'LBufCwppRc8LYu11Cam_IkR9Wu1cx-63pBnrnGYbHfy8MExN_wQR-cuvTM6KAtVsrAFCfWnaHX2sWNb2zXKvCA'
+                  keyId: '21fe31dfa154a261'
+                  seladoEm: '2026-10-27T14:30:00.412Z'
+                  emitidoEm: '2026-10-27T14:30:00.431Z'
+                  auditoriaUrl: /auditoria/0198f3c0-7b1a-7c00-8000-000000000001
+        '404': { $ref: '#/components/responses/ErroNaoEncontradoNoStore' }
+        '429': { $ref: '#/components/responses/ErroMuitasTentativasNoStore' }
+        '503': { $ref: '#/components/responses/ErroIndisponivelNoStore' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/me/arremates:
+    get:
+      tags: [comprovantes]
+      operationId: meArrematesListar
+      summary: Lotes arrematados pelo licitante, com o comprovante (specs/011 RF-03)
+      description: |
+        Só os recibos do próprio usuário (nunca de outro), por `emitidoEm` decrescente (desempate
+        `id` do recibo decrescente); **24 por página** (`meta.limite` = 24); `pagina` de 1 a 500;
+        além da última, 200 com lista vazia e o `total` real. Só licitante: leiloeiro recebe 403
+        `PAPEL_NAO_PERMITIDO`. Sem nome, e-mail nem id de usuário. Nunca cacheada
+        (`Cache-Control: no-store`, também nos erros 401, 403, 422 e 503). A aba "Meus lances" usa
+        `GET /api/me/lances`. Sem rate limit (rota autenticada).
+      security:
+        - cookieAcesso: []
+      parameters:
+        - $ref: '#/components/parameters/PaginaLimitada'
+      responses:
+        '200':
+          description: Página dos arremates do usuário.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaMeusArremates' }
+              example:
+                sucesso: true
+                dados:
+                  - codigo: k3Zt9QmW2xVbN7aD
+                    valorCentavos: 16500
+                    carta:
+                      nome: Black Lotus
+                      imagemUrl: /api/imagens/0198f3c0-7b1a-7c00-8000-0000000000a1
+                    emitidoEm: '2026-10-27T14:30:00.431Z'
+                    auditoriaUrl: /auditoria/0198f3c0-7b1a-7c00-8000-000000000001
+                meta: { total: 1, pagina: 1, limite: 24 }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticadoNoStore' }
+        '403': { $ref: '#/components/responses/ErroPapelNaoPermitidoNoStore' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidosComCampoNoStore' }
+        '503': { $ref: '#/components/responses/ErroIndisponivelNoStore' }
         default: { $ref: '#/components/responses/Erro' }
 
 components:
@@ -1417,6 +1592,94 @@ components:
           type: array
           items: { $ref: '#/components/schemas/ChavePublica' }
 
+    CodigoDoComprovante:
+      description: |
+        Código público do comprovante: 16 caracteres base62 aleatórios, cerca de 95 bits (specs/010
+        §Dados). É a única chave de acesso público ao comprovante.
+      type: string
+      pattern: '^[0-9A-Za-z]{16}$'
+
+    CartaDoComprovante:
+      description: Nome e imagem da carta; a imagem é sempre `/api/imagens/{snapshotId}`, nunca a Scryfall.
+      type: object
+      required: [nome, imagemUrl]
+      additionalProperties: false
+      properties:
+        nome: { type: string }
+        imagemUrl:
+          type: string
+          pattern: '^/api/imagens/[0-9a-fA-F-]{36}$'
+
+    Comprovante:
+      description: |
+        Comprovante de arremate (specs/011), sem dados pessoais: nenhum nome, e-mail nem id de
+        usuário. `hashFinal`, `assinaturaSelo`, `keyId` e `seladoEm` são os do selo do lote
+        (specs/008) gravados no recibo; `valorCentavos` e `vencedorPseudonimo` são os do selo.
+        `auditoriaUrl` é a rota da SPA, `/auditoria/{loteId}`.
+      type: object
+      required:
+        - codigo
+        - vencedorPseudonimo
+        - valorCentavos
+        - carta
+        - hashFinal
+        - assinaturaSelo
+        - keyId
+        - seladoEm
+        - emitidoEm
+        - auditoriaUrl
+      additionalProperties: false
+      properties:
+        codigo: { $ref: '#/components/schemas/CodigoDoComprovante' }
+        vencedorPseudonimo: { $ref: '#/components/schemas/Pseudonimo' }
+        valorCentavos: { $ref: '#/components/schemas/Centavos' }
+        carta: { $ref: '#/components/schemas/CartaDoComprovante' }
+        hashFinal: { $ref: '#/components/schemas/HashHex' }
+        assinaturaSelo: { $ref: '#/components/schemas/AssinaturaBase64Url' }
+        keyId: { $ref: '#/components/schemas/KeyId' }
+        seladoEm: { $ref: '#/components/schemas/Instante' }
+        emitidoEm: { $ref: '#/components/schemas/Instante' }
+        auditoriaUrl:
+          type: string
+          pattern: '^/auditoria/[0-9a-fA-F-]{36}$'
+
+    RespostaComprovante:
+      type: object
+      required: [sucesso, dados]
+      additionalProperties: false
+      properties:
+        sucesso: { const: true }
+        dados: { $ref: '#/components/schemas/Comprovante' }
+
+    Arremate:
+      description: |
+        Item de "Meus arremates" (specs/011): o resumo do comprovante do próprio usuário. O comprovante
+        completo está em `GET /api/comprovantes/{codigo}` e a rota da SPA é `/comprovantes/{codigo}`.
+        Sem nome, e-mail nem id de usuário.
+      type: object
+      required: [codigo, valorCentavos, carta, emitidoEm, auditoriaUrl]
+      additionalProperties: false
+      properties:
+        codigo: { $ref: '#/components/schemas/CodigoDoComprovante' }
+        valorCentavos: { $ref: '#/components/schemas/Centavos' }
+        carta: { $ref: '#/components/schemas/CartaDoComprovante' }
+        emitidoEm: { $ref: '#/components/schemas/Instante' }
+        auditoriaUrl:
+          type: string
+          pattern: '^/auditoria/[0-9a-fA-F-]{36}$'
+
+    RespostaMeusArremates:
+      type: object
+      required: [sucesso, dados, meta]
+      additionalProperties: false
+      properties:
+        sucesso: { const: true }
+        dados:
+          type: array
+          maxItems: 24
+          items: { $ref: '#/components/schemas/Arremate' }
+        meta: { $ref: '#/components/schemas/MetaPaginacao' }
+
     Erro:
       type: object
       required: [sucesso, erro]
@@ -1711,5 +1974,114 @@ components:
                   codigo: SALDO_INSUFICIENTE
                   mensagem: Saldo disponível insuficiente.
                   detalhes: { disponivelCentavos: 12000 }
+    ErroLoteEncerradoNoCancelamento:
+      description: |
+        O lote não pode mais ser cancelado (409 `LOTE_ENCERRADO`, specs/010 §Cancelamento): já está
+        `encerrado` ou `cancelado`, ou o horário do Postgres chegou ao `fimEm` e o job ainda não o
+        encerrou. Sem `detalhes`.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: LOTE_ENCERRADO } } }
+    # Variantes com `Cache-Control: no-store` para as rotas de auditoria, comprovante e meus
+    # arremates (specs/011 §Interfaces e contratos): o erro também nunca é cacheado.
+    ErroNaoEncontradoNoStore:
+      description: Recurso inexistente, ou id/código malformado, com o mesmo corpo (NAO_ENCONTRADO). Nunca cacheado.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: NAO_ENCONTRADO } } }
+    ErroMuitasTentativasNoStore:
+      description: |
+        Limite das rotas públicas de leitura excedido (MUITAS_TENTATIVAS, specs/011 §Rate limit):
+        teto global de 600 requisições por minuto por contador até a tarefa 020 (`trustProxy`, F5) e
+        60 por minuto por IP depois. Nunca cacheado.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: MUITAS_TENTATIVAS } } }
+    ErroNaoAutenticadoNoStore:
+      description: Sem cookie `access_token` válido (NAO_AUTENTICADO). Nunca cacheado.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: NAO_AUTENTICADO } } }
+    ErroPapelNaoPermitidoNoStore:
+      description: Rota restrita a outro papel (PAPEL_NAO_PERMITIDO). Nunca cacheado.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: PAPEL_NAO_PERMITIDO } } }
+    ErroDadosInvalidosComCampoNoStore:
+      description: |
+        Parâmetro fora do contrato (DADOS_INVALIDOS), com `detalhes.campo` = nome do primeiro campo
+        inválido. Nunca cacheado.
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo, detalhes]
+                    properties:
+                      codigo: { const: DADOS_INVALIDOS }
+                      detalhes:
+                        type: object
+                        additionalProperties: false
+                        required: [campo]
+                        properties:
+                          campo: { type: string }
+    ErroIndisponivelNoStore:
+      description: |
+        Dependência fora (banco; INDISPONIVEL), com mensagem fixa e sem `detalhes`. Nunca cacheado.
+        O Redis fora **não** causa este erro nas rotas públicas de leitura: o rate limit delas falha
+        aberto (specs/011 §Rate limit).
+      headers:
+        Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo]
+                    properties:
+                      codigo: { const: INDISPONIVEL }
+                      detalhes: false
 security:
   - cookieAcesso: []

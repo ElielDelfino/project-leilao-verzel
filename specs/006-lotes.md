@@ -7,7 +7,7 @@ Depende de: 003, 004, 005
 - RF-01 O leiloeiro cria um lote a partir de uma carta: título (default = nome da carta), descrição opcional, lance inicial, incremento mínimo, início e fim.
 - RF-02 Vitrine pública separada em ao vivo, agendados e encerrados; cancelados nunca aparecem.
 - RF-03 Busca e filtro: texto (título/carta), status, faixa de preço (lance atual ou inicial), raridade; ordenação por "termina antes", "mais recente" e "maior lance"; paginação de 24.
-- RF-04 Cancelamento pelo dono enquanto agendado ou ao vivo. Com lances, faz **estorno automático** do compromisso do líder (specs/004) na mesma transação e sela o histórico com status `cancelado`. A operação é executada pelo módulo `liquidacao` (specs/010 §Cancelamento, ADR 0025), porque envolve `carteira` e `lances`, que `lotes` não importa (specs/001).
+- RF-04 Cancelamento pelo dono enquanto agendado ou ao vivo. Com lances, faz **estorno automático** do compromisso do líder (specs/004) na mesma transação e sela o histórico com status `cancelado`. A operação é executada pelo módulo `liquidacao` (specs/010 §Cancelamento, ADR 0025), porque envolve `carteira` e `lances`, que `lotes` não importa (specs/001). Depois de `fim_em`, mesmo antes de o job gravar `encerrado`, o cancelamento é recusado (409 `LOTE_ENCERRADO`, complemento da ADR 0025 na ADR 0032): o status derivado já é `encerrado` e o lote é liquidado, não cancelado.
 - RF-05 Painel do leiloeiro: todos os seus lotes (inclusive cancelados), resultado de cada encerrado (arrematado ou não, por quanto) e total recebido.
 
 ## Comportamento
@@ -60,11 +60,17 @@ Os filtros se combinam com E. Resposta: `dados` = lista de `Lote` e `meta {total
 - `GET /api/lotes/{id}` (público, sessão opcional) → 200 `LoteDetalhe` · 404
 - `POST /api/painel/lotes` (leiloeiro) → 201 `Lote` · 401 · 403 · 422 · 503 `CATALOGO_OCUPADO` | `CATALOGO_INDISPONIVEL`
 - `GET /api/painel/lotes?pagina=` (dono) → 200 lista de `Lote` + `meta` · 401 · 403 · 422 e `GET /api/painel/resumo` → `{totalRecebidoCentavos, lotesArrematados, lotesSemLance}` · 401 · 403
-- `POST /api/painel/lotes/{id}/cancelamento` (dono) → 200 · 404 (lote inexistente ou de outro leiloeiro, specs/003) · 409 `LOTE_ENCERRADO`. A rota é servida por `liquidacao` (specs/010 §Cancelamento) e entra no `openapi.yaml` na F4; não faz parte do contrato da F2.
+- `POST /api/painel/lotes/{id}/cancelamento` (dono) → 200 `Lote` (status `cancelado`) · 401 · 403 · 404 (lote inexistente ou de outro leiloeiro, specs/003) · 409 `LOTE_ENCERRADO` (lote `encerrado` ou `cancelado`, ou `fim_em` já vencido) · 503 `INDISPONIVEL` (`lock_timeout` de 5 s ou `statement_timeout` de 10 s, specs/010). A rota é servida por `liquidacao` (specs/010 §Cancelamento) e consta do `openapi.yaml` desde a versão 0.6.0 (F4); não faz parte do contrato da F2.
 
 `suaPosicao` em `GET /api/lotes/{id}` usa só as colunas de `lots` (`lotes` não importa `lances`): `ganhando` (lote ao vivo e `lider_id` = usuário), `venceu` (lote encerrado e `vencedor_id` = usuário) ou `null` nos demais casos e para anônimos. As cinco posições (`ganhando`, `superado`, `venceu`, `perdeu`, `sem_lance`) vêm do ack de `entrar_lote` (specs/009) e de `GET /api/me/lances` (specs/007 §Posição do usuário no lote).
 
-Interface interna para `liquidacao` (recebe `tx`): travar o lote com `FOR UPDATE` e devolver a linha, e mudar o status (encerrado, cancelado); `lotes` continua dono de `lots`.
+### Interface interna para `liquidacao` (F4)
+`lotes` continua dono de `lots`; `liquidacao` só usa estas funções públicas (arquivo `interface-para-liquidacao.ts`, exportado por `index.ts`), com tipos próprios e `tx` quando há escrita. Lote antes de carteiras (specs/004). Nenhuma lê nome nem e-mail. Além delas, `liquidacao` usa `travarLote`, `agora` e `obterResumos` de §Interface interna para `lances`.
+- `iniciarLotesPendentes(tx, limite = 50): Promise<string[]>`: passa `agendado` com `inicio_em <= now()` a `ao_vivo` com `FOR UPDATE SKIP LOCKED` e devolve os ids.
+- `candidatosAoEncerramento(db, limite = 20): Promise<string[]>`: ids `ao_vivo` com `fim_em <= now()`, por `fim_em` crescente, **sem lock**.
+- `travarLoteVencido(tx, id): Promise<LoteTravado | null>`: `FOR UPDATE SKIP LOCKED` com `status='ao_vivo' AND fim_em <= clock_timestamp()`; `null` se outra transação o travou, se já foi encerrado ou se o anti-sniping estendeu o fim.
+- `encerrarLote(tx, id, {vencedorId, valorArremateCentavos, encerradoEm}): Promise<void>`: exige `ao_vivo`; `vencedorId` e valor ambos nulos (sem lances) ou ambos presentes; grava `encerrado`, vencedor, valor e `encerrado_em`; erro tipado se nenhuma linha muda.
+- `cancelarLote(tx, id, canceladoEm): Promise<void>`: exige `agendado` ou `ao_vivo`; grava `cancelado` e `cancelado_em`; erro tipado se nenhuma linha muda.
 
 ### Interface interna para `lances` (ADR 0031)
 `lances` nunca lê `lots`; usa só estas funções públicas de `lotes`, com tipos próprios (sem expor o `schema.ts`):
@@ -84,6 +90,8 @@ Implementação em `apps/api/src/modules/lotes/interface-para-lances.ts` (export
 ## Critérios de aceite
 - [ ] Lote cancelado some da vitrine e continua no painel do dono.
 - [ ] Cancelar com líder devolve o comprometido ao disponível (evento `saldo_atualizado`).
+- [ ] Cancelar depois de `fim_em` (status gravado ainda `ao_vivo`), um lote `encerrado` e um `cancelado` → 409 `LOTE_ENCERRADO` (teste de integração, specs/010).
+- [ ] Interface para `liquidacao`: duas transações simultâneas em `travarLoteVencido` do mesmo lote → só uma recebe a linha e a outra recebe `null` sem esperar; lote com `fim_em` estendido entre a varredura e o lock → `null`; `encerrarLote` recusa lote já `encerrado` e vencedor sem valor; `cancelarLote` recusa `encerrado` e `cancelado`; `iniciarLotesPendentes` inicia só `agendado` com `inicio_em <= now()` (teste de integração).
 - [ ] `GET /api/lotes/{id}` devolve `suaPosicao` `ganhando` para o líder do lote ao vivo, `venceu` para o vencedor do encerrado e `null` nos demais casos; com cookie inválido ou expirado responde 200 como anônimo (nunca 401).
 - [ ] `GET /api/lotes/{id}` de lote cancelado → 200 com `status` `cancelado`; id inexistente ou que não é UUID → 404.
 - [ ] Filtros combinados retornam o resultado correto (testes de integração): status derivado dos horários (agendado antes do início, ao vivo entre início e fim, encerrado a partir do fim mesmo com status gravado `ao_vivo`), `q` em título e em nome da carta (com `%` e `_` literais), faixa de preço por `coalesce(lance_atual, lance_inicial)`, `raridade`, cada `ordem`, com desempate por `id` decrescente (páginas sem repetição nem lacuna com valores iguais).
@@ -98,4 +106,4 @@ Implementação em `apps/api/src/modules/lotes/interface-para-lances.ts` (export
 Edição de lote depois de publicado; lotes com múltiplos itens; preço de reserva; `Idempotency-Key` na criação de lote (F2).
 
 ## Decisões relacionadas
-- decisions/0001-decisoes-iniciais.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md, 0031-complementos-da-f3.md
+- decisions/0001-decisoes-iniciais.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md, 0031-complementos-da-f3.md, 0032-complementos-da-f4.md
