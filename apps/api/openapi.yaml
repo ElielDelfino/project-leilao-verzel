@@ -1,11 +1,12 @@
 # Contrato REST (OpenAPI 3.1). Fonte: specs/001 e specs/003–011. Dono: spec-guardian.
-# F1 (tarefa 009): rotas de specs/003 (auth) e specs/004 (carteira). As demais fases acrescentam as suas.
+# F1 (tarefa 009): rotas de specs/003 (auth) e specs/004 (carteira). F2 (tarefa 049): rotas de
+# specs/005 (catálogo, imagens) e specs/006 (lotes, painel). As demais fases acrescentam as suas.
 # Ponto de atenção: Centavos (e Pseudonimo, quando as rotas da F3 entrarem) é duplicado em
 # eventbus/socketio/asyncapi.yaml; mude os dois juntos.
 openapi: 3.1.0
 info:
   title: Casa de Leilões API
-  version: 0.3.0
+  version: 0.4.0
   license: { name: MIT, identifier: MIT }
   description: |
     Envelope (specs/001 §Contratos): sucesso `{ sucesso: true, dados }`; erro
@@ -28,6 +29,14 @@ tags:
     description: CSRF, cadastro, login, refresh, logout e sessão (specs/003).
   - name: carteira
     description: Saldo, depósito simulado e extrato do ledger (specs/004).
+  - name: catalogo
+    description: Busca de cartas na Scryfall, só leiloeiro (specs/005).
+  - name: imagens
+    description: Imagem do snapshot da carta, pública (specs/005).
+  - name: lotes
+    description: Vitrine e detalhe do lote, públicos (specs/006).
+  - name: painel
+    description: Criação de lotes, lista e resumo do leiloeiro (specs/006).
 paths:
   /api/health/live:
     get:
@@ -267,6 +276,254 @@ paths:
         '422': { $ref: '#/components/responses/ErroDadosInvalidos' }
         default: { $ref: '#/components/responses/Erro' }
 
+  /api/catalogo/cartas:
+    get:
+      tags: [catalogo]
+      operationId: catalogoBuscarCartas
+      summary: Busca de cartas na Scryfall, só leiloeiro (specs/005 RF-01)
+      description: |
+        `q` de 1 a 200 caracteres (sintaxe da Scryfall) e `pagina` de 1 a 500; 25 cartas por página
+        (`meta.limite` = 25), mapeadas sobre as páginas de 175 da Scryfall (specs/005 §Busca). Nenhuma
+        carta, ou página além da última, é 200 com lista vazia e `total` 0. Sintaxe recusada pela
+        Scryfall é 422 com `detalhes.campo` `q`. Ordem: validação, cache (responde mesmo com o
+        circuito aberto), circuito, ficha do bucket, chamada à Scryfall. Todo 503 de catálogo leva
+        `detalhes.tenteNovamenteEm` e o header `Retry-After` com o mesmo valor. `imagemUrl` é a
+        miniatura da própria Scryfall (ADR 0029), sem passar pelo servidor.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Busca em texto, sem espaços nas pontas.
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - $ref: '#/components/parameters/PaginaLimitada'
+      responses:
+        '200':
+          description: Página de cartas.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados, meta]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados:
+                    type: array
+                    maxItems: 25
+                    items: { $ref: '#/components/schemas/CartaDaBusca' }
+                  meta: { $ref: '#/components/schemas/MetaPaginacao' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroPapelNaoPermitido' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidosComCampo' }
+        '503': { $ref: '#/components/responses/ErroCatalogo' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/imagens/{snapshotId}:
+    get:
+      tags: [imagens]
+      operationId: imagemDoSnapshot
+      summary: Imagem `normal` do snapshot da carta, pública (specs/005)
+      description: |
+        Bytes do JPEG ou PNG gravado no snapshot, sem o envelope. Imutável: `Cache-Control: public,
+        max-age=31536000, immutable`; `ETag` é o SHA-256 dos bytes em hexadecimal minúsculo entre
+        aspas. `If-None-Match` igual ao `ETag` responde 304 sem corpo. Id inexistente, ou que não é
+        UUID, responde 404 `NAO_ENCONTRADO`. Nunca chama a Scryfall.
+      security: []
+      parameters:
+        - name: snapshotId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Uuid' }
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string, maxLength: 80 }
+      responses:
+        '200':
+          description: Imagem do snapshot.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlImagem' }
+            ETag: { $ref: '#/components/headers/ETagImagem' }
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        '304':
+          description: O `If-None-Match` casa com o `ETag`; sem corpo.
+          headers:
+            Cache-Control: { $ref: '#/components/headers/CacheControlImagem' }
+            ETag: { $ref: '#/components/headers/ETagImagem' }
+        '404': { $ref: '#/components/responses/ErroNaoEncontrado' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/lotes:
+    get:
+      tags: [lotes]
+      operationId: lotesListar
+      summary: Vitrine pública de lotes, com busca, filtros e ordenação (specs/006 RF-02, RF-03)
+      description: |
+        24 lotes por página (`meta.limite` = 24); `pagina` além da última é 200 com lista vazia. O
+        `status` é derivado dos horários (specs/006 §Estados e status derivado); sem `status`, vêm
+        os três; cancelados nunca aparecem. `q` busca `ILIKE %q%` em título e nome da carta, com `%`,
+        `_` e `\` literais. A faixa de preço usa `coalesce(lance atual, lance inicial)`, em centavos,
+        fechada nas duas pontas. Desempate de toda ordenação: `id` decrescente. Nenhum nome nem
+        e-mail de usuário na resposta.
+      security: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [ao_vivo, agendado, encerrado] }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 100 }
+        - name: precoMin
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, maximum: 10000000000 }
+        - name: precoMax
+          in: query
+          required: false
+          description: Maior ou igual a `precoMin`; senão, 422 com `detalhes.campo` `precoMax`.
+          schema: { type: integer, minimum: 0, maximum: 10000000000 }
+        - name: raridade
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/Raridade' }
+        - name: ordem
+          in: query
+          required: false
+          description: |
+            `termina_antes` (`fim_em` crescente), `mais_recente` (`criado_em` decrescente) ou
+            `maior_lance` (preço decrescente).
+          schema: { type: string, enum: [termina_antes, mais_recente, maior_lance], default: termina_antes }
+        - $ref: '#/components/parameters/PaginaLimitada'
+      responses:
+        '200':
+          description: Página de lotes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaListaDeLotes' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidosComCampo' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/lotes/{id}:
+    get:
+      tags: [lotes]
+      operationId: lotesDetalhar
+      summary: Detalhe do lote, público com sessão opcional (specs/006 §Detalhe)
+      description: |
+        Sessão opcional (`@SessaoOpcional()`, specs/003): sem cookie, ou com cookie inválido ou
+        expirado, responde 200 como anônimo; nunca 401. Lote `cancelado` é 200 com `status`
+        `cancelado`. Id inexistente, ou que não é UUID, é 404 `NAO_ENCONTRADO`. `suaPosicao` é
+        `ganhando` (lote ao vivo e o usuário lidera), `venceu` (lote encerrado e o usuário venceu) ou
+        `null`. Sem nome nem e-mail de usuário.
+      security:
+        - {}
+        - cookieAcesso: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Uuid' }
+      responses:
+        '200':
+          description: Lote com o snapshot da carta, sem a imagem.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/LoteDetalhe' }
+        '404': { $ref: '#/components/responses/ErroNaoEncontrado' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/painel/lotes:
+    post:
+      tags: [painel]
+      operationId: painelCriarLote
+      summary: Cria um lote a partir de uma carta, só leiloeiro (specs/006 RF-01)
+      description: |
+        Validação (422, `detalhes.campo` com o primeiro campo inválido) antes de qualquer chamada
+        externa; depois o snapshot é preparado fora da transação e gravado junto com o lote, tudo
+        ou nada (specs/005 §Snapshot). Falha no snapshot: 503 (`CATALOGO_OCUPADO` |
+        `CATALOGO_INDISPONIVEL`, com `tenteNovamenteEm` e `Retry-After`) ou 422 com
+        `detalhes.campo` `scryfallId` (carta inexistente ou sem imagem). Status gravado: `ao_vivo`
+        se `inicioEm` ≤ agora, senão `agendado`. Sem `Idempotency-Key` na F2.
+      security:
+        - cookieAcesso: []
+          csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoteEntrada' }
+      responses:
+        '201':
+          description: Lote criado.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/Lote' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroCsrfOuPapel' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidosComCampo' }
+        '503': { $ref: '#/components/responses/ErroCatalogo' }
+        default: { $ref: '#/components/responses/Erro' }
+    get:
+      tags: [painel]
+      operationId: painelListarLotes
+      summary: Lotes do próprio leiloeiro, inclusive cancelados (specs/006 RF-05)
+      description: |
+        Do mais recente para o mais antigo (`criado_em` decrescente, desempate `id` decrescente);
+        24 por página (`meta.limite` = 24); `pagina` de 1 a 500; além da última, 200 com lista vazia.
+      parameters:
+        - $ref: '#/components/parameters/PaginaLimitada'
+      responses:
+        '200':
+          description: Página dos lotes do usuário.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespostaListaDeLotes' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroPapelNaoPermitido' }
+        '422': { $ref: '#/components/responses/ErroDadosInvalidosComCampo' }
+        default: { $ref: '#/components/responses/Erro' }
+
+  /api/painel/resumo:
+    get:
+      tags: [painel]
+      operationId: painelResumo
+      summary: Total recebido e contagens dos lotes encerrados do leiloeiro (specs/006 RF-05)
+      description: |
+        Conta só lotes do usuário com status gravado `encerrado`. Sem lote encerrado, os três
+        valores são 0.
+      responses:
+        '200':
+          description: Resumo do painel.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sucesso, dados]
+                additionalProperties: false
+                properties:
+                  sucesso: { const: true }
+                  dados: { $ref: '#/components/schemas/ResumoDoPainel' }
+        '401': { $ref: '#/components/responses/ErroNaoAutenticado' }
+        '403': { $ref: '#/components/responses/ErroPapelNaoPermitido' }
+        default: { $ref: '#/components/responses/Erro' }
+
 components:
   securitySchemes:
     cookieAcesso:
@@ -300,6 +557,12 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 1, default: 1 }
+    PaginaLimitada:
+      name: pagina
+      in: query
+      required: false
+      description: Página de 1 a 500; o teto evita OFFSET sem limite (specs/005 e specs/006).
+      schema: { type: integer, minimum: 1, maximum: 500, default: 1 }
 
   headers:
     # Atributos dos cookies (specs/003 §Cookies). "Secure em produção": ausente só em dev (http://localhost).
@@ -323,6 +586,14 @@ components:
       description: Segundos até a próxima tentativa ser aceita.
       required: true
       schema: { type: integer, minimum: 1 }
+    CacheControlImagem:
+      description: Sempre `public, max-age=31536000, immutable` (specs/005).
+      required: true
+      schema: { type: string, const: 'public, max-age=31536000, immutable' }
+    ETagImagem:
+      description: SHA-256 dos bytes da imagem, em hexadecimal minúsculo, entre aspas (specs/005).
+      required: true
+      schema: { type: string, pattern: '^"[0-9a-f]{64}"$' }
 
   schemas:
     Uuid: { type: string, format: uuid }
@@ -452,6 +723,226 @@ components:
         pagina: { type: integer, minimum: 1 }
         limite: { type: integer, minimum: 1 }
 
+    Raridade:
+      description: Raridades da Scryfall (specs/006).
+      type: string
+      enum: [common, uncommon, rare, mythic, special, bonus]
+
+    StatusLote:
+      description: |
+        Status derivado dos horários (specs/006 §Estados e status derivado); `cancelado` só aparece
+        no painel e no detalhe, nunca na vitrine.
+      type: string
+      enum: [agendado, ao_vivo, encerrado, cancelado]
+
+    CartaDaBusca:
+      description: Carta do resultado da busca (specs/005). Ainda sem snapshot.
+      type: object
+      required: [scryfallId, nome, colecao, raridade, tipo, artista, imagemUrl]
+      additionalProperties: false
+      properties:
+        scryfallId: { $ref: '#/components/schemas/Uuid' }
+        nome: { type: string }
+        colecao: { type: string }
+        raridade: { $ref: '#/components/schemas/Raridade' }
+        tipo: { type: string }
+        artista:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+        imagemUrl:
+          description: |
+            Miniatura `small` na Scryfall (`https://cards.scryfall.io/...`; ADR 0029); null se a
+            carta não tiver imagem.
+          oneOf:
+            - { type: string, format: uri }
+            - { type: 'null' }
+
+    Carta:
+      description: Campos do snapshot da carta, sem a imagem (`catalogo.obterSnapshot`, specs/005).
+      type: object
+      required: [scryfallId, nome, colecao, raridade, tipo, textoOracle, artista]
+      additionalProperties: false
+      properties:
+        scryfallId: { $ref: '#/components/schemas/Uuid' }
+        nome: { type: string }
+        colecao: { type: string }
+        raridade: { $ref: '#/components/schemas/Raridade' }
+        tipo: { type: string }
+        textoOracle:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+        artista:
+          oneOf:
+            - { type: string }
+            - { type: 'null' }
+
+    Lote:
+      description: |
+        Resumo do lote (vitrine, painel e criação; specs/006). Nunca leva nome nem e-mail de
+        usuário.
+      type: object
+      required:
+        - id
+        - titulo
+        - status
+        - cartaNome
+        - raridade
+        - imagemUrl
+        - inicioEm
+        - fimEm
+        - lanceInicialCentavos
+        - incrementoMinimoCentavos
+        - lanceAtualCentavos
+        - precoAtualCentavos
+        - totalLances
+        - valorArremateCentavos
+        - criadoEm
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        titulo: { type: string, minLength: 1, maxLength: 120 }
+        status: { $ref: '#/components/schemas/StatusLote' }
+        cartaNome: { type: string }
+        raridade: { $ref: '#/components/schemas/Raridade' }
+        imagemUrl:
+          description: '`/api/imagens/{snapshotId}`.'
+          type: string
+          pattern: '^/api/imagens/[0-9a-fA-F-]{36}$'
+        inicioEm: { $ref: '#/components/schemas/Instante' }
+        fimEm: { $ref: '#/components/schemas/Instante' }
+        lanceInicialCentavos: { $ref: '#/components/schemas/Centavos' }
+        incrementoMinimoCentavos: { $ref: '#/components/schemas/Centavos' }
+        lanceAtualCentavos:
+          description: Null enquanto não há lance.
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+        precoAtualCentavos:
+          description: '`coalesce(lanceAtualCentavos, lanceInicialCentavos)`, o preço da faixa e da ordem `maior_lance`.'
+          allOf: [{ $ref: '#/components/schemas/Centavos' }]
+        totalLances: { type: integer, minimum: 0 }
+        valorArremateCentavos:
+          description: Valor do arremate do lote encerrado com vencedor; null nos demais casos.
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+        criadoEm: { $ref: '#/components/schemas/Instante' }
+
+    LoteDetalhe:
+      description: |
+        Detalhe do lote (specs/006 §Detalhe): os campos de `Lote` mais descrição, fim original, o
+        snapshot da carta sem a imagem e a posição do usuário. Mude os campos de `Lote` junto.
+      type: object
+      required:
+        - id
+        - titulo
+        - descricao
+        - status
+        - cartaNome
+        - raridade
+        - carta
+        - imagemUrl
+        - inicioEm
+        - fimEm
+        - fimOriginalEm
+        - lanceInicialCentavos
+        - incrementoMinimoCentavos
+        - lanceAtualCentavos
+        - precoAtualCentavos
+        - totalLances
+        - valorArremateCentavos
+        - suaPosicao
+        - criadoEm
+      additionalProperties: false
+      properties:
+        id: { $ref: '#/components/schemas/Uuid' }
+        titulo: { type: string, minLength: 1, maxLength: 120 }
+        descricao:
+          oneOf:
+            - { type: string, maxLength: 2000 }
+            - { type: 'null' }
+        status: { $ref: '#/components/schemas/StatusLote' }
+        cartaNome: { type: string }
+        raridade: { $ref: '#/components/schemas/Raridade' }
+        carta: { $ref: '#/components/schemas/Carta' }
+        imagemUrl:
+          description: '`/api/imagens/{snapshotId}`.'
+          type: string
+          pattern: '^/api/imagens/[0-9a-fA-F-]{36}$'
+        inicioEm: { $ref: '#/components/schemas/Instante' }
+        fimEm: { $ref: '#/components/schemas/Instante' }
+        fimOriginalEm: { $ref: '#/components/schemas/Instante' }
+        lanceInicialCentavos: { $ref: '#/components/schemas/Centavos' }
+        incrementoMinimoCentavos: { $ref: '#/components/schemas/Centavos' }
+        lanceAtualCentavos:
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+        precoAtualCentavos: { $ref: '#/components/schemas/Centavos' }
+        totalLances: { type: integer, minimum: 0 }
+        valorArremateCentavos:
+          oneOf:
+            - { $ref: '#/components/schemas/Centavos' }
+            - { type: 'null' }
+        suaPosicao:
+          description: |
+            `ganhando` (lote ao vivo e o usuário lidera), `venceu` (lote encerrado e o usuário
+            venceu); null nos demais casos e para anônimos. Só as colunas de `lots` (specs/006).
+          oneOf:
+            - { type: string, enum: [ganhando, venceu] }
+            - { type: 'null' }
+        criadoEm: { $ref: '#/components/schemas/Instante' }
+
+    LoteEntrada:
+      description: Corpo da criação do lote; limites e regras em specs/006 §Criação.
+      type: object
+      required: [scryfallId, lanceInicialCentavos, incrementoMinimoCentavos, inicioEm, fimEm]
+      additionalProperties: false
+      properties:
+        scryfallId: { $ref: '#/components/schemas/Uuid' }
+        titulo:
+          description: Opcional; ausente, null ou só espaços → o nome da carta, truncado em 120 caracteres.
+          oneOf:
+            - { type: string, minLength: 1, maxLength: 120 }
+            - { type: 'null' }
+        descricao:
+          description: Opcional; vazia ou só espaços → sem descrição.
+          oneOf:
+            - { type: string, maxLength: 2000 }
+            - { type: 'null' }
+        lanceInicialCentavos: { type: integer, minimum: 100, maximum: 100000000 }
+        incrementoMinimoCentavos: { type: integer, minimum: 100, maximum: 100000000 }
+        inicioEm:
+          description: Instante com fuso; não pode ser mais de 1 minuto no passado.
+          allOf: [{ $ref: '#/components/schemas/Instante' }]
+        fimEm:
+          description: Pelo menos 5 minutos depois de `inicioEm` e no máximo 7 dias depois.
+          allOf: [{ $ref: '#/components/schemas/Instante' }]
+
+    RespostaListaDeLotes:
+      type: object
+      required: [sucesso, dados, meta]
+      additionalProperties: false
+      properties:
+        sucesso: { const: true }
+        dados:
+          type: array
+          maxItems: 24
+          items: { $ref: '#/components/schemas/Lote' }
+        meta: { $ref: '#/components/schemas/MetaPaginacao' }
+
+    ResumoDoPainel:
+      description: Só lotes do usuário com status gravado `encerrado` (specs/006 §Painel).
+      type: object
+      required: [totalRecebidoCentavos, lotesArrematados, lotesSemLance]
+      additionalProperties: false
+      properties:
+        totalRecebidoCentavos: { $ref: '#/components/schemas/Centavos' }
+        lotesArrematados: { type: integer, minimum: 0 }
+        lotesSemLance: { type: integer, minimum: 0 }
+
     Erro:
       type: object
       required: [sucesso, erro]
@@ -537,6 +1028,70 @@ components:
               - required: [erro]
                 properties:
                   erro: { required: [codigo], properties: { codigo: { const: DADOS_INVALIDOS } } }
+    ErroDadosInvalidosComCampo:
+      description: |
+        Parâmetro ou corpo fora do contrato (DADOS_INVALIDOS), com `detalhes.campo` = nome do
+        primeiro campo inválido (specs/006 §Criação, specs/005).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo, detalhes]
+                    properties:
+                      codigo: { const: DADOS_INVALIDOS }
+                      detalhes:
+                        type: object
+                        required: [campo]
+                        properties:
+                          campo: { type: string }
+    ErroPapelNaoPermitido:
+      description: Rota restrita a outro papel (PAPEL_NAO_PERMITIDO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: PAPEL_NAO_PERMITIDO } } }
+    ErroNaoEncontrado:
+      description: Recurso inexistente, ou id que não é UUID (NAO_ENCONTRADO).
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro: { required: [codigo], properties: { codigo: { const: NAO_ENCONTRADO } } }
+    ErroCatalogo:
+      description: |
+        Catálogo sem condição de chamar a Scryfall (specs/005): `CATALOGO_OCUPADO` (sem ficha do
+        bucket em 1 s; `tenteNovamenteEm` 1) ou `CATALOGO_INDISPONIVEL` (circuito aberto, Redis fora
+        ou falha do upstream). `detalhes.tenteNovamenteEm` (segundos inteiros ≥ 1) é igual ao
+        header `Retry-After`.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Erro'
+              - required: [erro]
+                properties:
+                  erro:
+                    required: [codigo, detalhes]
+                    properties:
+                      codigo: { enum: [CATALOGO_OCUPADO, CATALOGO_INDISPONIVEL] }
+                      detalhes:
+                        type: object
+                        required: [tenteNovamenteEm]
+                        properties:
+                          tenteNovamenteEm: { type: integer, minimum: 1 }
     ErroNaoAutenticado:
       description: Sem cookie `access_token` válido (NAO_AUTENTICADO).
       content:

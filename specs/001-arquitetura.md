@@ -54,7 +54,7 @@ Ciclos são proibidos (o grafo acima é acíclico: `lotes` não importa `lances`
 
 Consequências da tabela:
 - **Cancelamento de lote** é de `liquidacao`, não de `lotes`: uma transação com lote `FOR UPDATE` → `carteira.estornar` → `lances.selar` (status `cancelado`) → status `cancelado` (specs/010 §Cancelamento). `lotes` expõe a `liquidacao` as operações de travar o lote e de mudar o status.
-- **Guards** `@Papel` e `@Publico` ficam em `apps/api/src/common/auth/` (só metadados); o guard global é registrado por `identidade` via `APP_GUARD`, sem aresta entre módulos.
+- **Guards** `@Papel`, `@Publico` e `@SessaoOpcional` (rota pública que identifica o usuário se houver sessão válida; specs/003) ficam em `apps/api/src/common/auth/` (só metadados); o guard global é registrado por `identidade` via `APP_GUARD`, sem aresta entre módulos.
 - **Seed por módulo** (ADR 0027): o `pnpm db:seed` descobre as etapas em `apps/api/src/modules/<nome>/seed.ts`, na ordem da primeira tabela de §Módulos (identidade, carteira, catalogo, lotes, lances, liquidacao; `tempo-real` não tem etapa), e cada etapa é idempotente (rodar duas vezes não duplica linhas nem falha). O seed conecta como dono do banco (specs/014 §Conexão). Uma fase nova adiciona o `seed.ts` do módulo, sem tarefa do db-dev só para registrar etapa.
 - **Posição do usuário** (`ganhando`, `superado`, `venceu`, `perdeu`, `sem_lance`): `lotes` usa só as colunas de `lots`; `lances` calcula as cinco (specs/007 §Posição).
 
