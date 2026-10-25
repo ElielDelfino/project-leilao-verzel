@@ -55,6 +55,17 @@ Os scripts abaixo chegam com a tarefa 021; até lá, o lint roda com as CLIs fix
 - Duas execuções simultâneas no mesmo worktree não são suportadas.
 - Órfãos: bancos de worktrees removidos ou movidos (um worktree movido gera um sufixo novo e deixa o antigo órfão) e o `leilao_test` sem sufixo, que sobrou da tarefa 011, não são apagados automaticamente. A limpeza é manual: listar com `SELECT datname FROM pg_database WHERE datname LIKE 'leilao\_test%' AND datname <> 'leilao_test_tpl';` e apagar cada um com `DROP DATABASE <nome> WITH (FORCE);`. O `WITH (FORCE)` derruba as conexões abertas, então apagar o banco de um worktree que ainda existe interrompe os testes dele. Nunca usar `docker compose down -v`, que apaga o volume compartilhado.
 
+### Papéis do Postgres nos testes (ADR 0026)
+- Os testes de integração da API conectam como o **dono** (`leilao`): o setup exporta as credenciais do dono nos nomes de variáveis que a API lê (`POSTGRES_API_USER` e `DB_API_PASSWORD`), além de `POSTGRES_USER` e `DB_PASSWORD` para as migrations e o seed. Assim os testes podem preparar dados e desligar triggers sem depender das permissões da API.
+- Os testes que provam as permissões (matriz de privilégios, 42501 em `UPDATE`/`DELETE` de tabela append-only; specs/014 §Papéis do Postgres, critérios) conectam como `leilao_api`, com a senha que o próprio teste aplica no banco de teste.
+- O e2e conecta a API como `leilao_api`, com a senha do `.env.local`, para exercitar os mesmos privilégios da produção.
+
+### Rate limit e Redis nos testes
+- O Redis de dev é compartilhado por todos os worktrees. O reset do rate limit entre os casos apaga só as chaves do prefixo `ratelimit:` com `SCAN` (`MATCH ratelimit:*`) + `DEL`; `FLUSHDB` e `FLUSHALL` são proibidos no código e nos testes (specs/003 §Rate limit).
+
+### E2E
+- O e2e usa as portas padrão (API :13000, web :15173) e o banco do worktree (`leilao_test_<sufixo>`). Dois e2e simultâneos em worktrees diferentes não são suportados (as portas colidem); a execução em um worktree por vez é responsabilidade de quem dispara.
+
 ### Saída
 Resumo final com ✓/✗/pulado e o tempo de cada passo. Implementação em `scripts/verify.mjs`.
 
@@ -64,4 +75,4 @@ Resumo final com ✓/✗/pulado e o tempo de cada passo. Implementação em `scr
 - Subagentes: quick por padrão, full só quando quem delegou pedir.
 
 ## Decisões relacionadas
-- decisions/0016-testes-dois-niveis.md
+- decisions/0016-testes-dois-niveis.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md

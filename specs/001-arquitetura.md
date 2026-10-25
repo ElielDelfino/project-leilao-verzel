@@ -55,6 +55,7 @@ Ciclos são proibidos (o grafo acima é acíclico: `lotes` não importa `lances`
 Consequências da tabela:
 - **Cancelamento de lote** é de `liquidacao`, não de `lotes`: uma transação com lote `FOR UPDATE` → `carteira.estornar` → `lances.selar` (status `cancelado`) → status `cancelado` (specs/010 §Cancelamento). `lotes` expõe a `liquidacao` as operações de travar o lote e de mudar o status.
 - **Guards** `@Papel` e `@Publico` ficam em `apps/api/src/common/auth/` (só metadados); o guard global é registrado por `identidade` via `APP_GUARD`, sem aresta entre módulos.
+- **Seed por módulo** (ADR 0027): o `pnpm db:seed` descobre as etapas em `apps/api/src/modules/<nome>/seed.ts`, na ordem da primeira tabela de §Módulos (identidade, carteira, catalogo, lotes, lances, liquidacao; `tempo-real` não tem etapa), e cada etapa é idempotente (rodar duas vezes não duplica linhas nem falha). O seed conecta como dono do banco (specs/014 §Conexão). Uma fase nova adiciona o `seed.ts` do módulo, sem tarefa do db-dev só para registrar etapa.
 - **Posição do usuário** (`ganhando`, `superado`, `venceu`, `perdeu`, `sem_lance`): `lotes` usa só as colunas de `lots`; `lances` calcula as cinco (specs/007 §Posição).
 
 ## Integrações externas
@@ -64,7 +65,7 @@ Consequências da tabela:
 | GCP Secret Manager | leitura de segredos no deploy | o deploy aborta e mantém a versão anterior (specs/014) |
 | GHCR | registro de imagens | o deploy aborta e mantém a versão anterior |
 
-## Autenticação e autorização (ADR 0006, specs/003)
+## Autenticação e autorização (ADR 0006, 0022, 0027, specs/003)
 E-mail + senha; JWT de acesso (15 min) + refresh rotativo (7 dias) em cookies httpOnly; CSRF por double-submit; papéis `leiloeiro` e `licitante`, verificados por guard em cada rota. Sem administrador: o seed cria as contas demo.
 
 ## Contratos
@@ -103,8 +104,8 @@ Regras:
 - 4xx nunca é logado em error.
 - Ainda fora do envelope: as respostas do Fastify no nível do socket (`clientErrorHandler`: 400, 408, 431) e o 503 durante o encerramento (`return503OnClosing`); a tarefa 020 avalia.
 
-## Stack (ADR 0011, 0012)
-Node 24 LTS · pnpm 12 workspaces · TypeScript 6.0.x (provisório) · NestJS 12 + `@nestjs/platform-fastify` · Socket.IO 4.8 + `@socket.io/redis-adapter` · Drizzle ORM 0.45 + drizzle-kit · Zod 4 · argon2 · `@noble/ed25519` · Pino · React 19 · Vite 8 · React Router 8 · TanStack Query 5 · Tailwind 4 · Postgres 18.6 · Redis 8.8 · Vitest 5 · Playwright 1.64 · k6.
+## Stack (ADR 0011, 0012, 0027)
+Node 24 LTS (≥ 24.7) · pnpm 12 workspaces · TypeScript 6.0.x (provisório) · NestJS 12 + `@nestjs/platform-fastify` · Socket.IO 4.8 + `@socket.io/redis-adapter` · Drizzle ORM 0.45 + drizzle-kit · Zod 4 · argon2id por `node:crypto.argon2` (Node ≥ 24.7.0, `engines.node` `>=24.7 <25`) · `jose` 6.2.13 (JWT HS256) · `@fastify/cookie` 11.1.3 · `@noble/ed25519` · Pino · React 19 · Vite 8 · React Router 8 · TanStack Query 5 · Tailwind 4 · Postgres 18.6 · Redis 8.8 · Vitest 5 · Playwright 1.64 · k6.
 
 ## Qualidade e operação (resumo)
 - Testes em dois níveis, `verify:quick` e `verify:full` (specs/013, ADR 0016).
@@ -121,4 +122,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023, 0025
+- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023, 0025, 0026, 0027
