@@ -1,0 +1,7 @@
+# Exceções do lint do Redocly. Rotas sem entrada de usuário não têm resposta 4xx a documentar.
+# Mantenha só o que for justificado.
+apps/api/openapi.yaml:
+  operation-4xx-response:
+    - '#/paths/~1api~1health~1live/get/responses'
+    - '#/paths/~1api~1health~1ready/get/responses'
+    - '#/paths/~1api~1auth~1csrf/get/responses'
