@@ -9,7 +9,8 @@
 //   testes ligados ao que mudou (src/x.ts → test/x.test.ts, o próprio teste alterado, e os
 //   testes de banco quando as migrations, o setup ou os helpers de test/db mudam); banco local via
 //   TEMPLATE (LEILAO_TEST_DB=local, apps/api/test/setup/). Roda todos os passos; sai ≠ 0 se algum
-//   falhar.
+//   falhar. contracts:lint e contracts:check rodam quando um contrato (openapi, eventbus, contracts,
+//   redocly, scripts/contracts-*) muda.
 // full: formato, lint, typecheck, todos os testes, contrato e build (--e2e: Playwright). Para na
 //   primeira falha.
 // Saída: resumo com ✓/✗/pulado e o tempo de cada passo.
@@ -178,6 +179,17 @@ export function pacotesAfetados(pacotes, alterados) {
     }
   }
   return pacotes.filter((p) => afetados.has(p.nome));
+}
+
+// ---------------------------------------------------------------- contratos
+
+/** Arquivos cuja mudança liga contracts:lint e contracts:check no quick (tarefa 046). */
+const ARQUIVOS_DE_CONTRATO =
+  /^(apps\/api\/openapi\.yaml|eventbus\/.+|packages\/contracts\/.+|redocly\.yaml|\.redocly\.lint-ignore\.yaml|scripts\/contracts-[^/]+\.mjs)$/;
+
+/** Algum contrato, gerado ou ferramenta de contratos mudou (caminhos relativos à raiz, com "/"). */
+export function mudouContrato(alterados) {
+  return alterados.some((a) => ARQUIVOS_DE_CONTRATO.test(a));
 }
 
 // ---------------------------------------------------------------- testes ligados ao que mudou
@@ -557,7 +569,18 @@ async function quick(opcoes, env) {
   }
 
   await passoTestes(v, pacotes, porPacote, { nome: opcoes.nome, semTestes }, env);
+  await passosDeContratos(v, mudouContrato(alterados), env);
   return v;
+}
+
+/** contracts:lint e contracts:check: no quick só quando um contrato mudou; no full, sempre. */
+async function passosDeContratos(v, rodar, env) {
+  const scriptsDaRaiz = JSON.parse(readFileSync(join(RAIZ, 'package.json'), 'utf8')).scripts ?? {};
+  for (const script of ['contracts:lint', 'contracts:check']) {
+    if (!rodar) v.pular(script, 'nenhum contrato mudou');
+    else if (!scriptsDaRaiz[script]) v.pular(script, 'script ainda não existe (tarefa 021)');
+    else await v.passo(script, () => executar('pnpm', ['run', script], { env }));
+  }
 }
 
 // ---------------------------------------------------------------- full
@@ -565,7 +588,6 @@ async function quick(opcoes, env) {
 async function full(opcoes, env) {
   const v = new Verificacao('full', true);
   const pacotes = lerPacotes(RAIZ);
-  const scriptsDaRaiz = JSON.parse(readFileSync(join(RAIZ, 'package.json'), 'utf8')).scripts ?? {};
 
   await v.passo('formato', () => executar('pnpm', ['run', 'format:check'], { env }));
   await v.passo('lint', () => executar('pnpm', ['run', 'lint'], { env }));
@@ -575,10 +597,7 @@ async function full(opcoes, env) {
   // Banco: o leilao_test_<sufixo> do worktree via TEMPLATE. O Testcontainers (specs/013)
   // depende de um pedido ao infra (allowBuilds no pnpm-workspace.yaml); veja a tarefa 011.
   await passoTestes(v, pacotes, 'todos', { nome: undefined, semTestes: '' }, env);
-  for (const script of ['contracts:lint', 'contracts:check']) {
-    if (!scriptsDaRaiz[script]) v.pular(script, 'script ainda não existe (tarefa 021)');
-    else await v.passo(script, () => executar('pnpm', ['run', script], { env }));
-  }
+  await passosDeContratos(v, true, env);
   await v.passo('build', () =>
     executar('pnpm', ['--recursive', '--if-present', 'run', 'build'], { env }),
   );

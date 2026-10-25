@@ -40,7 +40,7 @@ export async function setup(): Promise<void> {
   // Falta de variável lança ErroDeConfiguracaoDoBanco só com os nomes, nunca os valores.
   const admin = lerConexaoDoBanco(process.env);
   const preparo = await prepararBancoDeTeste(admin);
-  postgresDbOriginal = process.env['POSTGRES_DB'];
+  postgresDbOriginal ??= process.env['POSTGRES_DB'];
   // Os workers do Vitest nascem depois deste setup e herdam o process.env.
   process.env['POSTGRES_DB'] = preparo.banco;
   const modelo = preparo.modeloRefeito ? 'refeito' : 'reaproveitado';
