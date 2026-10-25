@@ -1045,6 +1045,7 @@ components:
                       codigo: { const: DADOS_INVALIDOS }
                       detalhes:
                         type: object
+                        additionalProperties: false
                         required: [campo]
                         properties:
                           campo: { type: string }
@@ -1089,6 +1090,7 @@ components:
                       codigo: { enum: [CATALOGO_OCUPADO, CATALOGO_INDISPONIVEL] }
                       detalhes:
                         type: object
+                        additionalProperties: false
                         required: [tenteNovamenteEm]
                         properties:
                           tenteNovamenteEm: { type: integer, minimum: 1 }
