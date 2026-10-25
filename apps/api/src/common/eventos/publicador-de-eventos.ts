@@ -8,13 +8,27 @@ import type { EventosDoServidor } from '@leilao/contracts';
 
 export type TipoDeEvento = keyof EventosDoServidor;
 
-/** Evento de domínio: o tipo é o nome do evento do asyncapi e o payload é o do contrato. */
+/**
+ * Evento de domínio: o tipo é o nome do evento do asyncapi e o payload é o do contrato.
+ * `usuarioId` é o destinatário dos eventos privados (room `usuario:{id}`, specs/009); fica fora
+ * do payload, que não leva dado de usuário (D8). Eventos públicos não têm destinatário.
+ */
 export type EventoDeDominio = {
-  [Tipo in TipoDeEvento]: { readonly tipo: Tipo; readonly payload: EventosDoServidor[Tipo] };
+  [Tipo in TipoDeEvento]: {
+    readonly tipo: Tipo;
+    readonly payload: EventosDoServidor[Tipo];
+    readonly usuarioId?: string;
+  };
 }[TipoDeEvento];
+
+/** Para quem o evento vai: vazio nos públicos; `usuarioId` nos privados. */
+export interface DestinoDoEvento {
+  readonly usuarioId?: string;
+}
 
 export type AssinanteDeEvento<Tipo extends TipoDeEvento> = (
   payload: EventosDoServidor[Tipo],
+  destino: DestinoDoEvento,
 ) => void | Promise<void>;
 
 /** Destino do aviso de falha de assinante. Nunca recebe o payload nem a mensagem do erro. */
@@ -32,14 +46,17 @@ export class PublicadorDeEventos {
 
   /** Entrega o evento a todos os assinantes, na ordem de registro. Nunca lança. */
   publicar(evento: EventoDeDominio): void {
-    this.emissor.emit(evento.tipo, evento.payload);
+    const destino: DestinoDoEvento = Object.freeze(
+      evento.usuarioId === undefined ? {} : { usuarioId: evento.usuarioId },
+    );
+    this.emissor.emit(evento.tipo, evento.payload, destino);
   }
 
   /** Registra um assinante; devolve a função que o remove. */
   aoOcorrer<Tipo extends TipoDeEvento>(tipo: Tipo, assinante: AssinanteDeEvento<Tipo>): () => void {
-    const protegido = (payload: EventosDoServidor[Tipo]): void => {
+    const protegido = (payload: EventosDoServidor[Tipo], destino: DestinoDoEvento): void => {
       try {
-        const resultado = assinante(payload);
+        const resultado = assinante(payload, destino);
         if (resultado instanceof Promise) {
           resultado.catch((erro: unknown) => {
             this.registrarFalha(tipo, erro);

@@ -2,13 +2,17 @@ import { type INestApplicationContext, Module } from '@nestjs/common';
 
 import { CadeiaDeLances } from './cadeia.js';
 import { ServicoDeChaves } from './chaves.js';
+import { LancesController } from './lances.controller.js';
+import { ServicoDeLances } from './servico-de-lances.js';
 
 /**
  * Módulo lances (specs/007, specs/008): dono de `bids`, `lot_seals` e `signing_keys`. Depende dos
- * providers globais BANCO e ENV. Outros módulos usam só `CadeiaDeLances` (anexar e selar).
+ * providers globais BANCO, ENV, LimiteDeTentativas e PublicadorDeEventos (AppModule). Outros
+ * módulos usam só `CadeiaDeLances` (anexar e selar).
  */
 @Module({
-  providers: [ServicoDeChaves, CadeiaDeLances],
+  controllers: [LancesController],
+  providers: [ServicoDeChaves, CadeiaDeLances, ServicoDeLances],
   exports: [CadeiaDeLances],
 })
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- módulo Nest: o conteúdo vem do decorator

@@ -10,6 +10,7 @@ import {
 } from '../../../src/common/eventos/publicador-de-eventos.js';
 
 const LOTE_ID = '3f0c1d52-8a4e-4f57-9a55-6d3a1f0b7c11';
+const USUARIO_ID = '0192f1a2-7b3c-7d4e-8f90-a1b2c3d4e5f6';
 const lanceUm: EventoDeDominio = { tipo: 'lote_iniciado', payload: { loteId: LOTE_ID } };
 const lanceDois: EventoDeDominio = { tipo: 'lote_cancelado', payload: { loteId: LOTE_ID } };
 
@@ -33,7 +34,7 @@ describe('PublicadorDeEventos', () => {
 
     publicador.publicar(lanceUm);
 
-    expect(iniciado).toHaveBeenCalledExactlyOnceWith({ loteId: LOTE_ID });
+    expect(iniciado).toHaveBeenCalledExactlyOnceWith({ loteId: LOTE_ID }, {});
     expect(cancelado).not.toHaveBeenCalled();
   });
 
@@ -80,6 +81,47 @@ describe('PublicadorDeEventos', () => {
     expect(() => {
       publicador.publicar(lanceUm);
     }).not.toThrow();
+  });
+
+  it('evento público chega ao assinante com destino vazio (sem usuarioId)', () => {
+    const { publicador } = criar();
+    const assinante = vi.fn();
+    publicador.aoOcorrer('lote_iniciado', assinante);
+
+    publicador.publicar(lanceUm);
+
+    expect(assinante).toHaveBeenCalledExactlyOnceWith({ loteId: LOTE_ID }, {});
+  });
+
+  it('evento privado entrega o destinatário como segundo argumento, fora do payload', () => {
+    const { publicador } = criar();
+    const assinante = vi.fn();
+    publicador.aoOcorrer('voce_foi_superado', assinante);
+    const privado: EventoDeDominio = {
+      tipo: 'voce_foi_superado',
+      payload: { loteId: LOTE_ID, valorCentavos: 1100 },
+      usuarioId: USUARIO_ID,
+    };
+
+    publicador.publicar(privado);
+
+    expect(assinante).toHaveBeenCalledExactlyOnceWith(
+      { loteId: LOTE_ID, valorCentavos: 1100 },
+      { usuarioId: USUARIO_ID },
+    );
+  });
+
+  it('assinante de um argumento só continua recebendo o payload', () => {
+    const { publicador } = criar();
+    const recebidos: unknown[] = [];
+    publicador.aoOcorrer('saldo_atualizado', (payload) => {
+      recebidos.push(payload);
+    });
+    const saldo = { totalCentavos: 5000, comprometidoCentavos: 1000, disponivelCentavos: 4000 };
+
+    publicador.publicar({ tipo: 'saldo_atualizado', payload: saldo, usuarioId: USUARIO_ID });
+
+    expect(recebidos).toEqual([saldo]);
   });
 
   it('a função devolvida por aoOcorrer remove o assinante', () => {

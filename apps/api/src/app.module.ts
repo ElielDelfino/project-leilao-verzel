@@ -2,6 +2,7 @@ import { type DynamicModule, Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { FiltroDeExcecoes } from './common/erros/filtro-de-excecoes.js';
+import { EventosModule } from './common/eventos/eventos.module.js';
 import { LimiteModule } from './common/limite/limite.module.js';
 import { BancoModule } from './config/banco.module.js';
 import { ENV, type Env } from './config/env.js';
@@ -31,6 +32,7 @@ export class AppModule {
         BancoModule,
         RedisModule,
         LimiteModule,
+        EventosModule,
         IdentidadeModule,
         CarteiraModule,
         CatalogoModule,
