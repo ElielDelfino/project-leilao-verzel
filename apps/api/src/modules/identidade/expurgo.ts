@@ -30,6 +30,8 @@ export class ExpurgoDiario implements OnApplicationBootstrap, OnApplicationShutd
   constructor(@Inject(BANCO) private readonly banco: Banco) {}
 
   onApplicationBootstrap(): void {
+    // Uma rodada já no boot (sem esperar; a falha vai para o log em executar) e depois a cada 24 h.
+    void this.executar(new Date());
     this.#temporizador = setInterval(() => {
       void this.executar(new Date());
     }, INTERVALO_DO_EXPURGO_MS);

@@ -465,6 +465,79 @@ describe.skipIf(!INFRA_DISPONIVEL)('auth com Postgres e Redis reais', () => {
     });
   });
 
+  describe('concorrência na família do refresh token (revisão da 038)', () => {
+    async function tokensVivosDaFamilia(token: string): Promise<number> {
+      const linhas = await consultar<{ n: string }>(
+        `select count(*) as n from refresh_tokens
+          where familia_id = (select familia_id from refresh_tokens where token_hash = $1)
+            and revogado_em is null and substituido_por is null`,
+        [hash(token)],
+      );
+      return Number(linhas[0]?.n);
+    }
+
+    function comToken(token: string, csrf: string, url: string) {
+      return ctx.app.inject({
+        method: 'POST',
+        url,
+        headers: { cookie: `refresh_token=${token}; csrf_token=${csrf}`, 'x-csrf-token': csrf },
+      });
+    }
+
+    it('dois refresh em paralelo com o mesmo token: exatamente um 204 e um 401', async () => {
+      for (let i = 0; i < 5; i++) {
+        const navegador = new Navegador(ctx.app);
+        await cadastrar(navegador);
+        const token = navegador.cookies.get('refresh_token') ?? '';
+        const csrf = navegador.cookies.get('csrf_token') ?? '';
+
+        const respostas = await Promise.all([
+          comToken(token, csrf, '/api/auth/refresh'),
+          comToken(token, csrf, '/api/auth/refresh'),
+        ]);
+
+        expect(respostas.map((r) => r.statusCode).sort()).toEqual([204, 401]);
+        // O reuso revogou a família: nem o token emitido pelo vencedor sobrevive.
+        expect(await tokensVivosDaFamilia(token)).toBe(0);
+      }
+    });
+
+    it('logout × refresh em voo: nenhum token da família continua válido', async () => {
+      for (let i = 0; i < 5; i++) {
+        const navegador = new Navegador(ctx.app);
+        await cadastrar(navegador);
+        const token = navegador.cookies.get('refresh_token') ?? '';
+        const csrf = navegador.cookies.get('csrf_token') ?? '';
+
+        const [refresh, logout] = await Promise.all([
+          comToken(token, csrf, '/api/auth/refresh'),
+          comToken(token, csrf, '/api/auth/logout'),
+        ]);
+
+        expect(logout.statusCode).toBe(204);
+        expect(await tokensVivosDaFamilia(token)).toBe(0);
+        const novo = refresh.cookies.find((c) => c.name === 'refresh_token')?.value;
+        if (novo !== undefined) {
+          expect((await comToken(novo, csrf, '/api/auth/refresh')).statusCode).toBe(401);
+        }
+      }
+    });
+
+    it('login com o refresh_token de outra conta não revoga a família dela', async () => {
+      const dono = new Navegador(ctx.app);
+      await cadastrar(dono);
+      const tokenDoDono = dono.cookies.get('refresh_token') ?? '';
+      const { email } = await cadastrar(new Navegador(ctx.app));
+      const outro = new Navegador(ctx.app);
+      await outro.obterCsrf();
+      outro.cookies.set('refresh_token', tokenDoDono);
+
+      expect((await outro.post('/api/auth/login', { email, senha: SENHA })).statusCode).toBe(200);
+
+      expect((await dono.post('/api/auth/refresh')).statusCode).toBe(204);
+    });
+  });
+
   describe('POST /api/auth/logout', () => {
     it('204, revoga a família e expira os três cookies (Max-Age=0, mesmos Path)', async () => {
       const navegador = new Navegador(ctx.app);

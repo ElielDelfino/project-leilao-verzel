@@ -95,6 +95,12 @@ export async function travarRefresh(
   tx: Transacao,
   hash: Buffer,
 ): Promise<RefreshTravado | undefined> {
+  const familiaId = await familiaDoToken(tx, hash);
+  if (familiaId === undefined) {
+    return undefined;
+  }
+  await travarFamilia(tx, familiaId);
+  // Statement novo depois do lock: enxerga tudo o que a transação anterior da família gravou.
   const [linha] = await tx
     .select({
       id: refreshTokens.id,
@@ -113,22 +119,57 @@ export async function marcarSubstituido(tx: Transacao, id: string, novoId: strin
   await tx.update(refreshTokens).set({ substituidoPor: novoId }).where(eq(refreshTokens.id, id));
 }
 
-/** Revoga todos os tokens ainda não revogados da família. */
-export async function revogarFamilia(db: Executor, familiaId: string): Promise<void> {
-  await db
+/**
+ * Lock transacional da família (pg_advisory_xact_lock, solto no COMMIT/ROLLBACK). Toda rotação e
+ * toda revogação passam por ele: uma rotação em voo termina (e grava o token novo) antes de a
+ * revogação rodar, ou a rotação seguinte já encontra o token revogado e cai no caminho de reuso.
+ * Não exige privilégio de tabela (ADR 0026).
+ */
+async function travarFamilia(tx: Transacao, familiaId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${familiaId}, 0))`);
+}
+
+/** Família do token de hash `hash` (opcionalmente só se for do usuário `userId`). */
+async function familiaDoToken(
+  db: Executor,
+  hash: Buffer,
+  userId?: string,
+): Promise<string | undefined> {
+  const condicao =
+    userId === undefined
+      ? eq(refreshTokens.tokenHash, hash)
+      : and(eq(refreshTokens.tokenHash, hash), eq(refreshTokens.userId, userId));
+  const [linha] = await db
+    .select({ familiaId: refreshTokens.familiaId })
+    .from(refreshTokens)
+    .where(condicao);
+  return linha?.familiaId;
+}
+
+/**
+ * Revoga todos os tokens ainda não revogados da família. Chame com o lock da família já tomado
+ * (travarRefresh ou revogarFamiliaDoToken), na mesma transação.
+ */
+export async function revogarFamilia(tx: Transacao, familiaId: string): Promise<void> {
+  await tx
     .update(refreshTokens)
     .set({ revogadoEm: sql`now()` })
     .where(and(eq(refreshTokens.familiaId, familiaId), isNull(refreshTokens.revogadoEm)));
 }
 
-/** Revoga a família do token de hash `hash`, se ele existir. */
-export async function revogarFamiliaDoToken(db: Executor, hash: Buffer): Promise<void> {
-  const [linha] = await db
-    .select({ familiaId: refreshTokens.familiaId })
-    .from(refreshTokens)
-    .where(eq(refreshTokens.tokenHash, hash));
-  if (linha !== undefined) {
-    await revogarFamilia(db, linha.familiaId);
+/**
+ * Revoga a família do token de hash `hash`, se ele existir (e, com `userId`, só se for desse
+ * usuário). Trava a família antes; o UPDATE é um statement separado, depois do lock.
+ */
+export async function revogarFamiliaDoToken(
+  tx: Transacao,
+  hash: Buffer,
+  userId?: string,
+): Promise<void> {
+  const familiaId = await familiaDoToken(tx, hash, userId);
+  if (familiaId !== undefined) {
+    await travarFamilia(tx, familiaId);
+    await revogarFamilia(tx, familiaId);
   }
 }
 

@@ -17,19 +17,21 @@ afterEach(() => {
 });
 
 describe('ExpurgoDiario (ciclo de vida)', () => {
-  it('agenda a cada 24 h com unref e para no shutdown', async () => {
+  it('roda uma vez no bootstrap, depois a cada 24 h, e para no shutdown', async () => {
     vi.useFakeTimers();
     vi.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     const consultar = vi.fn(async () => 0);
     const expurgo = new ExpurgoDiario({ ...bancoFalso(), consultar } as never);
 
     expurgo.onApplicationBootstrap();
-    await vi.advanceTimersByTimeAsync(INTERVALO_DO_EXPURGO_MS);
+    await vi.advanceTimersByTimeAsync(0);
     expect(consultar).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(INTERVALO_DO_EXPURGO_MS);
+    expect(consultar).toHaveBeenCalledTimes(2);
 
     expurgo.onApplicationShutdown();
     await vi.advanceTimersByTimeAsync(INTERVALO_DO_EXPURGO_MS * 2);
-    expect(consultar).toHaveBeenCalledTimes(1);
+    expect(consultar).toHaveBeenCalledTimes(2);
     expect(INTERVALO_DO_EXPURGO_MS).toBe(86_400_000);
   });
 

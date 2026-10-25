@@ -162,7 +162,8 @@ export class ServicoDeAuth {
       refreshRecebido === undefined ? undefined : hashDoRefreshToken(refreshRecebido);
     const tokens = await this.banco.transaction(async (tx) => {
       if (hashAntigo !== undefined) {
-        await revogarFamiliaDoToken(tx, hashAntigo);
+        // Só a família do próprio usuário: um cookie de outra conta não revoga a sessão alheia.
+        await revogarFamiliaDoToken(tx, hashAntigo, usuario.id);
       }
       return this.novaSessao(tx, usuario);
     });
@@ -223,7 +224,7 @@ export class ServicoDeAuth {
   async sair(refreshRecebido: string | undefined): Promise<void> {
     const hash = refreshRecebido === undefined ? undefined : hashDoRefreshToken(refreshRecebido);
     if (hash !== undefined) {
-      await this.banco.consultar((db) => revogarFamiliaDoToken(db, hash));
+      await this.banco.transaction((tx) => revogarFamiliaDoToken(tx, hash));
     }
   }
 
