@@ -30,6 +30,14 @@ export interface RequisicaoRegistrada {
   caminho: string;
   /** performance.now() na chegada: monotônico, em ms, com fração. */
   instanteMs: number;
+  /** Headers `User-Agent` e `Accept` como chegaram (undefined se ausentes). */
+  userAgent: string | undefined;
+  accept: string | undefined;
+}
+
+export interface OpcoesDoModo {
+  /** Depois de `vezes` requisições neste modo, volta sozinho ao `ok`. Sem isso, o modo fica. */
+  vezes?: number;
 }
 
 export interface OpcoesScryfallFalsa {
@@ -43,19 +51,25 @@ export interface OpcoesScryfallFalsa {
 
 export interface ScryfallFalsa {
   url: string;
+  /** Endereço em que o servidor escuta (servidor.address().address). */
+  host: string;
   porta: number;
   modo(): ModoScryfall;
-  definirModo(modo: ModoScryfall): void;
+  definirModo(modo: ModoScryfall, opcoes?: OpcoesDoModo): void;
   requisicoes(): readonly RequisicaoRegistrada[];
   zerar(): void;
-  /** Resolve quando o registro tem pelo menos `n` requisições (espera por evento, sem sleep). */
-  aguardarRequisicoes(n: number): Promise<void>;
+  /**
+   * Resolve quando o registro tem pelo menos `n` requisições (espera por evento, sem sleep).
+   * Rejeita depois de `limiteMs` (padrão 5 s), para um teste não ficar pendurado.
+   */
+  aguardarRequisicoes(n: number, limiteMs?: number): Promise<void>;
   fechar(): Promise<void>;
 }
 
 const ATRASO_LENTO_PADRAO_MS = 5000;
 const RETRY_AFTER_429_S = 30;
 const MAX_CORPO_CONTROLE = 4096;
+const LIMITE_DE_ESPERA_PADRAO_MS = 5000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -170,6 +184,8 @@ export async function iniciarScryfallFalsa(
 ): Promise<ScryfallFalsa> {
   const atrasoLentoMs = opcoes.atrasoLentoMs ?? ATRASO_LENTO_PADRAO_MS;
   let modoAtual: ModoScryfall = 'ok';
+  /** Requisições que ainda faltam no modo atual antes de voltar ao `ok` (undefined = sem fim). */
+  let restantes: number | undefined;
   let registro: RequisicaoRegistrada[] = [];
   let esperas: { n: number; resolver: () => void }[] = [];
   const timers = new Set<NodeJS.Timeout>();
@@ -203,7 +219,10 @@ export async function iniciarScryfallFalsa(
     if (req.method !== 'POST' || corpo === undefined || corpo === null || !modoValido) {
       return erro(res, 400, 'bad_request', 'Controle inválido.');
     }
-    if (modo !== undefined) modoAtual = modo as ModoScryfall;
+    if (modo !== undefined) {
+      modoAtual = modo as ModoScryfall;
+      restantes = undefined;
+    }
     if (corpo.zerar === true) registro = [];
     json(res, 200, { modo: modoAtual, total: registro.length });
   };
@@ -212,18 +231,34 @@ export async function iniciarScryfallFalsa(
     const caminho = req.url ?? '/';
     const u = new URL(caminho, 'http://127.0.0.1');
     if (opcoes.controle === true && u.pathname === '/__controle') {
-      void controle(req, res);
+      controle(req, res).catch(() => res.destroy());
       return;
     }
     registro = [
       ...registro,
-      { metodo: req.method ?? 'GET', caminho, instanteMs: performance.now() },
+      {
+        metodo: req.method ?? 'GET',
+        caminho,
+        instanteMs: performance.now(),
+        userAgent: req.headers['user-agent'],
+        accept: req.headers.accept,
+      },
     ];
     acordar();
     const modo = modoAtual;
+    if (restantes !== undefined) {
+      restantes -= 1;
+      if (restantes <= 0) {
+        modoAtual = 'ok';
+        restantes = undefined;
+      }
+    }
     if (modo === 'fora') return void req.socket.destroy();
     if (modo === '429' || modo === 'bloqueada') {
-      if (modo === '429') modoAtual = 'ok';
+      if (modo === '429') {
+        modoAtual = 'ok';
+        restantes = undefined;
+      }
       return erro(res, 429, 'too_many_requests', 'Limite excedido.', {
         'retry-after': String(RETRY_AFTER_429_S),
       });
@@ -258,19 +293,34 @@ export async function iniciarScryfallFalsa(
 
   return {
     url: origem,
+    host: endereco.address,
     porta: endereco.port,
     modo: () => modoAtual,
-    definirModo: (modo) => {
+    definirModo: (modo, opcoesDoModo = {}) => {
       modoAtual = modo;
+      restantes = opcoesDoModo.vezes;
     },
     requisicoes: () => [...registro],
     zerar: () => {
       registro = [];
     },
-    aguardarRequisicoes: (n) =>
-      registro.length >= n
-        ? Promise.resolve()
-        : new Promise<void>((resolver) => esperas.push({ n, resolver })),
+    aguardarRequisicoes: (n, limiteMs = LIMITE_DE_ESPERA_PADRAO_MS) => {
+      if (registro.length >= n) return Promise.resolve();
+      return new Promise<void>((resolver, rejeitar) => {
+        const t = setTimeout(() => {
+          esperas = esperas.filter((e) => e !== espera);
+          rejeitar(new Error(`scryfall-falsa: ${registro.length} de ${n} requisições`));
+        }, limiteMs);
+        const espera = {
+          n,
+          resolver: () => {
+            clearTimeout(t);
+            resolver();
+          },
+        };
+        esperas.push(espera);
+      });
+    },
     fechar: async () => {
       timers.forEach(clearTimeout);
       timers.clear();

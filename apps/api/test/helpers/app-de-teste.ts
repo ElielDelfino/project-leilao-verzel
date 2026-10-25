@@ -1,4 +1,3 @@
-import { MODULE_METADATA } from '@nestjs/common/constants.js';
 import type { Type } from '@nestjs/common';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
@@ -7,7 +6,6 @@ import type { DestinationStream } from 'pino';
 
 import { AppModule } from '../../src/app.module.js';
 import { configurarApp, criarAdaptadorFastify } from '../../src/app.js';
-import { Publico } from '../../src/common/auth/metadados.js';
 import type { ContadorDeJanela } from '../../src/common/limite/limite-de-tentativas.js';
 import { CONTADOR_DE_JANELA, PREFIXO_DO_LIMITE } from '../../src/common/limite/limite.module.js';
 import { BANCO } from '../../src/config/banco.module.js';
@@ -19,11 +17,10 @@ import {
   type VerificacaoDeProntidao,
 } from '../../src/health/prontidao.js';
 import { criarLogger, LoggerNestPino } from '../../src/logger/logger.js';
-import type { ClienteRedis } from '../../src/redis/cliente.js';
+import type { ClienteRedis, ClienteRedisComCatalogo } from '../../src/redis/cliente.js';
 import { criarConexaoDoRedis } from '../../src/redis/conexao.js';
 import { CLIENTE_REDIS } from '../../src/redis/redis.module.js';
 import { caminhoDoContrato, validarContrato } from './contrato.js';
-import { ModuloDeErros } from './modulo-de-erros.js';
 
 /** Só forma canônica (specs/014 §Leitura); não abre nenhum serviço real. */
 const SENHA_FALSA = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
@@ -58,6 +55,8 @@ export const ENV_DE_TESTE: Env = {
     chavePseudonimo: CHAVE_FALSA,
     sementeEd25519: CHAVE_FALSA,
   }),
+  // Porta 1 do loopback: nenhum teste sem Scryfall falsa chega a uma Scryfall de verdade.
+  scryfall: { userAgent: 'LeilaoVerzel/teste', baseUrl: 'http://127.0.0.1:1' },
 };
 
 const SEM_INFRA =
@@ -78,11 +77,18 @@ export function bancoFalso(): BancoVerificavel & { readonly encerrado: () => boo
   };
 }
 
-/** Redis falso: o PING rejeita; `encerrar` é observável. */
-export function redisFalso(): ClienteRedis & { readonly encerrado: () => boolean } {
+/** Redis falso: todo comando rejeita (como o Redis fora); `encerrar` é observável. */
+export function redisFalso(): ClienteRedisComCatalogo & { readonly encerrado: () => boolean } {
   let encerrado = false;
+  const rejeitar = (): Promise<never> => Promise.reject(new Error(SEM_INFRA));
   return {
-    ping: () => Promise.reject(new Error(SEM_INFRA)),
+    ping: rejeitar,
+    aguardarConexao: () => Promise.resolve(),
+    incrementarNaJanela: rejeitar,
+    obter: rejeitar,
+    gravarComTtl: rejeitar,
+    ttlRestanteMs: rejeitar,
+    executarLua: rejeitar,
     encerrar: () => {
       encerrado = true;
       return Promise.resolve();
@@ -94,15 +100,6 @@ export function redisFalso(): ClienteRedis & { readonly encerrado: () => boolean
 /** Contador do rate limit falso: toda contagem rejeita (como o Redis fora). */
 export function contadorFalso(): ContadorDeJanela {
   return { incrementar: () => Promise.reject(new Error(SEM_INFRA)) };
-}
-
-/**
- * O ModuloDeErros exercita o filtro global, não a autenticação: as rotas dele são públicas
- * (@Publico na classe). O guard global de identidade exige sessão nas rotas sem anotação.
- */
-for (const controlador of (Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, ModuloDeErros) ??
-  []) as Type[]) {
-  Publico()(controlador);
 }
 
 export interface OpcoesDoAppDeTeste {

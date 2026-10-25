@@ -41,6 +41,16 @@ type NomeDoSegredo = (typeof SEGREDOS)[number];
 /** Origem da SPA: só http:// ou https:// seguido de host (specs/003 §Cookies, ADR 0027). */
 const origemWeb = z.string().regex(/^https?:\/\/[^\s/?#]+$/);
 
+/** Base da API da Scryfall: `http(s)://host[:porta]`, sem caminho nem barra final (specs/005). */
+const SCRYFALL_BASE_URL_PADRAO = 'https://api.scryfall.com';
+const MAX_USER_AGENT = 200;
+/** ASCII imprimível, sem controle (um header não pode levar quebra de linha). */
+const userAgent = z
+  .string()
+  .min(1)
+  .max(MAX_USER_AGENT)
+  .regex(/^[\x20-\x7E]+$/);
+
 // specs/014 §Conexão: todas obrigatórias e sem default no código; não há DATABASE_URL nem REDIS_URL.
 const esquemaDoEnv = z.object({
   API_PORT: z.coerce.number().int().min(PORTA_MINIMA).max(PORTA_MAXIMA),
@@ -57,6 +67,8 @@ const esquemaDoEnv = z.object({
   PSEUDONYM_HMAC_KEY: segredo,
   ED25519_PRIVATE_KEY: segredo,
   WEB_ORIGIN: origemWeb,
+  SCRYFALL_USER_AGENT: userAgent,
+  SCRYFALL_BASE_URL: origemWeb.default(SCRYFALL_BASE_URL_PADRAO),
 });
 
 type VariaveisDoEnv = z.infer<typeof esquemaDoEnv>;
@@ -89,6 +101,15 @@ export interface Env {
   /** `Secure` nos cookies: WEB_ORIGIN começa com https:// (specs/003 §Cookies, ADR 0027). */
   readonly cookiesSeguros: boolean;
   readonly segredos: SegredosDaApi;
+  /** Cliente da Scryfall (specs/005 §Cliente HTTP). */
+  readonly scryfall: ConfigDaScryfall;
+}
+
+export interface ConfigDaScryfall {
+  /** Header `User-Agent` de toda chamada (SCRYFALL_USER_AGENT). */
+  readonly userAgent: string;
+  /** Origem da API, sem barra final (SCRYFALL_BASE_URL; só teste e e2e a sobrescrevem). */
+  readonly baseUrl: string;
 }
 
 /** Monta SegredosDaApi com as chaves não enumeráveis. */
@@ -172,6 +193,10 @@ function montarEnv(dados: VariaveisDoEnv): Env {
       chaveJwt: decodificar(dados.JWT_SECRET),
       chavePseudonimo: decodificar(dados.PSEUDONYM_HMAC_KEY),
       sementeEd25519: decodificar(dados.ED25519_PRIVATE_KEY),
+    }),
+    scryfall: Object.freeze({
+      userAgent: dados.SCRYFALL_USER_AGENT,
+      baseUrl: dados.SCRYFALL_BASE_URL,
     }),
   };
 }

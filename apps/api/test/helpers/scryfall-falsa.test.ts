@@ -34,6 +34,7 @@ interface Lista {
 describe('modo ok', () => {
   it('escuta só em 127.0.0.1 numa porta aleatória', async () => {
     const s = await subir();
+    expect(s.host).toBe('127.0.0.1');
     expect(s.url).toBe(`http://127.0.0.1:${s.porta}`);
     expect(s.porta).toBeGreaterThan(0);
     const res = await fetch(`${s.url}/cards/${ID_CARTA_SIMPLES}`);
@@ -156,6 +157,14 @@ describe('modos de falha', () => {
     expect((await fetch(`${s.url}/cards/${ID_CARTA_SIMPLES}`)).status).toBe(503);
   });
 
+  it('5xx com vezes 1 falha uma vez e volta ao ok', async () => {
+    const s = await subir();
+    s.definirModo('5xx', { vezes: 1 });
+    expect((await fetch(`${s.url}/cards/${ID_CARTA_SIMPLES}`)).status).toBe(503);
+    expect((await fetch(`${s.url}/cards/${ID_CARTA_SIMPLES}`)).status).toBe(200);
+    expect(s.modo()).toBe('ok');
+  });
+
   it('lento atrasa a resposta pelo tempo configurado', async () => {
     const s = await subir({ atrasoLentoMs: 200 });
     s.definirModo('lento');
@@ -214,6 +223,22 @@ describe('registro de requisições', () => {
     const [primeira, segunda] = reg.map((r) => r.instanteMs);
     expect(primeira).toBeTypeOf('number');
     expect(segunda).toBeGreaterThanOrEqual(primeira ?? Number.POSITIVE_INFINITY);
+  });
+
+  it('guarda os headers User-Agent e Accept', async () => {
+    const s = await subir();
+    await fetch(`${s.url}/cards/${ID_CARTA_SIMPLES}`, {
+      headers: { 'user-agent': 'Teste/1.0', accept: 'application/json' },
+    });
+    expect(s.requisicoes()[0]).toMatchObject({
+      userAgent: 'Teste/1.0',
+      accept: 'application/json',
+    });
+  });
+
+  it('aguardarRequisicoes rejeita depois do tempo limite', async () => {
+    const s = await subir();
+    await expect(s.aguardarRequisicoes(1, 50)).rejects.toThrow('0 de 1');
   });
 
   it('zerar limpa o registro e a cópia devolvida não altera o interno', async () => {
