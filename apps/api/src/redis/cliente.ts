@@ -55,6 +55,8 @@ export interface OpcoesDoClienteRedis {
    * última conexão bem-sucedida, para não inundar o log enquanto o Redis está fora.
    */
   readonly aoErro: (erro: ErroDoRedis) => void;
+  /** Nome da conexão no Redis (CLIENT SETNAME); os testes o usam para achar a própria conexão. */
+  readonly nome?: string;
 }
 
 export interface ClienteRedis {
@@ -65,6 +67,35 @@ export interface ClienteRedis {
   ping(sinal: AbortSignal): Promise<void>;
   /** Fecha a conexão na hora, rejeitando o que estiver na fila. Chamar de novo não faz nada. */
   encerrar(): Promise<void>;
+}
+
+/** Resultado de INCR + TTL numa janela fixa. */
+export interface ContagemNaJanelaDoRedis {
+  /** Valor da chave depois do INCR. */
+  readonly contagem: number;
+  /** TTL da chave em segundos depois do EXPIRE NX. */
+  readonly ttlS: number;
+}
+
+/** O cliente completo, como o RedisModule o cria (único cliente Redis da API, tarefa 047). */
+export interface ClienteRedisDaApi extends ClienteRedis {
+  /**
+   * Espera a conexão ficar pronta, a primeira falha de conexão ou o `sinal` abortar, o que vier
+   * antes. Nunca rejeita: com o Redis fora, a API sobe e responde 503/500 até ele voltar.
+   */
+  aguardarConexao(sinal: AbortSignal): Promise<void>;
+  /**
+   * INCR, EXPIRE <janelaS> NX e TTL num MULTI (rate limit, specs/003 §Rate limit). Sem fila
+   * offline: com o Redis fora, rejeita na hora com ErroDoRedis (falha fechada, specs/001 §Erros).
+   */
+  incrementarNaJanela(chave: string, janelaS: number): Promise<ContagemNaJanelaDoRedis>;
+}
+
+function comoInteiro(valor: unknown): number {
+  if (typeof valor !== 'number' || !Number.isInteger(valor)) {
+    throw new ErroDoRedis('RespostaInesperada', undefined);
+  }
+  return valor;
 }
 
 /** Avisa cada código uma vez até a próxima conexão pronta. */
@@ -97,10 +128,11 @@ function criarAviso(aoErro: (erro: ErroDoRedis) => void): {
 
 /**
  * Cria o cliente e já começa a conectar, sem esperar: a API sobe com o Redis fora e o
- * /api/health/ready responde 503 até ele voltar (specs/014). Os comandos feitos antes da conexão
- * ficam na fila do node-redis até ela abrir ou até o sinal do comando abortar.
+ * /api/health/ready responde 503 até ele voltar (specs/014). Sem fila offline
+ * (`disableOfflineQueue`): um comando feito sem conexão pronta rejeita na hora, em vez de esperar
+ * na fila; o RedisModule chama `aguardarConexao` no boot para os primeiros comandos não caírem aí.
  */
-export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedis {
+export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedisDaApi {
   const { conexao } = opcoes;
   const cliente = createClient({
     socket: {
@@ -109,6 +141,8 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedis {
       connectTimeout: TEMPO_LIMITE_DE_CONEXAO_DO_REDIS_MS,
     },
     password: conexao.password,
+    disableOfflineQueue: true,
+    ...(opcoes.nome === undefined ? {} : { name: opcoes.nome }),
   });
   const { avisar, conectou } = criarAviso(opcoes.aoErro);
   let encerrado = false;
@@ -133,6 +167,40 @@ export function criarClienteRedis(opcoes: OpcoesDoClienteRedis): ClienteRedis {
       if (resposta !== 'PONG') {
         throw new ErroDoRedis('RespostaInesperada', undefined);
       }
+    },
+    aguardarConexao: (sinal) => {
+      if (cliente.isReady || encerrado || sinal.aborted) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolver) => {
+        const terminar = (): void => {
+          cliente.off('ready', terminar);
+          cliente.off('error', terminar);
+          sinal.removeEventListener('abort', terminar);
+          resolver();
+        };
+        cliente.on('ready', terminar);
+        cliente.on('error', terminar);
+        sinal.addEventListener('abort', terminar, { once: true });
+      });
+    },
+    incrementarNaJanela: async (chave, janelaS) => {
+      let respostas: unknown;
+      try {
+        respostas = await cliente
+          .multi()
+          .incr(chave)
+          .expire(chave, janelaS, 'NX')
+          .ttl(chave)
+          .exec();
+      } catch (erro: unknown) {
+        throw paraErroDoRedis(erro);
+      }
+      // Sem esta conferência, `contagem` poderia virar NaN e `NaN > 5` liberaria a tentativa.
+      if (!Array.isArray(respostas)) {
+        throw new ErroDoRedis('RespostaInesperada', undefined);
+      }
+      return { contagem: comoInteiro(respostas[0]), ttlS: comoInteiro(respostas[2]) };
     },
     encerrar: () => {
       encerrado = true;

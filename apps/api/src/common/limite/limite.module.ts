@@ -1,16 +1,11 @@
-// Rate limit como provider global (specs/003 §Rate limit): o contador Redis é criado no boot a
-// partir do env validado e fechado no shutdown. O prefixo das chaves é injetável (os testes usam
-// um prefixo próprio sob `ratelimit:` e apagam só as próprias chaves; specs/013).
-import {
-  Global,
-  Inject,
-  Injectable,
-  Logger,
-  Module,
-  type OnApplicationShutdown,
-} from '@nestjs/common';
+// Rate limit como provider global (specs/003 §Rate limit): o contador usa o cliente Redis único
+// da API (CLIENTE_REDIS, do RedisModule global, que também o fecha no shutdown). O prefixo das
+// chaves é injetável (os testes usam um prefixo próprio sob `ratelimit:` e apagam só as próprias
+// chaves; specs/013).
+import { Global, Module } from '@nestjs/common';
 
-import { ENV, type Env } from '../../config/env.js';
+import type { ClienteRedisDaApi } from '../../redis/cliente.js';
+import { CLIENTE_REDIS } from '../../redis/redis.module.js';
 import { criarContadorRedis } from './contador-redis.js';
 import {
   type ContadorDeJanela,
@@ -23,33 +18,14 @@ export const CONTADOR_DE_JANELA = Symbol('CONTADOR_DE_JANELA');
 /** Token do prefixo das chaves (padrão `ratelimit:`). */
 export const PREFIXO_DO_LIMITE = Symbol('PREFIXO_DO_LIMITE');
 
-/** O que o encerramento usa: só contadores com `encerrar` (o Redis) precisam fechar. */
-interface ComEncerrar {
-  encerrar?: () => Promise<void>;
-}
-
-@Injectable()
-class EncerramentoDoContador implements OnApplicationShutdown {
-  constructor(@Inject(CONTADOR_DE_JANELA) private readonly contador: ContadorDeJanela) {}
-
-  async onApplicationShutdown(): Promise<void> {
-    await (this.contador as ContadorDeJanela & ComEncerrar).encerrar?.();
-  }
-}
-
-function criarContadorDoEnv(env: Env): ContadorDeJanela {
-  const logger = new Logger('RateLimit');
-  return criarContadorRedis({
-    conexao: env.redis,
-    // ErroDoRedis só leva tipo e código: a mensagem é segura para o log.
-    aoErro: (erro) => logger.warn(`conexão com o Redis do rate limit falhou: ${erro.message}`),
-  });
-}
-
 @Global()
 @Module({
   providers: [
-    { provide: CONTADOR_DE_JANELA, inject: [ENV], useFactory: criarContadorDoEnv },
+    {
+      provide: CONTADOR_DE_JANELA,
+      inject: [CLIENTE_REDIS],
+      useFactory: (redis: ClienteRedisDaApi) => criarContadorRedis(redis),
+    },
     { provide: PREFIXO_DO_LIMITE, useValue: PREFIXO_PADRAO_DO_LIMITE },
     {
       provide: LimiteDeTentativas,
@@ -57,7 +33,6 @@ function criarContadorDoEnv(env: Env): ContadorDeJanela {
       useFactory: (contador: ContadorDeJanela, prefixo: string) =>
         new LimiteDeTentativas(contador, prefixo),
     },
-    EncerramentoDoContador,
   ],
   exports: [LimiteDeTentativas],
 })
