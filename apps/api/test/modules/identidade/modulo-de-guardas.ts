@@ -2,7 +2,13 @@
 import { Body, Controller, Get, HttpCode, Module, Post } from '@nestjs/common';
 import { z } from 'zod';
 
-import { Papel, Publico, UsuarioAtual } from '../../../src/common/auth/metadados.js';
+import {
+  Papel,
+  Publico,
+  SessaoOpcional,
+  UsuarioAtual,
+  UsuarioOpcional,
+} from '../../../src/common/auth/metadados.js';
 import type { UsuarioDaSessao } from '../../../src/common/auth/sessao.js';
 import { type RespostaDeSucesso, sucesso } from '../../../src/common/envelope.js';
 import { PipeZod } from '../../../src/common/validacao/pipe-zod.js';
@@ -14,6 +20,22 @@ class ControladorDeGuardas {
   @Publico()
   @Get('publica')
   publica(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+
+  /** Como GET /api/lotes/{id}: pública, com `usuario` quando há sessão válida (task 053). */
+  @SessaoOpcional()
+  @Get('opcional')
+  opcional(
+    @UsuarioOpcional() usuario: UsuarioDaSessao | undefined,
+  ): RespostaDeSucesso<{ usuario: UsuarioDaSessao | null }> {
+    return sucesso({ usuario: usuario ?? null });
+  }
+
+  @SessaoOpcional()
+  @Post('opcional')
+  @HttpCode(200)
+  opcionalPost(): RespostaDeSucesso<{ ok: true }> {
     return sucesso({ ok: true });
   }
 
@@ -45,6 +67,57 @@ class ControladorDeGuardas {
   }
 }
 
-@Module({ controllers: [ControladorDeGuardas] })
+/** Combinações proibidas com @SessaoOpcional (task 053): o guard tem de falhar fechado. */
+@SessaoOpcional()
+@Controller('teste-guardas/opcional-na-classe')
+class ControladorOpcionalNaClasse {
+  @Papel('leiloeiro')
+  @Get('papel-no-metodo')
+  papelNoMetodo(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+
+  @Publico()
+  @Get('publico-no-metodo')
+  publicoNoMetodo(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+}
+
+@Papel('leiloeiro')
+@Controller('teste-guardas/papel-na-classe')
+class ControladorPapelNaClasse {
+  @SessaoOpcional()
+  @Get('opcional-no-metodo')
+  opcionalNoMetodo(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+}
+
+@Publico()
+@Controller('teste-guardas/publico-na-classe')
+class ControladorPublicoNaClasse {
+  @SessaoOpcional()
+  @Get('opcional-no-metodo')
+  opcionalNoMetodo(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+
+  @SessaoOpcional()
+  @Papel('leiloeiro')
+  @Get('tudo-no-metodo')
+  tudoNoMetodo(): RespostaDeSucesso<{ ok: true }> {
+    return sucesso({ ok: true });
+  }
+}
+
+@Module({
+  controllers: [
+    ControladorDeGuardas,
+    ControladorOpcionalNaClasse,
+    ControladorPapelNaClasse,
+    ControladorPublicoNaClasse,
+  ],
+})
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- módulo Nest: o conteúdo vem do decorator
 export class ModuloDeGuardas {}
