@@ -1,6 +1,11 @@
 # Compose principal: inclui o compose de cada sistema (padrão em specs/002).
 # Dev: `pnpm infra:up` (= docker compose --env-file .env --env-file .env.local up -d) sobe só a infraestrutura; API e web rodam com `pnpm dev`.
-# Os serviços das apps e o Caddy de produção entram em infra/ (tarefa 007).
+# Os serviços das apps e o Caddy de produção ficam em infra/docker-compose.prod.yml (projeto leilao-prod).
+# Nome fixo do projeto, e não o do diretório: todos os worktrees do git caem no mesmo projeto leilao e
+# usam os mesmos containers e o mesmo volume leilao_pgdata. Um `down -v` em qualquer worktree apaga o
+# banco de dev de todos (docs/dev-setup.md).
+name: leilao
+
 include:
   - path: database/postgres/docker-compose.yml
   - path: cache/redis/docker-compose.yml

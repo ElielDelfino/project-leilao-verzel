@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-// `pnpm keys:generate`: cria o .env.local com os segredos de desenvolvimento (task 010) e os
+// `pnpm keys:generate`: cria o .env.local com os segredos de desenvolvimento (tasks 010 e 023) e os
 // arquivos de senha que o Compose monta como `secrets:` (task 002).
-// Fonte: specs/014 §Segredos e ADR 0015 (dev usa .env.local; prod usa o GCP Secret Manager).
+// Fonte: specs/014 §Segredos e ADR 0023 (dev usa .env.local; prod usa o GCP Secret Manager).
 // Nunca imprime valores: a saída lista só nomes de variáveis e caminhos de arquivos.
 import { spawnSync } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  fstatSync,
   linkSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -24,11 +29,8 @@ import * as ed from '@noble/ed25519';
 const RAIZ = resolve(import.meta.dirname, '..');
 const CAMINHO_PADRAO = join(RAIZ, '.env.local');
 
+// Os 5 segredos são 32 bytes em base64url sem padding (ADR 0023 §Decisão, item 4).
 const BYTES_256_BITS = 32;
-// 15 bytes viram 20 caracteres base64url, dentro da regra de senha do cadastro (specs/003 RF-01).
-const BYTES_SENHA_DEMO = 15;
-// ED25519_KEY_ID: 16 hex (64 bits) do SHA-256 da chave pública; identifica a chave na rotação (specs/008).
-const HEX_DO_KEY_ID = 16;
 // Sufixo aleatório do backup: dois --force no mesmo milissegundo não colidem.
 const BYTES_SUFIXO_BACKUP = 3;
 const PERMISSAO_SO_DONO = 0o600;
@@ -41,9 +43,16 @@ export const VARIAVEIS = Object.freeze([
   'JWT_SECRET',
   'PSEUDONYM_HMAC_KEY',
   'ED25519_PRIVATE_KEY',
-  'ED25519_KEY_ID',
-  'SEED_DEMO_PASSWORD',
 ]);
+
+// Saíram com a ADR 0023: o keyId é derivado da chave pública (item 5) e SEED_DEMO_PASSWORD é pública,
+// fixa no .env (item 6). Num .env.local antigo elas sobrescrevem o .env, então o script avisa.
+export const VARIAVEIS_OBSOLETAS = Object.freeze(['ED25519_KEY_ID', 'SEED_DEMO_PASSWORD']);
+
+// Usuário `node` da imagem da API (apps/api/Dockerfile). O Compose ignora uid, gid e mode de
+// secrets com `file:` (ADR 0023 §Consequências): no compose de produção, a API só lê os arquivos de
+// .secrets/ se o dono deles for esse uid.
+export const UID_DA_API = 1000;
 
 // Diretório, ao lado do .env.local, com uma senha por arquivo (sem quebra de linha) para o Compose
 // `secrets:`: o Postgres lê via POSTGRES_PASSWORD_FILE e o Redis no entrypoint. Assim as senhas não
@@ -57,15 +66,14 @@ export const SEGREDOS_EM_ARQUIVO = Object.freeze({
 const aleatorioBase64url = (bytes) => randomBytes(bytes).toString('base64url');
 
 async function gerarSegredos() {
-  const { secretKey, publicKey } = await ed.keygenAsync();
+  const { secretKey } = await ed.keygenAsync();
   return Object.freeze({
     DB_PASSWORD: aleatorioBase64url(BYTES_256_BITS),
     REDIS_PASSWORD: aleatorioBase64url(BYTES_256_BITS),
     JWT_SECRET: aleatorioBase64url(BYTES_256_BITS),
     PSEUDONYM_HMAC_KEY: aleatorioBase64url(BYTES_256_BITS),
+    // Seed de 32 bytes da RFC 8032 §5.1.5; a API deriva dela a chave pública e o keyId.
     ED25519_PRIVATE_KEY: Buffer.from(secretKey).toString('base64url'),
-    ED25519_KEY_ID: createHash('sha256').update(publicKey).digest('hex').slice(0, HEX_DO_KEY_ID),
-    SEED_DEMO_PASSWORD: aleatorioBase64url(BYTES_SENHA_DEMO),
   });
 }
 
@@ -189,6 +197,31 @@ function gravarSoDono(caminho, conteudo) {
   chmodSync(caminho, PERMISSAO_SO_DONO);
 }
 
+// Fecha a permissão de um arquivo ou diretório que já existia (specs/014 §Segredos: arquivos 600;
+// .secrets/ 700, task 023). O_NOFOLLOW: se o caminho virou link simbólico depois do lstat, a abertura
+// falha em vez de mudar o modo do destino do link. Devolve true se o modo foi corrigido.
+function fecharPermissao(caminho, permissao, { diretorio = false } = {}) {
+  const tipo = diretorio ? constants.O_DIRECTORY : 0;
+  let fd;
+  try {
+    fd = openSync(caminho, constants.O_RDONLY | constants.O_NOFOLLOW | tipo);
+  } catch (erro) {
+    if (erro.code === 'ELOOP' || erro.code === 'ENOTDIR') {
+      falhar(`${caminho} virou link simbólico ou mudou de tipo; a permissão não foi alterada.`);
+    }
+    throw erro;
+  }
+  try {
+    if ((fstatSync(fd).mode & 0o777) === permissao) return false;
+    fchmodSync(fd, permissao);
+    return true;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const comCorrecao = (corrigida) => (corrigida ? { permissaoCorrigida: true } : {});
+
 // Grava num temporário (permissão 600 desde a criação) e publica de forma atômica:
 // sem sobrescrever, link() falha se o destino já existir; com sobrescrita, rename() troca o arquivo.
 function gravarAtomico(caminho, temporario, conteudo, sobrescrever) {
@@ -253,15 +286,22 @@ const caminhosQueSeraoGravados = (plano) =>
     .filter((item) => item.acao !== 'mantido')
     .flatMap((item) => [item.caminho, nomeTemporario(item.caminho), item.backup].filter(Boolean));
 
-function criarDiretorioDeSegredos(diretorio) {
-  if (estadoDoDiretorio(diretorio) === 'diretorio') return;
+// Cria .secrets/ com 700 ou fecha em 700 um que já existia. Devolve true se corrigiu a permissão.
+function prepararDiretorioDeSegredos(diretorio) {
+  if (estadoDoDiretorio(diretorio) === 'diretorio') {
+    return fecharPermissao(diretorio, PERMISSAO_DIRETORIO_SO_DONO, { diretorio: true });
+  }
   mkdirSync(diretorio, { mode: PERMISSAO_DIRETORIO_SO_DONO });
   chmodSync(diretorio, PERMISSAO_DIRETORIO_SO_DONO);
+  return false;
 }
 
 function gravarSegredos(plano) {
   return plano.map(({ variavel, caminho, conteudo, acao, backup }) => {
-    if (acao === 'mantido') return { variavel, caminho, status: acao };
+    if (acao === 'mantido') {
+      const corrigida = fecharPermissao(caminho, PERMISSAO_SO_DONO);
+      return { variavel, caminho, status: acao, ...comCorrecao(corrigida) };
+    }
     if (backup) gravarSoDono(backup, readFileSync(caminho));
     gravarAtomico(caminho, nomeTemporario(caminho), conteudo, acao === 'sobrescrito');
     return { variavel, caminho, status: acao, ...(backup ? { backup } : {}) };
@@ -280,15 +320,35 @@ function publicarEnv(destino, conteudo, existia) {
   }
 }
 
+// Nomes (nunca valores) das variáveis obsoletas presentes num .env.local mantido.
+function obsoletasNoEnv(caminho) {
+  const nomes = new Set(
+    readFileSync(caminho, 'utf8')
+      .split('\n')
+      .filter((linha) => linha.includes('=') && !linha.startsWith('#'))
+      .map((linha) => linha.slice(0, linha.indexOf('=')).trim()),
+  );
+  const presentes = VARIAVEIS_OBSOLETAS.filter((nome) => nomes.has(nome));
+  return presentes.length > 0 ? presentes : undefined;
+}
+
 /**
- * Cria o arquivo de segredos e os arquivos de senha em `.secrets/` (ao lado dele). Sem `forcar`, um
- * .env.local existente nunca é alterado, e os arquivos de `.secrets/` são criados ou sincronizados a
- * partir dele; com `forcar`, tudo é regerado e os anteriores vão para backup (600). Recusa destino
- * versionável pelo git e links simbólicos.
+ * Cria o arquivo de segredos e os arquivos de senha em `.secrets/` (ao lado dele). Sem `forcar`, o
+ * conteúdo de um .env.local existente nunca é alterado (só a permissão, se não for 600), e os
+ * arquivos de `.secrets/` são criados ou sincronizados a partir dele; com `forcar`, tudo é regerado e
+ * os anteriores vão para backup (600). Arquivos e diretório que já existiam voltam a 600 e 700.
+ * Recusa destino versionável pelo git e links simbólicos. `uid` existe para os testes.
  * @returns {Promise<{status: 'criado' | 'mantido' | 'sobrescrito', caminho: string, backup?: string,
- *   segredos: Array<{variavel: string, caminho: string, status: string, backup?: string}>}>}
+ *   permissaoCorrigida?: true, obsoletas?: string[], donoDiferenteDaApi?: true,
+ *   diretorioDeSegredos: {caminho: string, permissaoCorrigida?: true},
+ *   segredos: Array<{variavel: string, caminho: string, status: string, backup?: string,
+ *     permissaoCorrigida?: true}>}>}
  */
-export async function gerarEnvLocal({ caminho = CAMINHO_PADRAO, forcar = false } = {}) {
+export async function gerarEnvLocal({
+  caminho = CAMINHO_PADRAO,
+  forcar = false,
+  uid = process.getuid?.(),
+} = {}) {
   const destino = resolverDestino(caminho);
   const base = dirname(destino);
   const diretorioDeSegredos = join(base, DIRETORIO_DE_SEGREDOS);
@@ -311,10 +371,21 @@ export async function gerarEnvLocal({ caminho = CAMINHO_PADRAO, forcar = false }
       garantirNaoVersionaveis(base, caminhosQueSeraoGravados(planoFinal));
     }
   }
-  criarDiretorioDeSegredos(diretorioDeSegredos);
+  const envCorrigido = status === 'mantido' && fecharPermissao(destino, PERMISSAO_SO_DONO);
+  const obsoletas = status === 'mantido' ? obsoletasNoEnv(destino) : undefined;
+  const diretorioCorrigido = prepararDiretorioDeSegredos(diretorioDeSegredos);
   const segredos = gravarSegredos(planoFinal);
   const backup = status === 'sobrescrito' ? backupDoEnv : undefined;
-  return { status, caminho: destino, ...(backup ? { backup } : {}), segredos };
+  return {
+    status,
+    caminho: destino,
+    ...(backup ? { backup } : {}),
+    ...comCorrecao(envCorrigido),
+    ...(obsoletas ? { obsoletas } : {}),
+    ...(uid !== undefined && uid !== UID_DA_API ? { donoDiferenteDaApi: true } : {}),
+    diretorioDeSegredos: { caminho: diretorioDeSegredos, ...comCorrecao(diretorioCorrigido) },
+    segredos,
+  };
 }
 
 const OPCOES_CLI = Object.freeze({
@@ -334,10 +405,14 @@ function exibir(caminho) {
   return relativo.startsWith('..') ? caminho : relativo;
 }
 
-function mensagemDosSegredos(segredos) {
-  const linhas = segredos.map(({ caminho, status, backup }) => {
+const permissao = (modo, corrigida) =>
+  corrigida ? `permissão corrigida para ${modo}` : `permissão ${modo}`;
+
+function mensagemDosSegredos({ diretorioDeSegredos, segredos, donoDiferenteDaApi }) {
+  const diretorio = `  - ${exibir(diretorioDeSegredos.caminho)} (diretório, ${permissao('700', diretorioDeSegredos.permissaoCorrigida)})`;
+  const linhas = segredos.map(({ caminho, status, backup, permissaoCorrigida }) => {
     const anterior = backup ? `; anterior em ${exibir(backup)}` : '';
-    return `  - ${exibir(caminho)} (${status}, permissão 600${anterior})`;
+    return `  - ${exibir(caminho)} (${status}, ${permissao('600', permissaoCorrigida)}${anterior})`;
   });
   // Um bind mount de arquivo segue o inode antigo até o container reiniciar; `up -d` não recria
   // o container por mudança no conteúdo do segredo.
@@ -345,16 +420,40 @@ function mensagemDosSegredos(segredos) {
   const aviso = regravou
     ? [
         'Um Redis em execução só lê o arquivo novo ao reiniciar: docker compose restart redis' +
-          ' (pnpm infra:up não recria o container). O Postgres só lê a senha ao criar o volume.',
+          ' (pnpm infra:up não recria o container). O Postgres só lê a senha ao criar o volume:' +
+          ' com o volume de dev já existente, rode pnpm db:sync-password.',
       ]
     : [];
-  return [`Arquivos de senha para o Compose (secrets:):`, ...linhas, ...aviso].join('\n');
+  const dono = donoDiferenteDaApi
+    ? [
+        `Aviso: o dono dos arquivos é o seu usuário, não o uid ${UID_DA_API} da imagem da API. Em dev` +
+          ' a API roda no host e lê o .env.local; só o infra/docker-compose.prod.yml local fica sem' +
+          ' conseguir ler .secrets/ (o Compose ignora uid e mode de secrets com file:).',
+      ]
+    : [];
+  return [
+    `Arquivos de senha para o Compose (secrets:):`,
+    diretorio,
+    ...linhas,
+    ...aviso,
+    ...dono,
+  ].join('\n');
 }
 
-function mensagemDoEnv({ status, caminho, backup }) {
+function mensagemDasObsoletas({ caminho, obsoletas }) {
+  if (!obsoletas) return [];
+  return [
+    `Atenção: ${exibir(caminho)} ainda define ${obsoletas.join(', ')}, que saíram do keys:generate` +
+      ' (ADR 0023). Em dev elas sobrescrevem o .env (SEED_DEMO_PASSWORD fica no .env, e o keyId é' +
+      ' derivado da chave pública): apague essas linhas do arquivo.',
+  ];
+}
+
+function mensagemDoEnv({ status, caminho, backup, permissaoCorrigida }) {
   const nome = exibir(caminho);
   if (status === 'mantido') {
-    return `${nome} já existe e não foi alterado. Para regerar todos os segredos: pnpm keys:generate --force`;
+    const correcao = permissaoCorrigida ? ' (só a permissão foi corrigida para 600)' : '';
+    return `${nome} já existe e não foi alterado${correcao}. Para regerar todos os segredos: pnpm keys:generate --force`;
   }
   const lista = VARIAVEIS.map((variavel) => `  - ${variavel}`).join('\n');
   const criado = `${nome} ${status} (permissão 600) com:\n${lista}`;
@@ -364,12 +463,16 @@ function mensagemDoEnv({ status, caminho, backup }) {
     `Arquivo anterior guardado em ${exibir(backup)} (permissão 600, ignorado pelo git).`,
     'Atenção: a chave Ed25519 antiga só existe nesse backup; sem ela, lances e selos já assinados',
     'deixam de ser verificáveis. O Postgres só lê DB_PASSWORD ao criar o volume: se ele já existia,',
-    'recrie-o (docker compose down -v) ou troque a senha no banco antes de subir de novo.',
+    'rode pnpm db:sync-password (aplica a senha nova sem apagar o volume).',
   ].join('\n');
 }
 
 const mensagem = (resultado) =>
-  [mensagemDoEnv(resultado), mensagemDosSegredos(resultado.segredos)].join('\n');
+  [
+    mensagemDoEnv(resultado),
+    ...mensagemDasObsoletas(resultado),
+    mensagemDosSegredos(resultado),
+  ].join('\n');
 
 async function main() {
   let argumentos;

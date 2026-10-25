@@ -32,7 +32,7 @@ A conexão é lida em partes; não existem `DATABASE_URL` nem `REDIS_URL`. Uma U
 |---|---|---|---|
 | `POSTGRES_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `postgres` (serviço do compose) |
 | `POSTGRES_PORT` | inteiro de 1 a 65535 | `15432` (`.env`; é também a porta publicada pelo compose de dev) | `5432` (porta interna), no `environment:` do serviço da API |
-| `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test` | `leilao` |
+| `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test_<sufixo>`, um banco por worktree (specs/013 §Banco de teste) | `leilao` |
 | `POSTGRES_USER` | nome do usuário | `leilao` (`.env`) | `leilao` |
 | `DB_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `DB_PASSWORD_FILE=/run/secrets/db_password` |
 | `REDIS_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `redis` (serviço do compose) |
@@ -51,10 +51,11 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 | `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
 | `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5, gerada com `@noble/ed25519`), base64url sem padding (43 caracteres) | API: assinatura dos lances e do selo (specs/008 §Chaves) | Secret Manager → `ed25519_private_key` |
 
-Variáveis que o `pnpm keys:generate` ainda gera e que saem dele pela ADR 0023 (pedido ao infra):
+Variáveis que saíram do `pnpm keys:generate` pela ADR 0023 (task 023):
 
-- `ED25519_KEY_ID`: deixa de existir. A API deriva o `keyId` da chave pública: 16 primeiros caracteres hex minúsculos de SHA-256 dos 32 bytes dela (specs/008 §Chaves, com vetor de teste).
-- `SEED_DEMO_PASSWORD`: não é segredo. Vai para o `.env` versionado, com o mesmo valor em dev, CI e produção (valor `leilao-demo-2026`, decidido na ADR 0023; 10 a 128 caracteres `A–Z a–z 0–9 - _`, specs/003 RF-03), e é publicada no README. Um `.env.local` antigo que ainda tenha essas linhas sobrescreve o `.env` em dev: apague-as.
+- `ED25519_KEY_ID`: deixou de existir. A API deriva o `keyId` da chave pública: 16 primeiros caracteres hex minúsculos de SHA-256 dos 32 bytes dela (specs/008 §Chaves, com vetor de teste).
+- `SEED_DEMO_PASSWORD`: não é segredo. Fica no `.env` versionado, com o mesmo valor em dev, CI e produção (`leilao-demo-2026`, decidido na ADR 0023; 10 a 128 caracteres `A–Z a–z 0–9 - _`, specs/003 RF-03), e é publicada no README. O gitleaks 8.30.1 não aponta essa linha (conferido na task 023), então não há allowlist.
+- Um `.env.local` antigo que ainda tenha essas linhas sobrescreve o `.env` em dev. O `pnpm keys:generate` avisa pelo nome, sem mostrar o valor e sem alterar o arquivo: apague as linhas à mão.
 
 Base64url (RFC 4648 §5) usa só `A–Z a–z 0–9 - _`, então nenhum valor precisa de aspas no `.env` nem de escape no compose ou numa URL de conexão. O entrypoint do Redis recusa uma senha fora desse conjunto (uma quebra de linha injetaria diretivas no `redis.conf`) e sai com erro, sem exibir o valor.
 
@@ -68,15 +69,17 @@ Para cada um dos 5 segredos, a API, o runner de migrations e o seed leem exatame
 
 - Cria `.env.local` na raiz do repositório com permissão 600.
 - Cria `.secrets/` (permissão 700) ao lado do `.env.local`, com `db_password` e `redis_password` (permissão 600, só o valor, sem quebra de linha), copiados de `DB_PASSWORD` e `REDIS_PASSWORD`. O `.env.local` é a fonte: os arquivos de `.secrets/` sempre seguem os valores dele.
-- Se o `.env.local` já existe, ele não é alterado e o comando sai com código 0. Os arquivos de `.secrets/` são criados se faltarem, mantidos se iguais ao `.env.local` e regravados se diferentes (o anterior vai para backup). Para regerar todos os segredos: `pnpm keys:generate --force`.
+- Se o `.env.local` já existe, o conteúdo dele não é alterado e o comando sai com código 0. Os arquivos de `.secrets/` são criados se faltarem, mantidos se iguais ao `.env.local` e regravados se diferentes (o anterior vai para backup). Para regerar todos os segredos: `pnpm keys:generate --force`.
+- Permissões que já existiam são corrigidas, nunca aceitas: um `.env.local` ou arquivo de `.secrets/` mantido com outro modo (por exemplo 644) volta a 600, e um `.secrets/` existente (por exemplo 755) volta a 700. A saída diz `permissão corrigida para 600` (ou `700`). A troca de modo abre o caminho com `O_NOFOLLOW`, então um link simbólico colocado no lugar é recusado.
+- Dono dos arquivos: o do usuário que roda o comando. O Compose ignora `uid`, `gid` e `mode` de secrets com `file:` (ADR 0023), então só o uid 1000 (usuário `node` da imagem da API) consegue ler `.secrets/` pelo `infra/docker-compose.prod.yml` local. Com outro uid, o comando avisa. Em dev isso não importa: a API roda no host e lê o `.env.local`.
 - Recusa um `.env.local` existente sem `DB_PASSWORD` ou `REDIS_PASSWORD` em base64url; a mensagem cita o nome da variável, nunca o valor.
-- Com `--force`, o `.env.local` anterior é guardado antes da troca em `.env.bak-<data-hora UTC>-<sufixo>.local` (permissão 600, no mesmo diretório), e cada arquivo de `.secrets/` em `.secrets/<nome>.bak-<data-hora UTC>-<sufixo>` (permissão 600). Os nomes casam com `.env.*.local` e `.secrets/` do `.gitignore`. A saída cita os caminhos dos backups, nunca os valores. Os backups não são apagados automaticamente: apague-os quando não precisar mais da chave antiga.
+- Com `--force`, o `.env.local` anterior é guardado antes da troca em `.env.bak-<data-hora UTC>-<sufixo>.local` (permissão 600, no mesmo diretório), e cada arquivo de `.secrets/` em `.secrets/<nome>.bak-<data-hora UTC>-<sufixo>` (permissão 600). Os nomes casam com `.env.*.local` e `.secrets/` do `.gitignore`. A saída cita os caminhos dos backups, nunca os valores. Os backups não são apagados automaticamente e se acumulam a cada `--force`, cada um com senhas e chaves antigas: confira que não precisa mais deles (em especial da chave Ed25519 antiga) e apague-os (`rm .env.bak-*.local .secrets/*.bak-*`).
 - Nunca imprime valores: a saída lista só nomes de variáveis e caminhos.
 - A gravação de cada arquivo é atômica (temporário `.env.tmp-<pid>-<nome>.local` no mesmo diretório + `link`/`rename`): uma falha no meio não deixa arquivo incompleto. O `.env.local` é gravado antes de `.secrets/`; se algo falhar depois dele, rodar `pnpm keys:generate` de novo sincroniza `.secrets/`.
 - Recusa, sem gravar nada, um destino que o git versionaria: o alvo, os arquivos de `.secrets/`, os temporários ou os backups dentro de uma working tree sem estar no `.gitignore`, ou um arquivo já rastreado. Também recusa link simbólico (mesmo pendente) no `.env.local`, em `.secrets/` ou nos arquivos dele, diretório no lugar de arquivo e diretório de destino inexistente.
 - `--out <caminho>` grava em outro arquivo (e `.secrets/` no mesmo diretório), só fora do repositório ou em caminho ignorado pelo git; existe para os testes (`pnpm test:scripts`).
 
-Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê a senha ao inicializar o volume. Recrie o volume local (`docker compose down -v`, apaga os dados de dev) ou troque a senha no banco antes de subir de novo. O Redis lê o arquivo a cada início do container: `docker compose restart redis`. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`); a chave antiga só fica no backup.
+Ao regerar com `--force`, o Postgres continua com a senha antiga: ele só lê a senha ao inicializar o volume. Rode `pnpm db:sync-password`: ele aplica a senha nova no volume existente, sem apagar dados (ver [dev-setup.md](dev-setup.md#problemas-comuns)). Não use `docker compose down -v`, que apaga o volume compartilhado por todos os worktrees. O Redis lê o arquivo a cada início do container: `docker compose restart redis`. Trocar `ED25519_PRIVATE_KEY` invalida a verificação dos lances já assinados com a chave anterior, a menos que a chave pública antiga continue publicada (ADR 0005, rotação por `key_id`); a chave antiga só fica no backup.
 
 ## Saídas que expõem segredos
 

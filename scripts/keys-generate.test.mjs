@@ -1,8 +1,10 @@
-// Testes de `pnpm keys:generate` (task 010, specs/014 §Segredos, ADR 0015). Rodar: pnpm test:scripts
+// Testes de `pnpm keys:generate` (tasks 010 e 023, specs/014 §Segredos, ADR 0023). Rodar: pnpm test:scripts
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -18,10 +20,13 @@ import assert from 'node:assert/strict';
 
 import * as ed from '@noble/ed25519';
 
+import { sincronizarSenha, verificadorScram } from './db-sync-password.mjs';
 import {
   DIRETORIO_DE_SEGREDOS,
   SEGREDOS_EM_ARQUIVO,
+  UID_DA_API,
   VARIAVEIS,
+  VARIAVEIS_OBSOLETAS,
   gerarEnvLocal,
   nomeBackup,
   nomeBackupDeSegredo,
@@ -32,7 +37,10 @@ const SCRIPT = resolve(import.meta.dirname, 'keys-generate.mjs');
 const RAIZ = resolve(import.meta.dirname, '..');
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const BYTES_256_BITS = 32;
+// 32 bytes em base64url sem padding (ADR 0023 §Decisão, item 4).
+const CARACTERES_DO_SEGREDO = 43;
 const ARQUIVOS_DE_SEGREDO = Object.values(SEGREDOS_EM_ARQUIVO).sort();
+const modo = (caminho) => statSync(caminho).mode & 0o777;
 
 // Caminho do arquivo de segredo (Compose `secrets:`) ao lado do .env informado.
 const caminhoDoSegredo = (caminhoDoEnv, variavel) =>
@@ -88,7 +96,7 @@ describe('keys:generate', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('cria o arquivo com as 7 variáveis da tarefa, sem valor vazio', async () => {
+  it('cria o arquivo com os 5 segredos da ADR 0023, sem valor vazio', async () => {
     const caminho = novoCaminho('cria.env');
 
     const resultado = await gerarEnvLocal({ caminho });
@@ -98,14 +106,34 @@ describe('keys:generate', () => {
     assert.deepEqual(Object.keys(env).sort(), [...VARIAVEIS].sort());
     assert.deepEqual([...VARIAVEIS].sort(), [
       'DB_PASSWORD',
-      'ED25519_KEY_ID',
       'ED25519_PRIVATE_KEY',
       'JWT_SECRET',
       'PSEUDONYM_HMAC_KEY',
       'REDIS_PASSWORD',
-      'SEED_DEMO_PASSWORD',
     ]);
     for (const nome of VARIAVEIS) assert.ok(env[nome].length > 0, `${nome} vazio`);
+  });
+
+  it('não gera ED25519_KEY_ID nem SEED_DEMO_PASSWORD (ADR 0023, itens 5 e 6)', async () => {
+    const caminho = novoCaminho('sem-obsoletas.env');
+
+    await gerarEnvLocal({ caminho });
+
+    const env = lerEnv(caminho);
+    assert.deepEqual([...VARIAVEIS_OBSOLETAS].sort(), ['ED25519_KEY_ID', 'SEED_DEMO_PASSWORD']);
+    for (const nome of VARIAVEIS_OBSOLETAS) assert.equal(env[nome], undefined, `${nome} gerado`);
+  });
+
+  it('gera os 5 segredos em base64url canônico de 43 caracteres (ADR 0023, item 4)', async () => {
+    const caminho = novoCaminho('canonico.env');
+
+    await gerarEnvLocal({ caminho });
+
+    const env = lerEnv(caminho);
+    for (const nome of VARIAVEIS) {
+      assert.equal(env[nome].length, CARACTERES_DO_SEGREDO, `${nome} sem 43 caracteres`);
+      assert.equal(bytes(env[nome]).toString('base64url'), env[nome], `${nome} não canônico`);
+    }
   });
 
   it('grava o arquivo com permissão 600', async () => {
@@ -128,17 +156,7 @@ describe('keys:generate', () => {
     }
   });
 
-  it('gera SEED_DEMO_PASSWORD dentro da regra de senha do cadastro (10 a 128 caracteres)', async () => {
-    const caminho = novoCaminho('seed.env');
-
-    await gerarEnvLocal({ caminho });
-
-    const senha = lerEnv(caminho).SEED_DEMO_PASSWORD;
-    assert.match(senha, BASE64URL);
-    assert.ok(senha.length >= 10 && senha.length <= 128, `tamanho ${senha.length}`);
-  });
-
-  it('gera uma chave Ed25519 válida e um ED25519_KEY_ID derivado da chave pública', async () => {
+  it('gera uma seed Ed25519 válida (RFC 8032 §5.1.5) que assina e verifica', async () => {
     const caminho = novoCaminho('ed25519.env');
 
     await gerarEnvLocal({ caminho });
@@ -151,8 +169,6 @@ describe('keys:generate', () => {
     const mensagem = new TextEncoder().encode('leilao-verzel:teste');
     const assinatura = await ed.signAsync(mensagem, chavePrivada);
     assert.equal(await ed.verifyAsync(assinatura, mensagem, chavePublica), true);
-    const esperado = createHash('sha256').update(chavePublica).digest('hex').slice(0, 16);
-    assert.equal(env.ED25519_KEY_ID, esperado);
   });
 
   it('gera valores diferentes a cada arquivo novo', async () => {
@@ -370,6 +386,162 @@ describe('keys:generate', () => {
     });
   });
 
+  describe('permissões de arquivos que já existiam (task 023)', () => {
+    // .secrets/ com 755 e arquivos com 644, com o conteúdo esperado: o cenário do MEDIUM 1.
+    async function preCriarAbertos(sub) {
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+      const diretorio = join(sub, DIRETORIO_DE_SEGREDOS);
+      chmodSync(diretorio, 0o755);
+      for (const variavel of Object.keys(SEGREDOS_EM_ARQUIVO)) {
+        chmodSync(caminhoDoSegredo(caminho, variavel), 0o644);
+      }
+      chmodSync(caminho, 0o644);
+      return { caminho, diretorio };
+    }
+
+    it('volta para 700 um .secrets/ existente com 755 e para 600 os arquivos mantidos com 644', async () => {
+      const { caminho, diretorio } = await preCriarAbertos(mkdtempSync(join(dir, 'abertos-')));
+      const conteudos = Object.keys(SEGREDOS_EM_ARQUIVO).map((v) => lerSegredo(caminho, v));
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(modo(diretorio), 0o700);
+      for (const segredo of resultado.segredos) {
+        assert.equal(segredo.status, 'mantido');
+        assert.equal(segredo.permissaoCorrigida, true, `${segredo.variavel} sem correção`);
+        assert.equal(
+          modo(segredo.caminho),
+          0o600,
+          `${segredo.variavel} com ${modo(segredo.caminho)}`,
+        );
+      }
+      const depois = Object.keys(SEGREDOS_EM_ARQUIVO).map((v) => lerSegredo(caminho, v));
+      assert.deepEqual(depois, conteudos);
+    });
+
+    it('volta para 600 um .env.local mantido com 644, sem alterar o conteúdo', async () => {
+      const { caminho } = await preCriarAbertos(mkdtempSync(join(dir, 'env-aberto-')));
+      const antes = readFileSync(caminho);
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.status, 'mantido');
+      assert.equal(resultado.permissaoCorrigida, true);
+      assert.equal(modo(caminho), 0o600);
+      assert.deepEqual(readFileSync(caminho), antes);
+    });
+
+    it('não marca correção quando as permissões já estão certas', async () => {
+      const sub = mkdtempSync(join(dir, 'ja-fechados-'));
+      const caminho = join(sub, '.env.local');
+      await gerarEnvLocal({ caminho });
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.permissaoCorrigida, undefined);
+      for (const segredo of resultado.segredos) assert.equal(segredo.permissaoCorrigida, undefined);
+    });
+
+    it('com --force, volta para 700 um .secrets/ existente com 755', async () => {
+      const { caminho, diretorio } = await preCriarAbertos(
+        mkdtempSync(join(dir, 'abertos-force-')),
+      );
+
+      const resultado = await gerarEnvLocal({ caminho, forcar: true });
+
+      assert.equal(modo(diretorio), 0o700);
+      for (const segredo of resultado.segredos) assert.equal(modo(segredo.caminho), 0o600);
+      assert.equal(modo(caminho), 0o600);
+    });
+
+    it('a CLI diz que corrigiu a permissão, sem citar valores', async () => {
+      const { caminho } = await preCriarAbertos(mkdtempSync(join(dir, 'cli-abertos-')));
+      const env = lerEnv(caminho);
+
+      const saida = rodarCli(['--out', caminho]);
+
+      assert.equal(saida.status, 0, saida.stderr);
+      assert.match(saida.stdout, /db_password \(mantido, permissão corrigida para 600\)/);
+      assert.match(saida.stdout, /\.secrets.*700/);
+      assert.match(saida.stdout, /permissão corrigida para 600/);
+      for (const nome of VARIAVEIS) assert.ok(!saida.stdout.includes(env[nome]), nome);
+    });
+  });
+
+  describe('.env.local antigo com variáveis que saíram (ADR 0023)', () => {
+    function envAntigo(sub) {
+      const caminho = join(sub, '.env.local');
+      const linhas = [
+        'DB_PASSWORD=' + 'a'.repeat(CARACTERES_DO_SEGREDO),
+        'REDIS_PASSWORD=' + 'b'.repeat(CARACTERES_DO_SEGREDO),
+        'ED25519_KEY_ID=valorDoKeyIdAntigo',
+        'SEED_DEMO_PASSWORD=valorDaSenhaDemoAntiga',
+        '',
+      ];
+      writeFileSync(caminho, linhas.join('\n'), { mode: 0o600 });
+      return caminho;
+    }
+
+    it('lista os nomes obsoletos sem alterar o arquivo', async () => {
+      const caminho = envAntigo(mkdtempSync(join(dir, 'obsoletas-')));
+      const antes = readFileSync(caminho);
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.status, 'mantido');
+      assert.deepEqual(resultado.obsoletas, ['ED25519_KEY_ID', 'SEED_DEMO_PASSWORD']);
+      assert.deepEqual(readFileSync(caminho), antes);
+    });
+
+    it('não lista nada num .env.local atual', async () => {
+      const caminho = novoCaminho('sem-obsoletas-mantido.env');
+      await gerarEnvLocal({ caminho });
+
+      const resultado = await gerarEnvLocal({ caminho });
+
+      assert.equal(resultado.obsoletas, undefined);
+    });
+
+    it('a CLI avisa pelos nomes e não mostra os valores', () => {
+      const caminho = envAntigo(mkdtempSync(join(dir, 'cli-obsoletas-')));
+
+      const saida = rodarCli(['--out', caminho]);
+
+      assert.equal(saida.status, 0, saida.stderr);
+      assert.match(saida.stdout, /ED25519_KEY_ID/);
+      assert.match(saida.stdout, /SEED_DEMO_PASSWORD/);
+      assert.match(saida.stdout, /sobrescrev/);
+      assert.ok(!saida.stdout.includes('valorDoKeyIdAntigo'), 'valor do key id no terminal');
+      assert.ok(
+        !saida.stdout.includes('valorDaSenhaDemoAntiga'),
+        'valor da senha demo no terminal',
+      );
+    });
+  });
+
+  describe('dono dos arquivos de .secrets/ e o uid da API (task 023)', () => {
+    it('o uid esperado é o do usuário node da imagem da API', () => {
+      assert.equal(UID_DA_API, 1000);
+    });
+
+    it('avisa quando o dono dos arquivos não é o uid da API', async () => {
+      const caminho = novoCaminho('uid-diferente.env');
+
+      const resultado = await gerarEnvLocal({ caminho, uid: 1001 });
+
+      assert.equal(resultado.donoDiferenteDaApi, true);
+    });
+
+    it('não avisa quando o dono é o uid da API', async () => {
+      const caminho = novoCaminho('uid-igual.env');
+
+      const resultado = await gerarEnvLocal({ caminho, uid: UID_DA_API });
+
+      assert.equal(resultado.donoDiferenteDaApi, undefined);
+    });
+  });
+
   describe('.gitignore do repositório', () => {
     it('ignora o .env.local, o temporário e o backup que o script cria na raiz', () => {
       const alvo = join(RAIZ, '.env.local');
@@ -573,6 +745,209 @@ describe('keys:generate', () => {
 
       assert.notEqual(saida.status, 0);
       assert.match(saida.stderr, /--out/);
+    });
+  });
+});
+
+// `pnpm db:sync-password` (task 023): aplica no volume de dev a senha de .secrets/db_password, o passo
+// seguinte a um `keys:generate --force`. Os testes ficam aqui porque o script só existe para esse fluxo.
+describe('db:sync-password', () => {
+  let dir;
+  const SENHA = 'S'.repeat(CARACTERES_DO_SEGREDO - 1) + 'A';
+  const OUTRA = 'O'.repeat(CARACTERES_DO_SEGREDO - 1) + 'A';
+
+  before(() => {
+    dir = mkdtempSync(join(tmpdir(), 'db-sync-password-'));
+  });
+
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function raizCom(senhaNoArquivo) {
+    const raiz = mkdtempSync(join(dir, 'raiz-'));
+    if (senhaNoArquivo !== undefined) {
+      mkdirSync(join(raiz, DIRETORIO_DE_SEGREDOS), { mode: 0o700 });
+      writeFileSync(join(raiz, DIRETORIO_DE_SEGREDOS, 'db_password'), senhaNoArquivo, {
+        mode: 0o600,
+      });
+    }
+    return raiz;
+  }
+
+  // O ALTER ROLE roda `psql` direto no `docker exec`; a conferência roda `sh -c` com o psql no script.
+  const ehAlter = (args) => args[0] === 'exec' && args.includes('psql');
+
+  // Docker de mentira: o banco aceita `senhaNoBanco` até um ALTER ROLE trocar pelo verificador novo.
+  function dockerFalso({ senhaNoBanco, container = 'abc123', falhaNoAlter, sempreRecusa } = {}) {
+    const chamadas = [];
+    let alterado = false;
+    const executar = (args, { entrada } = {}) => {
+      chamadas.push({ args, entrada });
+      if (args[0] === 'compose') return { status: 0, stdout: `${container}\n`, stderr: '' };
+      if (args[0] === 'inspect') return { status: 0, stdout: '172.18.0.2\n', stderr: '' };
+      if (ehAlter(args)) {
+        if (falhaNoAlter) return { status: 3, stdout: '', stderr: falhaNoAlter(entrada) };
+        alterado = true;
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      const aceita = !sempreRecusa && (alterado || entrada === `${senhaNoBanco}\n`);
+      return aceita
+        ? { status: 0, stdout: '1\n', stderr: '' }
+        : { status: 2, stdout: '', stderr: 'FATAL:  password authentication failed for user' };
+    };
+    return { executar, chamadas };
+  }
+
+  const opcoes = (raiz, docker, extra = {}) => ({
+    raiz,
+    usuario: 'leilao',
+    banco: 'leilao',
+    senhaDoEnv: SENHA,
+    executar: docker.executar,
+    ...extra,
+  });
+
+  describe('verificador SCRAM-SHA-256', () => {
+    it('reproduz o vetor de teste da RFC 7677 §3 (ServerSignature e StoredKey)', () => {
+      const sal = Buffer.from('W22ZaJ0SNY7soEsUEjb6gQ==', 'base64');
+
+      const verificador = verificadorScram('pencil', { sal, iteracoes: 4096 });
+
+      const [, parametros, chaves] = verificador.split('$');
+      assert.equal(parametros, '4096:W22ZaJ0SNY7soEsUEjb6gQ==');
+      const [storedKey, serverKey] = chaves.split(':').map((c) => Buffer.from(c, 'base64'));
+      const authMessage =
+        'n=user,r=rOprNGfwEbeRWgbNEkqO,' +
+        'r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096,' +
+        'c=biws,r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0';
+      const serverSignature = createHmac('sha256', serverKey).update(authMessage).digest('base64');
+      assert.equal(serverSignature, '6rriTRBi23WpRR/wtup+mMhUZUn/dB5nLTJRsjl95G4=');
+      const clientSignature = createHmac('sha256', storedKey).update(authMessage).digest();
+      const proof = Buffer.from('dHzbZapWIk4jUhN+Ute9ytag9zjfMHgsqmmiz7AndVQ=', 'base64');
+      const clientKey = Buffer.from(proof.map((byte, i) => byte ^ clientSignature[i]));
+      assert.deepEqual(createHash('sha256').update(clientKey).digest(), storedKey);
+    });
+
+    it('usa o formato do pg_authid, 4096 iterações e um sal novo a cada chamada', () => {
+      const a = verificadorScram(SENHA);
+      const b = verificadorScram(SENHA);
+
+      const formato =
+        /^SCRAM-SHA-256\$4096:[A-Za-z0-9+/]{22}==\$[A-Za-z0-9+/]{43}=:[A-Za-z0-9+/]{43}=$/;
+      assert.match(a, formato);
+      assert.notEqual(a, b);
+      assert.ok(!a.includes(SENHA));
+    });
+  });
+
+  it('sem trocar nada quando a senha do arquivo já autentica', async () => {
+    const docker = dockerFalso({ senhaNoBanco: SENHA });
+
+    const resultado = await sincronizarSenha(opcoes(raizCom(SENHA), docker));
+
+    assert.equal(resultado.status, 'ja-sincronizada');
+    assert.ok(!docker.chamadas.some((c) => ehAlter(c.args)), 'rodou ALTER ROLE');
+  });
+
+  it('aplica um verificador SCRAM pelo socket e confere a senha por TCP', async () => {
+    const docker = dockerFalso({ senhaNoBanco: OUTRA });
+
+    const resultado = await sincronizarSenha(opcoes(raizCom(SENHA), docker));
+
+    assert.equal(resultado.status, 'sincronizada');
+    const alter = docker.chamadas.find((c) => ehAlter(c.args));
+    assert.match(alter.entrada, /^ALTER ROLE "leilao" PASSWORD 'SCRAM-SHA-256\$4096:[^']+';\n$/);
+    assert.ok(!alter.entrada.includes(SENHA), 'senha em claro no SQL');
+    assert.ok(!alter.args.includes('-h'), 'ALTER ROLE fora do socket');
+    const verificacoes = docker.chamadas.filter((c) => c.args.includes('verificar'));
+    assert.equal(verificacoes.length, 2);
+    for (const { args } of verificacoes) assert.ok(args.includes('172.18.0.2'), 'sem TCP');
+  });
+
+  it('nunca põe a senha nem o verificador no argv do docker', async () => {
+    const docker = dockerFalso({ senhaNoBanco: OUTRA });
+
+    await sincronizarSenha(opcoes(raizCom(SENHA), docker));
+
+    for (const { args } of docker.chamadas) {
+      const argv = args.join(' ');
+      assert.ok(!argv.includes(SENHA), `senha no argv: ${args[0]}`);
+      assert.ok(!argv.includes('SCRAM-SHA-256$'), `verificador no argv: ${args[0]}`);
+    }
+  });
+
+  it('recusa quando o .env.local e .secrets/db_password divergem, sem citar valores nem chamar o docker', async () => {
+    const docker = dockerFalso({ senhaNoBanco: OUTRA });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(OUTRA), docker)), (erro) => {
+      assert.match(erro.message, /keys:generate/);
+      assert.ok(!erro.message.includes(SENHA) && !erro.message.includes(OUTRA), 'valor citado');
+      return true;
+    });
+    assert.equal(docker.chamadas.length, 0);
+  });
+
+  it('recusa sem .secrets/db_password', async () => {
+    const docker = dockerFalso({});
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(undefined), docker)), /db_password/);
+    assert.equal(docker.chamadas.length, 0);
+  });
+
+  it('recusa sem DB_PASSWORD no ambiente (.env.local)', async () => {
+    const docker = dockerFalso({});
+
+    await assert.rejects(
+      sincronizarSenha(opcoes(raizCom(SENHA), docker, { senhaDoEnv: undefined })),
+      /DB_PASSWORD/,
+    );
+    assert.equal(docker.chamadas.length, 0);
+  });
+
+  it('recusa um arquivo fora do formato (quebra de linha no fim) sem citar o valor', async () => {
+    const docker = dockerFalso({});
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(`${SENHA}\n`), docker)), (erro) => {
+      assert.match(erro.message, /db_password/);
+      assert.ok(!erro.message.includes(SENHA), 'valor citado');
+      return true;
+    });
+  });
+
+  it('recusa um POSTGRES_USER que não é identificador simples', async () => {
+    const docker = dockerFalso({});
+
+    await assert.rejects(
+      sincronizarSenha(opcoes(raizCom(SENHA), docker, { usuario: 'leilao"; DROP ROLE x; --' })),
+      /POSTGRES_USER/,
+    );
+    assert.equal(docker.chamadas.length, 0);
+  });
+
+  it('recusa quando o Postgres de dev não está rodando', async () => {
+    const docker = dockerFalso({ container: '' });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(SENHA), docker)), /infra:up/);
+  });
+
+  it('falha se a senha ainda não autentica depois do ALTER ROLE', async () => {
+    const docker = dockerFalso({ sempreRecusa: true });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(SENHA), docker)), /não autentic/);
+  });
+
+  it('não repassa o verificador nem a senha que apareçam no erro do psql', async () => {
+    const docker = dockerFalso({
+      senhaNoBanco: OUTRA,
+      falhaNoAlter: (sql) => `psql:<stdin>:1: ERROR:  algo deu errado perto de ${sql} ${SENHA}`,
+    });
+
+    await assert.rejects(sincronizarSenha(opcoes(raizCom(SENHA), docker)), (erro) => {
+      assert.match(erro.message, /ALTER ROLE falhou/);
+      assert.ok(!erro.message.includes('SCRAM-SHA-256$'), 'verificador no erro');
+      assert.ok(!erro.message.includes(SENHA), 'senha no erro');
+      return true;
     });
   });
 });
