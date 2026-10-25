@@ -35,9 +35,9 @@ const MENSAGENS: Readonly<Partial<Record<CodigoDeErro, string>>> = {
 };
 
 /**
- * Código do catálogo para um 4xx do framework (Nest ou Fastify), que não tem código próprio.
- * 403 → PAPEL_NAO_PERMITIDO (ADR 0022). Provisório até a tarefa 018: 405 → NAO_ENCONTRADO e os
- * 4xx sem equivalente (409, 413, 414, 415, ...) → DADOS_INVALIDOS.
+ * Código do catálogo para um 4xx do framework (Nest ou Fastify), que não tem código próprio,
+ * conforme a tabela de specs/001 §Erros: 403 → PAPEL_NAO_PERMITIDO (ADR 0022), 404 e 405 →
+ * NAO_ENCONTRADO, e 400, 409, 413, 414, 415, 422 e qualquer 4xx não listado → DADOS_INVALIDOS.
  */
 const CODIGO_POR_STATUS_4XX: Readonly<Record<number, CodigoDeErro>> = {
   [HttpStatus.UNAUTHORIZED]: 'NAO_AUTENTICADO',

@@ -1,8 +1,9 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { Banco } from '../../src/db/banco.js';
 import type { VerificacaoDeProntidao } from '../../src/health/prontidao.js';
-import { criarAppDeTeste } from '../helpers/app-de-teste.js';
+import { bancoFalso, criarAppDeTeste, redisFalso } from '../helpers/app-de-teste.js';
 
 const ok = (nome: string): VerificacaoDeProntidao => ({ nome, verificar: async () => {} });
 const fora = (nome: string): VerificacaoDeProntidao => ({
@@ -62,12 +63,54 @@ describe('health checks (specs/001, specs/014 §Observabilidade, openapi.yaml)',
   });
 
   it('GET /api/health/ready não se declara pronto sem verificações registradas', async () => {
-    app = await criarAppDeTeste();
+    app = await criarAppDeTeste({ verificacoes: [] });
 
     const resposta = await app.inject({ method: 'GET', url: '/api/health/ready' });
 
     expect(resposta.statusCode).toBe(503);
     expect(resposta.json()).toMatchObject({ sucesso: false, erro: { codigo: 'INDISPONIVEL' } });
+  });
+
+  // Tarefa 017: as verificações registradas são as do pool do Postgres e do cliente Redis.
+  it('o HealthModule registra as verificações de Postgres e Redis com os clientes injetados', async () => {
+    const execute = vi.fn(async () => ({ rows: [] }));
+    const banco = {
+      ...bancoFalso(),
+      consultar: vi.fn(async (fn: (db: never) => Promise<unknown>) => fn({ execute } as never)),
+    } as unknown as Banco;
+    const ping = vi.fn(async () => {});
+    app = await criarAppDeTeste({ banco, redis: { ...redisFalso(), ping } });
+
+    const resposta = await app.inject({ method: 'GET', url: '/api/health/ready' });
+
+    expect(resposta.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(ping).toHaveBeenCalledWith(expect.any(AbortSignal));
+  });
+
+  it('GET /api/health/ready responde 503 quando o PING do Redis registrado falha', async () => {
+    const banco = {
+      ...bancoFalso(),
+      consultar: async (fn: (db: never) => Promise<unknown>) =>
+        fn({ execute: async () => ({ rows: [] }) } as never),
+    } as unknown as Banco;
+    app = await criarAppDeTeste({ banco, redis: redisFalso() });
+
+    const resposta = await app.inject({ method: 'GET', url: '/api/health/ready' });
+
+    expect(resposta.statusCode).toBe(503);
+  });
+
+  it('ao fechar a API, encerra o pool do Postgres e o cliente Redis', async () => {
+    const banco = bancoFalso();
+    const redis = redisFalso();
+    app = await criarAppDeTeste({ banco, redis });
+
+    await app.close();
+    app = undefined;
+
+    expect(banco.encerrado()).toBe(true);
+    expect(redis.encerrado()).toBe(true);
   });
 
   it('as rotas só existem sob o prefixo /api', async () => {
