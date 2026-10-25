@@ -10,6 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 
+import { Publico } from '../../src/common/auth/metadados.js';
 import { type RespostaDeSucesso, sucesso } from '../../src/common/envelope.js';
 import { ErroApi } from '../../src/common/erros/erro-api.js';
 
@@ -23,7 +24,11 @@ function erroDeBiblioteca(statusCode: number): Error {
   return Object.assign(new Error(MENSAGEM_INTERNA), { statusCode, code: 'ERR_UPSTREAM' });
 }
 
-/** Rotas só de teste para exercitar o filtro global de exceções. */
+/**
+ * Rotas só de teste para exercitar o filtro global de exceções, não a autenticação: são públicas
+ * (o guard global de identidade exige sessão nas rotas sem @Publico).
+ */
+@Publico()
 @Controller('teste-erros')
 class ControladorDeErros {
   @Get('nao-tratado')

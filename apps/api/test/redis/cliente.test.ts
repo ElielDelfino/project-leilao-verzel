@@ -3,7 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { criarConexaoDoRedis } from '../../src/redis/conexao.js';
-import { type ClienteRedis, criarClienteRedis, ErroDoRedis } from '../../src/redis/cliente.js';
+import {
+  type ClienteRedisDaApi as ClienteRedis,
+  criarClienteRedis,
+  ErroDoRedis,
+} from '../../src/redis/cliente.js';
 import { portaFechada } from '../helpers/porta-fechada.js';
 import { ambienteDoRedis } from './ambiente-de-teste.js';
 
@@ -46,10 +50,46 @@ describe('criarClienteRedis com o Redis fora (porta fechada)', () => {
   it('com o sinal já abortado, o ping falha na hora', async () => {
     const { cliente: redis } = await clienteSemRedis();
 
-    await expect(redis.ping(AbortSignal.abort())).rejects.toMatchObject({
+    await expect(redis.ping(AbortSignal.abort())).rejects.toBeInstanceOf(ErroDoRedis);
+  });
+
+  it('sem fila offline: o ping falha na hora mesmo com um sinal que nunca aborta', async () => {
+    const { cliente: redis } = await clienteSemRedis();
+    const inicio = performance.now();
+
+    await expect(redis.ping(new AbortController().signal)).rejects.toMatchObject({
       name: 'ErroDoRedis',
-      tipo: 'AbortError',
+      tipo: 'ClientOfflineError',
     });
+
+    expect(performance.now() - inicio).toBeLessThan(200);
+  });
+
+  it('incrementarNaJanela falha na hora (falha fechada), sem host, porta nem senha', async () => {
+    const { cliente: redis, porta } = await clienteSemRedis();
+
+    const falha = await redis.incrementarNaJanela('ratelimit:x', 60).catch((erro: unknown) => erro);
+
+    expect(falha).toBeInstanceOf(ErroDoRedis);
+    const texto = `${String((falha as Error).message)} ${String((falha as Error).stack)}`;
+    expect(texto).not.toContain('127.0.0.1');
+    expect(texto).not.toContain(String(porta));
+    expect(texto).not.toContain(SENHA);
+  });
+
+  it('aguardarConexao resolve na primeira falha de conexão, sem rejeitar', async () => {
+    const { cliente: redis } = await clienteSemRedis();
+    const inicio = performance.now();
+
+    await expect(redis.aguardarConexao(AbortSignal.timeout(5_000))).resolves.toBeUndefined();
+
+    expect(performance.now() - inicio).toBeLessThan(1_000);
+  });
+
+  it('aguardarConexao respeita o sinal', async () => {
+    const { cliente: redis } = await clienteSemRedis();
+
+    await expect(redis.aguardarConexao(AbortSignal.abort())).resolves.toBeUndefined();
   });
 
   it('avisa a falha de conexão uma vez, só com o código, sem host, porta nem senha', async () => {
@@ -95,11 +135,13 @@ describe.skipIf(!ambiente.disponivel)('criarClienteRedis contra o Redis real', (
     erros.length = 0;
   });
 
-  it('PING responde com a senha certa', async () => {
+  it('depois de aguardarConexao, PING responde com a senha certa', async () => {
     cliente = criarClienteRedis({
       conexao: ambiente.conexao(),
       aoErro: (erro) => erros.push(erro),
     });
+
+    await cliente.aguardarConexao(AbortSignal.timeout(2_000));
 
     await expect(cliente.ping(AbortSignal.timeout(2_000))).resolves.toBeUndefined();
     expect(erros).toEqual([]);
@@ -111,6 +153,7 @@ describe.skipIf(!ambiente.disponivel)('criarClienteRedis contra o Redis real', (
       conexao: criarConexaoDoRedis({ host: real.host, port: real.port }, SENHA),
       aoErro: (erro) => erros.push(erro),
     });
+    await cliente.aguardarConexao(AbortSignal.timeout(2_000));
 
     await expect(cliente.ping(AbortSignal.timeout(500))).rejects.toBeInstanceOf(ErroDoRedis);
     expect(erros.length).toBeGreaterThan(0);
