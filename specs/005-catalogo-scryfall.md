@@ -17,7 +17,7 @@ Regras verificadas na documentação da Scryfall em 2026-10-24:
 ## Requisitos
 - RF-01 O leiloeiro busca cartas por texto (sintaxe da Scryfall) com paginação de 25 cartas por página.
 - RF-02 Ao criar o lote, a API grava um **snapshot** da carta (dados + imagem `normal`) no Postgres.
-- RNF-01 Vitrine, detalhe do lote, sala, auditoria e comprovante nunca chamam a Scryfall (nem a API da Scryfall, nem o download de imagem). A única imagem da Scryfall que um navegador carrega é a miniatura da busca do painel do leiloeiro (ADR 0029).
+- RNF-01 Vitrine, detalhe do lote, sala, auditoria e comprovante nunca chamam a Scryfall (nem a API da Scryfall, nem o download de imagem). A única imagem da Scryfall que um navegador carrega é a miniatura da busca do painel do leiloeiro (ADR 0029); a CSP do site todo permite esse host, então a garantia é do código e de um teste de componente (specs/012), não da CSP.
 - RNF-02 Nunca exceder 2 req/s em search nem 10 req/s nos demais, em qualquer janela de 1 s (token bucket global no Redis, sem rajada).
 - RNF-03 Busca com p95 < 1,5 s (cache hit < 50 ms).
 
@@ -53,7 +53,7 @@ Regras verificadas na documentação da Scryfall em 2026-10-24:
 `GET /api/imagens/{snapshotId}` (público) devolve os bytes com `Content-Type` = `imagem_mime`, `Cache-Control: public, max-age=31536000, immutable` e `ETag` = SHA-256 em hexadecimal minúsculo entre aspas (`"<64 hex>"`). Com `If-None-Match` igual ao `ETag` → 304 sem corpo (com `ETag` e `Cache-Control`). Id inexistente ou que não é UUID → 404 `NAO_ENCONTRADO`.
 
 ### UI
-Imagem com `object-fit: contain`, sem filtros nem sobreposições; rodapé com o aviso da Wizards of the Coast Fan Content Policy e crédito à Scryfall, com os textos exatos de specs/012 §Rodapé. As miniaturas da busca (painel) vêm direto de `cards.scryfall.io`, com `referrerpolicy="no-referrer"` (ADR 0029); todas as outras imagens vêm de `GET /api/imagens/{snapshotId}`.
+Imagem com `object-fit: contain`, sem filtros nem sobreposições; rodapé com o aviso da Wizards of the Coast Fan Content Policy e crédito à Scryfall, com os textos exatos de specs/012 §Rodapé. As miniaturas da busca (só no painel, novo lote) vêm direto de `cards.scryfall.io`, com `referrerpolicy="no-referrer"` (ADR 0029); todas as outras imagens vêm de `GET /api/imagens/{snapshotId}`.
 
 ## Interfaces e contratos
 - `GET /api/catalogo/cartas?q=&pagina=` (leiloeiro) → 200 `dados` = `[{scryfallId, nome, colecao, raridade, tipo, artista, imagemUrl}]` + `meta {total, pagina, limite: 25}` · 401 · 403 `PAPEL_NAO_PERMITIDO` · 422 · 503 `CATALOGO_OCUPADO` | `CATALOGO_INDISPONIVEL`

@@ -14,7 +14,7 @@ Sem staging (ADR 0013): só uma e2-micro é gratuita; a paridade vem do compose.
 ## Produção
 - VM Debian 13 com Docker Engine, swap de 2 GB e firewall liberando só 22 (restrito), 80 e 443.
 - `infra/docker-compose.prod.yml` inclui Postgres, Redis, API e Caddy, com os limites de RAM do `.env` (PG 300 MB, API 300 MB, Redis 64 MB, Caddy 64 MB; soma 728 MB, ADR 0024), `read_only`, `tmpfs /run`, `ulimits` e portas internas. Swap por container (`memswap_limit`) de 2× o limite só para Postgres e API (600 MB); Redis e Caddy sem swap. O Caddy roda com `GOMEMLIMIT` de 48 MiB.
-- Caddy: TLS automático, serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), proxy de `/api/*` e `/socket.io/*` para a API, headers de segurança (CSP com `img-src 'self' data:`, HSTS, nosniff, frame-ancestors none). Só HTTP/1.1 e HTTP/2: HTTP/3 desligado e 443/udp não publicado (ADR 0024).
+- Caddy: TLS automático, serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), proxy de `/api/*` e `/socket.io/*` para a API, headers de segurança (CSP com `img-src 'self' data: https://cards.scryfall.io` (ADR 0029, complementa a 0024), HSTS, nosniff, frame-ancestors none). Só HTTP/1.1 e HTTP/2: HTTP/3 desligado e 443/udp não publicado (ADR 0024).
 - Host: `<ip>.sslip.io` com TLS automático do Caddy até haver um domínio próprio (ADR 0020, provisória).
 
 ## Segredos (ADR 0023, ADR 0026)
