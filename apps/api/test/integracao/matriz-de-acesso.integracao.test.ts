@@ -60,6 +60,11 @@ interface Operacao {
   readonly extras?: () => Record<string, string>;
   /** Resultado com CSRF válido, por papel. */
   readonly comCsrf: Readonly<Record<Papel, Esperado>>;
+  /**
+   * Rota ainda inexistente na API: os casos viram `it.todo`, sem expectativa que passe por acaso
+   * (404 não vale como "ok"). Remover a marca quando a tarefa indicada entregar a rota.
+   */
+  readonly pendente?: { readonly tarefa: string; readonly motivo: string };
 }
 
 const igualParaTodos = (e: Esperado): Operacao['comCsrf'] => ({
@@ -184,6 +189,51 @@ const OPERACOES: readonly Operacao[] = [
       leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
     },
   },
+  // F3 (openapi 0.5.0): rotas pendentes até as tarefas 079 (POST lances), 080 (leituras de lances) e 081 (auditoria).
+  {
+    metodo: 'POST',
+    caminho: '/api/lotes/{id}/lances',
+    url: () => `/api/lotes/${alvo.loteId}/lances`,
+    corpo: () => ({ valorCentavos: 100_000 }),
+    extras: () => ({ 'idempotency-key': randomUUID() }),
+    // O lote do alvo precisa estar ativo para o 201 do licitante: a 079 ajusta o cenário.
+    comCsrf: {
+      anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
+      licitante: { status: 201 },
+      leiloeiro: { status: 403, codigo: 'LEILOEIRO_NAO_PODE_LANCAR' },
+    },
+    pendente: { tarefa: '079', motivo: 'POST /api/lotes/{id}/lances ainda não existe na API' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/lotes/{id}/lances',
+    url: () => `/api/lotes/${alvo.loteId}/lances`,
+    comCsrf: igualParaTodos({ status: 200 }),
+    pendente: { tarefa: '080', motivo: 'GET /api/lotes/{id}/lances ainda não existe na API' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/me/lances',
+    comCsrf: {
+      anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
+      licitante: { status: 200 },
+      leiloeiro: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
+    },
+    pendente: { tarefa: '080', motivo: 'GET /api/me/lances ainda não existe na API' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/auditoria/lotes/{id}',
+    url: () => `/api/auditoria/lotes/${alvo.loteId}`,
+    comCsrf: igualParaTodos({ status: 200 }),
+    pendente: { tarefa: '081', motivo: 'GET /api/auditoria/lotes/{id} ainda não existe na API' },
+  },
+  {
+    metodo: 'GET',
+    caminho: '/api/auditoria/chaves',
+    comCsrf: igualParaTodos({ status: 200 }),
+    pendente: { tarefa: '081', motivo: 'GET /api/auditoria/chaves ainda não existe na API' },
+  },
 ];
 
 const chaveDe = (o: { metodo: string; caminho: string }): string =>
@@ -301,37 +351,51 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       return email;
     }
 
-    describe.each(OPERACOES)('$metodo $caminho', (operacao) => {
-      it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
-        const navegador = await navegadorDe(papel);
-        const email = await contaExistente();
-
-        const resposta = await chamar(navegador, operacao, email, true);
-
-        const esperado = operacao.comCsrf[papel];
-        expect(resposta.statusCode).toBe(esperado.status);
-        if (esperado.codigo !== undefined) {
-          expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
-            esperado.codigo,
-          );
+    describe.each(OPERACOES.filter((o) => o.pendente !== undefined))(
+      'pendente: $metodo $caminho',
+      (operacao) => {
+        const { tarefa, motivo } = operacao.pendente ?? { tarefa: '?', motivo: '?' };
+        for (const papel of PAPEIS) {
+          it.todo(`${papel} com CSRF válido (task ${tarefa}: ${motivo})`);
+          it.todo(`${papel} sem o header X-CSRF-Token (task ${tarefa}: ${motivo})`);
         }
-      });
+      },
+    );
 
-      it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
-        const navegador = await navegadorDe(papel);
-        const email = await contaExistente();
+    describe.each(OPERACOES.filter((o) => o.pendente === undefined))(
+      '$metodo $caminho',
+      (operacao) => {
+        it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
+          const navegador = await navegadorDe(papel);
+          const email = await contaExistente();
 
-        const resposta = await chamar(navegador, operacao, email, false);
+          const resposta = await chamar(navegador, operacao, email, true);
 
-        if (exigeCsrf(operacao.metodo, operacao.caminho)) {
-          expect(resposta.statusCode).toBe(403);
-          expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
-            'CSRF_INVALIDO',
-          );
-        } else {
-          expect(resposta.statusCode).toBe(operacao.comCsrf[papel].status);
-        }
-      });
-    });
+          const esperado = operacao.comCsrf[papel];
+          expect(resposta.statusCode).toBe(esperado.status);
+          if (esperado.codigo !== undefined) {
+            expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
+              esperado.codigo,
+            );
+          }
+        });
+
+        it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
+          const navegador = await navegadorDe(papel);
+          const email = await contaExistente();
+
+          const resposta = await chamar(navegador, operacao, email, false);
+
+          if (exigeCsrf(operacao.metodo, operacao.caminho)) {
+            expect(resposta.statusCode).toBe(403);
+            expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe(
+              'CSRF_INVALIDO',
+            );
+          } else {
+            expect(resposta.statusCode).toBe(operacao.comCsrf[papel].status);
+          }
+        });
+      },
+    );
   },
 );
