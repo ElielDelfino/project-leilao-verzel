@@ -320,6 +320,9 @@ importers:
       '@leilao/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@noble/ed25519':
+        specifier: 3.2.0
+        version: 3.2.0
       '@tanstack/react-query':
         specifier: 5.104.5
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)

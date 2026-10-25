@@ -4,21 +4,20 @@ import { LayoutBase } from './layout/LayoutBase';
 import { LayoutDeErro } from './layout/LayoutDeErro';
 import { PaginaDeErro } from './paginas/PaginaDeErro';
 import { PaginaNaoEncontrada } from './paginas/PaginaNaoEncontrada';
+import { PaginaAuditoria } from './paginas/PaginaAuditoria';
 import { PaginaCadastro } from './paginas/PaginaCadastro';
 import { PaginaCarteira } from './paginas/PaginaCarteira';
+import { PaginaComprovante } from './paginas/PaginaComprovante';
 import { PaginaEntrar } from './paginas/PaginaEntrar';
 import { PaginaLote } from './paginas/PaginaLote';
+import { PaginaMeusArremates } from './paginas/PaginaMeusArremates';
 import { PaginaNovoLote } from './paginas/PaginaNovoLote';
 import { PaginaPainel } from './paginas/PaginaPainel';
-import { PaginaProvisoria } from './paginas/PaginaProvisoria';
 import { PaginaVitrine } from './paginas/PaginaVitrine';
 import { RotaAnonima, RotaRestrita } from './sessao/Guardas';
 import { RaizDaSessao } from './sessao/RaizDaSessao';
 
-// Rotas de specs/012 §Rotas. Por enquanto são páginas provisórias; o controle de acesso
-// (anônimo, licitante, leiloeiro) entra com as telas de cada spec.
-const provisoria = (titulo: string) => <PaginaProvisoria titulo={titulo} />;
-
+// Rotas de specs/012 §Rotas.
 export const rotas: RouteObject[] = [
   {
     element: <RaizDaSessao />,
@@ -46,13 +45,13 @@ export const rotas: RouteObject[] = [
                 element: <RotaRestrita />,
                 children: [
                   { path: 'carteira', element: <PaginaCarteira /> },
-                  { path: 'meus-arremates', element: provisoria('Meus arremates') },
+                  { path: 'meus-arremates', element: <PaginaMeusArremates /> },
                   { path: 'painel', element: <PaginaPainel /> },
                   { path: 'painel/lotes/novo', element: <PaginaNovoLote /> },
                 ],
               },
-              { path: 'auditoria/:loteId', element: provisoria('Auditoria do lote') },
-              { path: 'comprovantes/:codigo', element: provisoria('Comprovante') },
+              { path: 'auditoria/:loteId', element: <PaginaAuditoria /> },
+              { path: 'comprovantes/:codigo', element: <PaginaComprovante /> },
               { path: '*', element: <PaginaNaoEncontrada /> },
             ],
           },
