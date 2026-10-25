@@ -6,6 +6,7 @@ import {
   type ContadorDeJanela,
   JANELA_DO_LIMITE_S,
   LimiteDeTentativas,
+  REGRA_DO_LANCE,
   TENTATIVAS_POR_JANELA,
 } from '../../../src/common/limite/limite-de-tentativas.js';
 
@@ -85,6 +86,50 @@ describe('LimiteDeTentativas', () => {
     );
 
     await expect(limite.consumir('x')).rejects.toBe(falha);
+  });
+
+  describe('regra parametrizada (ADR 0031 D6: lance, 10 por janela de 1 s)', () => {
+    it('REGRA_DO_LANCE é limite 10 e janela de 1 s', () => {
+      expect(REGRA_DO_LANCE).toEqual({ limite: 10, janelaS: 1 });
+    });
+
+    it('aceita 10 e recusa a 11ª com 429 MUITAS_TENTATIVAS e Retry-After 1', async () => {
+      const contador = contadorFalso(1);
+      const limite = new LimiteDeTentativas(contador, 'ratelimit:');
+      for (let i = 0; i < 10; i++) {
+        await limite.consumir('lance:u1', REGRA_DO_LANCE);
+      }
+
+      const erro = await erroDe(limite.consumir('lance:u1', REGRA_DO_LANCE));
+
+      expect(erro.status).toBe(429);
+      expect(erro.codigo).toBe('MUITAS_TENTATIVAS');
+      expect(erro.retryAfterSegundos).toBe(1);
+      expect(contador.janelas.every((janela) => janela === 1)).toBe(true);
+    });
+
+    it('sem regra, continua 5 em 60 s (login e cadastro não mudam)', async () => {
+      const contador = contadorFalso();
+      const limite = new LimiteDeTentativas(contador, 'ratelimit:');
+      for (let i = 0; i < 5; i++) {
+        await limite.consumir('login:x');
+      }
+
+      await expect(limite.consumir('login:x')).rejects.toBeInstanceOf(ErroApi);
+      expect(contador.janelas[0]).toBe(60);
+    });
+
+    it.each([
+      { limite: 0, janelaS: 1 },
+      { limite: 10, janelaS: 0 },
+      { limite: 1.5, janelaS: 1 },
+    ])('recusa regra inválida %o sem tocar o contador', async (regra) => {
+      const contador = contadorFalso();
+      const limite = new LimiteDeTentativas(contador, 'ratelimit:');
+
+      await expect(limite.consumir('x', regra)).rejects.toBeInstanceOf(RangeError);
+      expect(contador.chaves).toEqual([]);
+    });
   });
 
   it('recusa prefixo que não começa com ratelimit: (specs/013: reset só desse prefixo)', () => {

@@ -2,7 +2,7 @@
 // §Dados). Nenhum outro módulo lê estas tabelas. Privilégios do papel da API (ADR 0026): só SELECT
 // e INSERT nas três (append-only, com trigger). O banco não impõe a cadeia: a ordem correta é de
 // quem chama (cadeia.ts), dentro da transação com o lote travado.
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 import type { BancoDrizzle, Transacao } from '../../db/banco.js';
 import { bids, lotSeals, signingKeys } from './schema.js';
@@ -69,6 +69,34 @@ export async function lerUltimoLance(tx: Transacao, loteId: string): Promise<Ult
     .limit(1);
   if (linha === undefined) return null;
   return { ...linha, hash: linha.hash.toString('hex') };
+}
+
+/** Lance já gravado com a `Idempotency-Key` do licitante (idempotência, specs/007). */
+export interface LanceDaChave {
+  readonly loteId: string;
+  readonly seq: number;
+  readonly pseudonimo: string;
+  readonly valorCentavos: number;
+  readonly criadoEm: Date;
+}
+
+/** Lance do licitante com a chave, em qualquer lote, ou `null` (unique `(licitante_id, chave)`). */
+export async function buscarLancePorChave(
+  tx: Transacao,
+  licitanteId: string,
+  idempotencyKey: string,
+): Promise<LanceDaChave | null> {
+  const [linha] = await tx
+    .select({
+      loteId: bids.loteId,
+      seq: bids.seq,
+      pseudonimo: bids.pseudonimo,
+      valorCentavos: bids.valorCentavos,
+      criadoEm: bids.criadoEm,
+    })
+    .from(bids)
+    .where(and(eq(bids.licitanteId, licitanteId), eq(bids.idempotencyKey, idempotencyKey)));
+  return linha ?? null;
 }
 
 /** Insere o lance e devolve o `id` (UUIDv7 do default `uuidv7()`). */
