@@ -8,6 +8,9 @@ playwright-report/
 test-results/
 blob-report/
 
+# Snapshots e journal gerados pelo drizzle-kit (db:generate); reformatá-los cria diff a cada geração
+database/postgres/migrations/meta/
+
 # Fora do Git
 tasks/
 tmp/
