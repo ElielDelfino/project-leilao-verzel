@@ -48,6 +48,10 @@ const GATILHOS_DO_BANCO = [
 ];
 const TESTES_DO_BANCO = ['test/db/', 'test/setup/'];
 
+/** Mudou a config do ESLint ou do TS: o teste de fronteiras (tarefa 013) usa o eslint real. */
+const GATILHOS_DE_FRONTEIRAS = new Set(['eslint.config.mjs', 'tsconfig.base.json']);
+const TESTE_DE_FRONTEIRAS = 'test/boundaries/fronteiras.test.ts';
+
 const HOSTS_LOCAIS = new Set(['127.0.0.1', 'localhost', '::1']);
 const ESPERA_DO_POSTGRES_MS = 1000;
 
@@ -241,6 +245,9 @@ export function testesRelacionados(raiz, pacotes, alterados, existe) {
     for (const teste of listarTestes(raiz, PACOTE_DO_BANCO, TESTES_DO_BANCO)) {
       adicionar(PACOTE_DO_BANCO, teste);
     }
+  }
+  if (alterados.some((a) => GATILHOS_DE_FRONTEIRAS.has(a))) {
+    adicionar(PACOTE_DO_BANCO, TESTE_DE_FRONTEIRAS);
   }
   return porPacote;
 }
@@ -585,8 +592,18 @@ async function passosDeContratos(v, rodar, env) {
 
 // ---------------------------------------------------------------- full
 
-/** O e2e conecta a API como leilao_api: sem estas duas variáveis ela nem sobe. */
-const VARIAVEIS_DO_E2E = ['POSTGRES_API_USER', 'DB_API_PASSWORD'];
+/** O e2e conecta a API como leilao_api e sobe o banco, o Redis e o seed: sem elas nada sobe. */
+const VARIAVEIS_DO_E2E = [
+  'POSTGRES_API_USER',
+  'DB_API_PASSWORD',
+  'POSTGRES_USER',
+  'DB_PASSWORD',
+  'POSTGRES_DB',
+  'REDIS_HOST',
+  'REDIS_PORT',
+  'REDIS_PASSWORD',
+  'SEED_DEMO_PASSWORD',
+];
 
 /** Nomes (nunca valores) das variáveis do e2e ausentes ou vazias. */
 export function variaveisFaltandoParaOE2e(env) {
