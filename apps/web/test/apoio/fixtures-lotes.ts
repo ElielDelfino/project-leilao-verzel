@@ -88,6 +88,35 @@ export function servirLotes(
   return { handler, registro };
 }
 
+/** `GET /api/painel/resumo` com os valores dados (padrão: tudo zero). */
+export function servirResumo(
+  dados: SchemasApi['ResumoDoPainel'] = {
+    totalRecebidoCentavos: 0,
+    lotesArrematados: 0,
+    lotesSemLance: 0,
+  },
+): HttpHandler {
+  return http.get(`${ORIGEM}/api/painel/resumo`, () => HttpResponse.json({ sucesso: true, dados }));
+}
+
+/** `GET /api/painel/lotes`; registra as consultas recebidas. */
+export function servirMeusLotes(
+  lotes: Lote[],
+  total = lotes.length,
+): { handler: HttpHandler; registro: RegistroDaListagem } {
+  const registro: RegistroDaListagem = { consultas: [] };
+  const handler = http.get(`${ORIGEM}/api/painel/lotes`, ({ request }) => {
+    const consulta = new URL(request.url).searchParams;
+    registro.consultas.push(consulta);
+    return HttpResponse.json({
+      sucesso: true,
+      dados: lotes,
+      meta: { total, pagina: Number(consulta.get('pagina')) || 1, limite: 24 },
+    });
+  });
+  return { handler, registro };
+}
+
 export function servirDetalhe(lote: LoteDetalhe): HttpHandler {
   return http.get(`${ORIGEM}/api/lotes/${lote.id}`, () =>
     HttpResponse.json({ sucesso: true, dados: lote }),
