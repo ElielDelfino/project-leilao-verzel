@@ -28,6 +28,8 @@ Tipos de lançamento e efeito na projeção:
 
 - Toda alteração acontece na transação de quem a causa (lance, liquidação, cancelamento), pela interface pública `carteira.*(tx, ...)`, que trava a linha de `wallet_balances` com `FOR UPDATE`.
 - Ordem de locks para evitar deadlock: lote primeiro, depois carteiras em ordem crescente de `user_id`.
+- A linha de `wallet_balances` de um usuário **nasce no primeiro lançamento dele** (para o licitante, o primeiro depósito; para o leiloeiro, o primeiro `credito_arremate`), na mesma transação do lançamento e sob o mesmo bloqueio, por `INSERT ... ON CONFLICT (user_id) DO UPDATE`; o cadastro (`identidade`) não escreve em tabela de `carteira` (ADR 0027). Sem linha, o saldo é zero: `GET /api/carteira` → 200 com os três valores em 0.
+- Extrato: uma `pagina` além da última não é erro: 200 com `dados: []` e `meta` com o `total` real; só `pagina` menor que 1 ou não inteira é 422.
 - Saldo insuficiente → erro de domínio `SALDO_INSUFICIENTE` com `disponivelCentavos`.
 - Idempotência do depósito, por `(user_id, idempotency_key)`: repetir a chave com o mesmo corpo responde 200 com o mesmo lançamento e o saldo atual; repetir a chave com corpo diferente responde 422 `DADOS_INVALIDOS`. Nos dois casos, nenhum lançamento novo é gravado.
 - Corpo com campo desconhecido → 422 `DADOS_INVALIDOS`.
@@ -39,7 +41,7 @@ Tipos de lançamento e efeito na projeção:
 - Evento Socket.IO pessoal `saldo_atualizado` (specs/009).
 
 ## Dados
-- `ledger_entries(id uuid pk, user_id fk, tipo tipo_lancamento, valor_centavos bigint check > 0, lote_id null, lance_id null, idempotency_key null, criado_em)`; unique `(user_id, idempotency_key)`; trigger bloqueia UPDATE/DELETE.
+- `ledger_entries(id uuid pk, user_id fk, tipo tipo_lancamento, valor_centavos bigint check > 0, lote_id null, lance_id null, idempotency_key null, criado_em)`; unique `(user_id, idempotency_key)`; trigger bloqueia UPDATE/DELETE; o papel da API só tem SELECT e INSERT (specs/014 §Papéis do Postgres).
 - `wallet_balances(user_id pk, total_centavos bigint, comprometido_centavos bigint, atualizado_em)`; `CHECK (comprometido_centavos >= 0 AND comprometido_centavos <= total_centavos)`.
 - Retenção: permanente.
 
@@ -47,6 +49,8 @@ Tipos de lançamento e efeito na projeção:
 - [ ] Ser superado devolve o valor ao disponível na mesma transação do novo lance.
 - [ ] Depósito repetido com a mesma `Idempotency-Key` e o mesmo corpo → 200 com o mesmo lançamento; com corpo diferente → 422; em ambos, um único lançamento no ledger.
 - [ ] Leiloeiro em `POST /api/carteira/depositos` → 403 `PAPEL_NAO_PERMITIDO`.
+- [ ] Usuário recém-cadastrado, sem lançamentos: `wallet_balances` não tem linha dele, `GET /api/carteira` → 200 com total, comprometido e disponível iguais a 0 e `GET /api/carteira/extrato` → 200 com `dados: []` e `meta.total` 0; depois do primeiro depósito de R$ 10,00, existe exatamente uma linha com total 1000 (teste de integração).
+- [ ] Extrato com 21 lançamentos: `pagina=2` → 1 item, `pagina=3` → 200 com `dados: []` e `meta.total` 21; `pagina=0` e `pagina=abc` → 422 (teste de integração).
 - [ ] 50 lances concorrentes do mesmo licitante em lotes diferentes nunca deixam o comprometido acima do total.
 - [ ] Teste de reconciliação: projeção == Σ ledger para todos os usuários após a suíte e2e.
 
@@ -54,4 +58,4 @@ Tipos de lançamento e efeito na projeção:
 Saque, pagamento real, moedas diferentes de BRL.
 
 ## Decisões relacionadas
-- decisions/0007-carteira-ledger-append-only.md, 0022-complementos-auth-e-idempotencia.md
+- decisions/0007-carteira-ledger-append-only.md, 0022-complementos-auth-e-idempotencia.md, 0026-papeis-do-postgres.md (privilégios de `ledger_entries` e `wallet_balances`), 0027-complementos-da-f1.md
