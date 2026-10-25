@@ -24,7 +24,7 @@ function textoDeEspera(segundos: number | undefined): string {
 type Texto = (contexto: ContextoDaMensagem) => string;
 
 // Um único mapa código → mensagem (specs/012 e tarefa 036 D12). Códigos sem texto na spec
-// (LEILOEIRO_NAO_PODE_LANCAR) caem no texto de indisponível.
+// caem no texto de indisponível.
 const MENSAGENS: Partial<Record<CodigoDeErro, Texto>> = {
   LANCE_ABAIXO_DO_MINIMO: ({ minimoCentavos }) =>
     `Seu lance precisa ser de pelo menos ${
@@ -38,6 +38,7 @@ const MENSAGENS: Partial<Record<CodigoDeErro, Texto>> = {
   LOTE_NAO_INICIADO: ({ inicio }) =>
     `Este lote ainda não começou.${inicio === undefined ? '' : ` Abre em ${formatarDataHora(inicio)}.`}`,
   LOTE_ENCERRADO: () => 'Este lote já foi encerrado.',
+  LEILOEIRO_NAO_PODE_LANCAR: () => 'Leiloeiros não podem dar lances.',
   PAPEL_NAO_PERMITIDO: () => 'Sua conta não tem permissão para esta ação.',
   SESSAO_EXPIRADA: () => 'Sua sessão expirou. Entre novamente.',
   MUITAS_TENTATIVAS: ({ segundos }) =>

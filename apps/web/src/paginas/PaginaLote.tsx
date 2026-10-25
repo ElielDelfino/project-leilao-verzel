@@ -118,6 +118,7 @@ function SalaDoLote({ id }: { id: string }) {
         reconectando={semConexaoOuComErro}
         seloDeFimEstendido={salaAoVivo.seloDeFimEstendido}
         semEstado={<RegiaoSemEstado sala={salaAoVivo} />}
+        aoSincronizar={salaAoVivo.tentarDeNovo}
       />
       <VoltarAVitrine />
     </>
