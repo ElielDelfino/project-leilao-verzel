@@ -1,9 +1,12 @@
-// Banco de teste a partir de um modelo (tarefa 011, specs/013 §"pnpm verify:quick"): o modelo
+// Banco de teste a partir de um modelo (tarefas 011 e 032, specs/013 §"Banco de teste"): o modelo
 // recebe as migrations e só é refeito quando o hash da pasta muda (hash no COMMENT ON DATABASE);
-// o banco de teste é recriado a cada execução com CREATE DATABASE ... TEMPLATE.
+// o banco de cada worktree é recriado a cada execução com CREATE DATABASE ... TEMPLATE.
 //
 // Os testes usam nomes próprios (leilao_t011_<hex>) e uma cópia da pasta de migrations, então não
-// mexem no leilao_test nem no leilao_test_tpl de quem estiver rodando o verify.
+// mexem no leilao_test_tpl nem no leilao_test_<sufixo> de quem estiver rodando o verify. O banco
+// de administração é o `postgres`: dentro do verify, POSTGRES_DB já aponta para o banco do
+// worktree, que a guarda do preparo recusa.
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,20 +19,31 @@ import { ambienteDeTeste } from '../db/ambiente-de-teste.js';
 import { type ConexaoDoBanco, trocarBanco } from '../../src/db/conexao.js';
 import { PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
 import {
-  BANCO_DE_TESTE,
   BANCO_MODELO,
+  CHAVE_DO_LOCK,
+  caminhoDoWorktree,
   hashDasMigrations,
+  nomeDoBancoDoWorktree,
   prepararBancoDeTeste,
+  PREFIXO_DOS_BANCOS_DE_TESTE,
+  sufixoDoWorktree,
 } from './banco-de-teste.js';
 
 const AMBIENTE = ambienteDeTeste(process.env);
 const SUFIXO = randomBytes(5).toString('hex');
 const MODELO = `leilao_t011_${SUFIXO}_tpl`;
 const TESTE = `leilao_t011_${SUFIXO}`;
+/** Banco de outro "worktree" (nome próprio), que o preparo de TESTE nunca pode apagar. */
+const OUTRO = `leilao_t011_${SUFIXO}_b`;
+/** Banco descartável só para segurar o advisory lock "em outro banco". */
+const BANCO_DO_LOCK = `leilao_t011_${SUFIXO}_lk`;
+const BANCO_DE_ADMINISTRACAO = 'postgres';
 const HASH_SHA256 = /^[0-9a-f]{64}$/;
 
 /** Critério de aceite da tarefa 011: recriar o banco de teste a partir do modelo leva < 1 s. */
 const LIMITE_PARA_RECRIAR_MS = 1000;
+/** A medida é sensível a carga: vale a melhor de algumas tentativas, não a primeira. */
+const TENTATIVAS_DA_MEDIDA = 3;
 
 /**
  * Os testes com Postgres refazem bancos logo depois de conexões recém-fechadas: o DROP DATABASE
@@ -37,6 +51,9 @@ const LIMITE_PARA_RECRIAR_MS = 1000;
  * com as outras suítes. O padrão de 5 s do Vitest não basta.
  */
 const TEMPO_DOS_TESTES_COM_BANCO_MS = 30_000;
+
+/** Conexão de administração (banco `postgres`), no lugar do banco de dev para o preparo. */
+const admin = (): ConexaoDoBanco => trocarBanco(AMBIENTE.conexao(), BANCO_DE_ADMINISTRACAO);
 
 /** Cópia descartável da pasta de migrations, para simular uma migration nova. */
 function copiarMigrations(): string {
@@ -128,6 +145,16 @@ async function migrationsAplicadas(nome: string): Promise<number> {
   });
 }
 
+async function tabelaExiste(banco: string, tabela: string): Promise<boolean | undefined> {
+  return comCliente(trocarBanco(AMBIENTE.conexao(), banco), async (cliente) => {
+    const { rows } = await cliente.query<{ existe: boolean }>(
+      'select to_regclass($1) is not null as existe',
+      [`public.${tabela}`],
+    );
+    return rows[0]?.existe;
+  });
+}
+
 describe('hashDasMigrations', () => {
   it('é o SHA-256 em hex e não muda entre leituras da mesma pasta', () => {
     const hash = hashDasMigrations(PASTA_DAS_MIGRATIONS);
@@ -178,10 +205,66 @@ describe('hashDasMigrations', () => {
   });
 });
 
+describe('sufixo e nome do banco do worktree (specs/013 §Modo local)', () => {
+  it('o sufixo são os 8 primeiros hex do SHA-256 dos bytes UTF-8 do caminho', () => {
+    expect(sufixoDoWorktree('/tmp/x')).toBe('2e56aa36');
+    // Acento e espaço: bytes UTF-8, sem normalização (NFC e NFD dão sufixos diferentes).
+    expect(sufixoDoWorktree('/home/ç ã/leilão x')).toBe('9898d4ab');
+    expect(sufixoDoWorktree('/home/leilão')).not.toBe(sufixoDoWorktree('/home/leilão'));
+  });
+
+  it('o nome é leilao_test_<sufixo> e o mesmo worktree gera sempre o mesmo nome', () => {
+    expect(nomeDoBancoDoWorktree('/tmp/x')).toBe('leilao_test_2e56aa36');
+    expect(nomeDoBancoDoWorktree('/tmp/x')).toBe(nomeDoBancoDoWorktree('/tmp/x'));
+    expect(nomeDoBancoDoWorktree('/tmp/y')).not.toBe(nomeDoBancoDoWorktree('/tmp/x'));
+  });
+
+  it('o caminho é o do rev-parse --show-toplevel, sem a quebra de linha final', () => {
+    const esperado = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+    }).replace(/\n$/, '');
+
+    expect(caminhoDoWorktree()).toBe(esperado);
+    expect(caminhoDoWorktree()).not.toMatch(/\n$/);
+  });
+
+  it('falha com o motivo quando não há repositório git', () => {
+    const fora = mkdtempSync(join(tmpdir(), 'leilao-t032-'));
+    try {
+      expect(() => caminhoDoWorktree(fora)).toThrow('não consegui descobrir o worktree');
+    } finally {
+      rmSync(fora, { recursive: true, force: true });
+    }
+  });
+});
+
+const CONEXAO_INALCANCAVEL = (database: string): ConexaoDoBanco =>
+  trocarBanco(
+    // Porta 1: se o preparo tentar conectar, o teste falha por conexão recusada, não pela mensagem.
+    { host: '127.0.0.1', port: 1, database: 'x', user: 'x', password: 'x' },
+    database,
+  );
+
 describe('prepararBancoDeTeste (sem banco)', () => {
-  it('usa leilao_test e leilao_test_tpl por padrão (specs/013)', () => {
-    expect(BANCO_DE_TESTE).toBe('leilao_test');
+  it('o modelo é leilao_test_tpl e o prefixo dos bancos de teste é leilao_test (specs/013)', () => {
     expect(BANCO_MODELO).toBe('leilao_test_tpl');
+    expect(PREFIXO_DOS_BANCOS_DE_TESTE).toBe('leilao_test');
+  });
+
+  it.each(['leilao_test', 'leilao_test_tpl', 'leilao_test_2e56aa36', 'leilao_testado'])(
+    'recusa POSTGRES_DB=%s antes de conectar',
+    async (banco) => {
+      await expect(prepararBancoDeTeste(CONEXAO_INALCANCAVEL(banco))).rejects.toThrow(
+        'POSTGRES_DB não pode ser um banco de teste (leilao_test*): use o banco de dev',
+      );
+    },
+  );
+
+  it('aceita o banco de dev (a falha é só de conexão, não da guarda)', async () => {
+    await expect(prepararBancoDeTeste(CONEXAO_INALCANCAVEL('leilao'))).rejects.not.toThrow(
+      'POSTGRES_DB não pode ser um banco de teste',
+    );
   });
 });
 
@@ -195,24 +278,22 @@ describe.skipIf(!AMBIENTE.disponivel)(
     const opcoes = { pasta, modelo: MODELO, teste: TESTE };
     const migrationsDoRepositorio = lerDiario(PASTA_DAS_MIGRATIONS).entries.length;
 
-    beforeAll(async () => {
-      // Estado inicial conhecido: nem modelo nem banco de teste.
+    const apagarOsBancosDoTeste = async (): Promise<void> => {
       await comCliente(AMBIENTE.conexao(), async (cliente) => {
-        await cliente.query(`drop database if exists ${TESTE} with (force)`);
-        await cliente.query(`drop database if exists ${MODELO} with (force)`);
+        for (const banco of [TESTE, OUTRO, BANCO_DO_LOCK, MODELO]) {
+          await cliente.query(`drop database if exists ${banco} with (force)`);
+        }
       });
-    });
+    };
 
+    beforeAll(apagarOsBancosDoTeste); // estado inicial conhecido
     afterAll(async () => {
-      await comCliente(AMBIENTE.conexao(), async (cliente) => {
-        await cliente.query(`drop database if exists ${TESTE} with (force)`);
-        await cliente.query(`drop database if exists ${MODELO} with (force)`);
-      });
+      await apagarOsBancosDoTeste();
       rmSync(pasta, { recursive: true, force: true });
     });
 
     it('sem modelo: cria o modelo com as migrations, grava o hash e cria o banco de teste', async () => {
-      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+      const resultado = await prepararBancoDeTeste(admin(), opcoes);
 
       expect(resultado.modeloRefeito).toBe(true);
       expect(resultado.hash).toBe(hashDasMigrations(pasta));
@@ -229,46 +310,38 @@ describe.skipIf(!AMBIENTE.disponivel)(
         cliente.query('create table sobra_da_execucao_anterior (id int)'),
       );
 
-      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+      const resultado = await prepararBancoDeTeste(admin(), opcoes);
 
+      expect(resultado.banco).toBe(TESTE);
       expect(resultado.modeloRefeito).toBe(false);
-      const sobra = await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), async (cliente) => {
-        const { rows } = await cliente.query<{ existe: boolean }>(
-          `select to_regclass('public.sobra_da_execucao_anterior') is not null as existe`,
-        );
-        return rows[0]?.existe;
-      });
-      expect(sobra).toBe(false);
+      expect(await tabelaExiste(TESTE, 'sobra_da_execucao_anterior')).toBe(false);
       expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio);
     });
 
     it(`recria o banco de teste a partir do modelo em menos de ${LIMITE_PARA_RECRIAR_MS} ms`, async () => {
-      // Como no verify: ninguém conectado no banco de teste desde a execução anterior.
-      await esperarSemConexoes(TESTE);
+      const medidas: number[] = [];
+      for (let i = 0; i < TENTATIVAS_DA_MEDIDA; i++) {
+        // Como no verify: ninguém conectado no banco de teste desde a execução anterior.
+        await esperarSemConexoes(TESTE);
+        const resultado = await prepararBancoDeTeste(admin(), opcoes);
+        expect(resultado.modeloRefeito).toBe(false);
+        medidas.push(resultado.msParaRecriar);
+      }
 
-      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
-
-      expect(resultado.modeloRefeito).toBe(false);
-      expect(resultado.msParaRecriar).toBeLessThan(LIMITE_PARA_RECRIAR_MS);
+      expect(Math.min(...medidas)).toBeLessThan(LIMITE_PARA_RECRIAR_MS);
     });
 
     it('com uma migration nova: refaz o modelo, aplica a nova e troca o hash', async () => {
       acrescentarMigration(pasta, '9999_t011', 'create table marca_t011 (id int primary key);\n');
 
-      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+      const resultado = await prepararBancoDeTeste(admin(), opcoes);
 
       expect(resultado.modeloRefeito).toBe(true);
       expect((await estadoDoBanco(MODELO))?.comentario).toBe(
         `migrations-sha256:${hashDasMigrations(pasta)}`,
       );
       expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio + 1);
-      const marca = await comCliente(trocarBanco(AMBIENTE.conexao(), TESTE), async (cliente) => {
-        const { rows } = await cliente.query<{ existe: boolean }>(
-          `select to_regclass('public.marca_t011') is not null as existe`,
-        );
-        return rows[0]?.existe;
-      });
-      expect(marca).toBe(true);
+      expect(await tabelaExiste(TESTE, 'marca_t011')).toBe(true);
     });
 
     it('modelo sem comentário (preparo interrompido antes do fim) é refeito', async () => {
@@ -276,7 +349,7 @@ describe.skipIf(!AMBIENTE.disponivel)(
         cliente.query(`comment on database ${MODELO} is null`),
       );
 
-      const resultado = await prepararBancoDeTeste(AMBIENTE.conexao(), opcoes);
+      const resultado = await prepararBancoDeTeste(admin(), opcoes);
 
       expect(resultado.modeloRefeito).toBe(true);
       expect((await estadoDoBanco(MODELO))?.comentario).toBe(
@@ -284,27 +357,112 @@ describe.skipIf(!AMBIENTE.disponivel)(
       );
     });
 
-    it('duas execuções simultâneas terminam as duas, com o banco de teste íntegro', async () => {
-      await Promise.all([
-        prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
-        prepararBancoDeTeste(AMBIENTE.conexao(), opcoes),
+    it('worktrees diferentes em paralelo: cada um termina com o seu banco íntegro', async () => {
+      const [a, b] = await Promise.all([
+        prepararBancoDeTeste(admin(), opcoes),
+        prepararBancoDeTeste(admin(), { ...opcoes, teste: OUTRO }),
       ]);
 
+      expect([a.banco, b.banco]).toEqual([TESTE, OUTRO]);
       expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio + 1);
+      expect(await migrationsAplicadas(OUTRO)).toBe(migrationsDoRepositorio + 1);
     });
 
-    it('recusa conectar pelo próprio banco de teste ou pelo modelo', async () => {
-      await expect(
-        prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), TESTE), opcoes),
-      ).rejects.toThrow(`POSTGRES_DB não pode ser "${TESTE}"`);
-      await expect(
-        prepararBancoDeTeste(trocarBanco(AMBIENTE.conexao(), MODELO), opcoes),
-      ).rejects.toThrow(`POSTGRES_DB não pode ser "${MODELO}"`);
+    it('nunca apaga o banco de outro worktree', async () => {
+      await comCliente(trocarBanco(AMBIENTE.conexao(), OUTRO), (cliente) =>
+        cliente.query('create table marca_do_outro (id int)'),
+      );
+
+      await prepararBancoDeTeste(admin(), opcoes);
+
+      expect(await tabelaExiste(OUTRO, 'marca_do_outro')).toBe(true);
+    });
+
+    it('migrations diferentes em paralelo: cada clone sai do modelo do seu próprio hash', async () => {
+      // `pasta` tem uma migration a mais que o repositório; `semNova` é o repositório.
+      const [comNova, semNova] = await Promise.all([
+        prepararBancoDeTeste(admin(), opcoes),
+        prepararBancoDeTeste(admin(), { ...opcoes, pasta: PASTA_DAS_MIGRATIONS, teste: OUTRO }),
+      ]);
+
+      expect(comNova.hash).not.toBe(semNova.hash);
+      expect(await migrationsAplicadas(TESTE)).toBe(migrationsDoRepositorio + 1);
+      expect(await migrationsAplicadas(OUTRO)).toBe(migrationsDoRepositorio);
+    });
+
+    it('lock ocupado: desiste depois da espera, com a mensagem da spec', async () => {
+      await comCliente(admin(), async (dono) => {
+        await dono.query('select pg_advisory_lock($1)', [CHAVE_DO_LOCK]);
+
+        await expect(
+          prepararBancoDeTeste(admin(), { ...opcoes, esperaDoLockMs: 300 }),
+        ).rejects.toThrow(
+          `lock do banco de teste não obtido em 300 ms: outra execução está preparando ${MODELO}; tente de novo`,
+        );
+      });
+    });
+
+    it('o lock é do banco de dev: segurá-lo em outro banco não atrapalha', async () => {
+      await comCliente(AMBIENTE.conexao(), (c) => c.query(`create database ${BANCO_DO_LOCK}`));
+      await comCliente(trocarBanco(AMBIENTE.conexao(), BANCO_DO_LOCK), async (dono) => {
+        await dono.query('select pg_advisory_lock($1)', [CHAVE_DO_LOCK]);
+
+        await expect(
+          prepararBancoDeTeste(admin(), { ...opcoes, esperaDoLockMs: 300 }),
+        ).resolves.toMatchObject({ banco: TESTE });
+      });
+    });
+
+    describe('conexão pendurada no modelo (psql, DBeaver; backend ainda saindo)', () => {
+      /** Abre uma conexão no modelo e volta a fechá-lo para novas conexões, como depois do preparo. */
+      async function conectarNoModelo(): Promise<pg.Client> {
+        await comCliente(AMBIENTE.conexao(), (c) =>
+          c.query(`alter database ${MODELO} with allow_connections true`),
+        );
+        const cliente = new pg.Client(trocarBanco(AMBIENTE.conexao(), MODELO));
+        await cliente.connect();
+        await comCliente(AMBIENTE.conexao(), (c) =>
+          c.query(`alter database ${MODELO} with allow_connections false`),
+        );
+        return cliente;
+      }
+
+      it('desiste com uma mensagem útil depois do prazo', async () => {
+        const pendurado = await conectarNoModelo();
+        try {
+          await expect(
+            prepararBancoDeTeste(admin(), { ...opcoes, esperaDoModeloMs: 200 }),
+          ).rejects.toThrow(`1 conexão(ões) aberta(s) em ${MODELO}`);
+        } finally {
+          await pendurado.end();
+        }
+      });
+
+      it('espera a conexão sair em vez de falhar com 55006', async () => {
+        const pendurado = await conectarNoModelo();
+        const preparo = prepararBancoDeTeste(admin(), opcoes);
+        // Espera determinística: só solta a conexão depois de o preparo já ter olhado o modelo.
+        await vi.waitFor(async () => {
+          const consultas = await comCliente(AMBIENTE.conexao(), async (cliente) => {
+            const { rows } = await cliente.query<{ total: string }>(
+              `select count(*) as total from pg_stat_activity
+                where datname = $1 and query like '%from pg_stat_activity where datname%'
+                  and pid <> pg_backend_pid()`,
+              [BANCO_DE_ADMINISTRACAO],
+            );
+            return Number(rows[0]?.total);
+          });
+          expect(consultas).toBeGreaterThan(0);
+        });
+        await pendurado.end();
+
+        await expect(preparo).resolves.toMatchObject({ banco: TESTE });
+      });
     });
 
     it('recusa nome de banco fora de [a-z0-9_]', async () => {
       await expect(
-        prepararBancoDeTeste(AMBIENTE.conexao(), { ...opcoes, teste: 'leilao-test"; drop' }),
+        prepararBancoDeTeste(admin(), { ...opcoes, teste: 'leilao-test"; drop' }),
       ).rejects.toThrow('nome de banco inválido');
     });
   },

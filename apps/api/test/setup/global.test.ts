@@ -1,5 +1,6 @@
 // Setup global dos testes da API (tarefa 011, specs/013): com LEILAO_TEST_DB=local, os testes
-// enxergam POSTGRES_DB=leilao_test, recriado a partir do leilao_test_tpl antes da coleta.
+// enxergam POSTGRES_DB=leilao_test_<sufixo do worktree>, recriado a partir do leilao_test_tpl antes
+// da coleta (tarefa 032).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -8,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ambienteDeTeste } from '../db/ambiente-de-teste.js';
 import { PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
-import { BANCO_DE_TESTE } from './banco-de-teste.js';
+import { nomeDoBancoDoWorktree } from './banco-de-teste.js';
 import { bancoDeTesteDoAmbiente } from './global.js';
 
 const AMBIENTE = ambienteDeTeste(process.env);
@@ -31,15 +32,22 @@ describe('bancoDeTesteDoAmbiente', () => {
     expect(bancoDeTesteDoAmbiente({ LEILAO_TEST_DB: 'local' })).toBe('local');
   });
 
-  it('recusa um valor desconhecido em vez de rodar sem banco', () => {
-    expect(() => bancoDeTesteDoAmbiente({ LEILAO_TEST_DB: 'ci' })).toThrow(
-      'LEILAO_TEST_DB="ci" não é suportado',
-    );
+  it('LEILAO_TEST_DB=testcontainers é aceito (modo da tarefa 030)', () => {
+    expect(bancoDeTesteDoAmbiente({ LEILAO_TEST_DB: 'testcontainers' })).toBe('testcontainers');
   });
+
+  it.each(['ci', 'Local', 'local ', 'true', '1'])(
+    'recusa o valor %j em vez de rodar sem banco',
+    (valor) => {
+      expect(() => bancoDeTesteDoAmbiente({ LEILAO_TEST_DB: valor })).toThrow(
+        'LEILAO_TEST_DB inválido: use "local" ou "testcontainers"',
+      );
+    },
+  );
 });
 
 describe.skipIf(!LOCAL || !AMBIENTE.disponivel)('com LEILAO_TEST_DB=local', () => {
-  it('os testes conectam no leilao_test, com as migrations do modelo aplicadas', async () => {
+  it('os testes conectam no banco do worktree, com as migrations do modelo aplicadas', async () => {
     const cliente = new pg.Client(AMBIENTE.conexao());
     await cliente.connect();
     try {
@@ -48,8 +56,9 @@ describe.skipIf(!LOCAL || !AMBIENTE.disponivel)('com LEILAO_TEST_DB=local', () =
                 (select count(*) from drizzle.__drizzle_migrations) as migrations`,
       );
 
-      expect(process.env['POSTGRES_DB']).toBe(BANCO_DE_TESTE);
-      expect(rows[0]?.banco).toBe(BANCO_DE_TESTE);
+      const esperado = nomeDoBancoDoWorktree();
+      expect(process.env['POSTGRES_DB']).toBe(esperado);
+      expect(rows[0]?.banco).toBe(esperado);
       expect(Number(rows[0]?.migrations)).toBe(quantidadeDeMigrations());
     } finally {
       await cliente.end();

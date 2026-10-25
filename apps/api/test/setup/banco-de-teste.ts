@@ -1,10 +1,13 @@
-// Banco de teste a partir de um modelo (tarefa 011, specs/013 §"pnpm verify:quick", ADR 0016).
-// - O modelo (leilao_test_tpl) recebe as migrations de database/postgres/migrations e guarda o
-//   hash da pasta no COMMENT ON DATABASE; só é refeito quando o hash muda (ou falta).
-// - O banco de teste (leilao_test) é apagado e recriado a cada execução com
-//   CREATE DATABASE leilao_test TEMPLATE leilao_test_tpl.
-// A conexão "admin" é a de POSTGRES_* + DB_PASSWORD (conexao.ts), num banco que não seja nenhum
-// dos dois. Um advisory lock serializa execuções simultâneas (worktrees no mesmo Postgres).
+// Banco de teste a partir de um modelo (tarefas 011 e 032, specs/013 §"Banco de teste", ADR 0016).
+// - O modelo (leilao_test_tpl) é compartilhado por todos os worktrees: recebe as migrations de
+//   database/postgres/migrations e guarda o hash da pasta no COMMENT ON DATABASE; só é refeito
+//   quando o hash muda (ou falta).
+// - Cada worktree tem o seu banco, leilao_test_<sufixo>, apagado e recriado a cada execução com
+//   CREATE DATABASE ... TEMPLATE leilao_test_tpl. Nunca se apaga o banco de outro worktree.
+// A conexão "admin" é a de POSTGRES_* + DB_PASSWORD (conexao.ts) no banco de dev: é nele que o
+// advisory lock é tomado (advisory locks valem por banco). O lock cobre a seção crítica inteira:
+// hash, refazer o modelo, esperar o modelo ficar sem conexões, apagar e clonar o banco do worktree.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
@@ -14,25 +17,37 @@ import pg from 'pg';
 import { type ConexaoDoBanco, trocarBanco } from '../../src/db/conexao.js';
 import { aplicarMigrations, PASTA_DAS_MIGRATIONS } from '../../src/db/migrate.js';
 
-export const BANCO_DE_TESTE = 'leilao_test';
+export const PREFIXO_DOS_BANCOS_DE_TESTE = 'leilao_test';
 export const BANCO_MODELO = 'leilao_test_tpl';
+const TAMANHO_DO_SUFIXO = 8;
 
 const PREFIXO_DO_HASH = 'migrations-sha256:';
 /** Chave do advisory lock do preparo (diferente da das migrations, 3_003_000_001). */
-const CHAVE_DO_LOCK = 3_011_000_001;
+export const CHAVE_DO_LOCK = 3_011_000_001;
+/** Espera pelo lock (lock_timeout), como no migrate.ts. */
+export const ESPERA_PADRAO_DO_LOCK_MS = 60_000;
+/** Espera pelos backends que ainda saem do modelo antes de clonar (senão: SQLSTATE 55006). */
+export const ESPERA_PADRAO_DO_MODELO_MS = 15_000;
+const INTERVALO_DO_MODELO_MS = 50;
+const LOCK_INDISPONIVEL = '55P03';
 /** Nomes que dispensam aspas no Postgres (até 63 bytes). */
 const NOME_DE_BANCO = /^[a-z_][a-z0-9_]{0,62}$/;
 
 export interface OpcoesDoBancoDeTeste {
   readonly pasta?: string;
   readonly modelo?: string;
+  /** Banco do worktree; padrão: leilao_test_<sufixo do worktree>. */
   readonly teste?: string;
+  readonly esperaDoLockMs?: number;
+  readonly esperaDoModeloMs?: number;
 }
 
 export interface PreparoDoBancoDeTeste {
   /** O modelo foi (re)criado nesta execução: hash diferente, ausente ou modelo inexistente. */
   readonly modeloRefeito: boolean;
   readonly hash: string;
+  /** Banco do worktree, recém-clonado do modelo. */
+  readonly banco: string;
   /** Tempo do DROP + CREATE DATABASE ... TEMPLATE do banco de teste. */
   readonly msParaRecriar: number;
 }
@@ -57,12 +72,44 @@ export function hashDasMigrations(pasta: string = PASTA_DAS_MIGRATIONS): string 
   return hash.digest('hex');
 }
 
+/** Os 8 primeiros hex do SHA-256 dos bytes UTF-8 do caminho, sem nenhuma normalização. */
+export function sufixoDoWorktree(caminho: string): string {
+  return createHash('sha256').update(caminho, 'utf8').digest('hex').slice(0, TAMANHO_DO_SUFIXO);
+}
+
+/** `git rev-parse --show-toplevel` como o git imprime, só sem a quebra de linha final. */
+export function caminhoDoWorktree(cwd: string = import.meta.dirname): string {
+  try {
+    const saida = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return saida.replace(/\n$/, '');
+  } catch (erro) {
+    const motivo = erro instanceof Error ? erro.message.trim() : String(erro);
+    throw new Error(`banco de teste: não consegui descobrir o worktree: ${motivo}`, {
+      cause: erro,
+    });
+  }
+}
+
+export function nomeDoBancoDoWorktree(caminho: string = caminhoDoWorktree()): string {
+  return `${PREFIXO_DOS_BANCOS_DE_TESTE}_${sufixoDoWorktree(caminho)}`;
+}
+
 function validarNome(nome: string): string {
   if (!NOME_DE_BANCO.test(nome)) {
     throw new Error(`banco de teste: nome de banco inválido: ${JSON.stringify(nome)}`);
   }
   return nome;
 }
+
+function esperaEmTexto(ms: number): string {
+  return ms % 1000 === 0 ? `${ms / 1000} s` : `${ms} ms`;
+}
+
+const dormir = (ms: number): Promise<void> => new Promise((fim) => setTimeout(fim, ms));
 
 async function comentarioDoBanco(cliente: pg.Client, nome: string): Promise<string | undefined> {
   const { rows } = await cliente.query<{ comentario: string | null }>(
@@ -79,35 +126,86 @@ async function refazerModelo(
   pasta: string,
   hash: string,
 ): Promise<void> {
-  await cliente.query(`drop database if exists ${modelo} with (force)`);
-  await cliente.query(`create database ${modelo}`);
+  const nome = pg.escapeIdentifier(modelo);
+  await cliente.query(`drop database if exists ${nome} with (force)`);
+  await cliente.query(`create database ${nome}`);
   await aplicarMigrations(trocarBanco(admin, modelo), { pasta });
-  // Sem conexões no modelo: uma conexão aberta faz o CREATE DATABASE ... TEMPLATE falhar.
-  await cliente.query(`alter database ${modelo} with allow_connections false`);
+  // Sem novas conexões no modelo: uma conexão aberta faz o CREATE DATABASE ... TEMPLATE falhar.
+  await cliente.query(`alter database ${nome} with allow_connections false`);
   // Por último: um preparo interrompido deixa o modelo sem hash, e a próxima execução o refaz.
   await cliente.query(
-    `comment on database ${modelo} is ${pg.escapeLiteral(`${PREFIXO_DO_HASH}${hash}`)}`,
+    `comment on database ${nome} is ${pg.escapeLiteral(`${PREFIXO_DO_HASH}${hash}`)}`,
   );
 }
 
 /**
- * Garante o modelo em dia com as migrations e recria o banco de teste a partir dele.
- * `admin` não pode apontar para o banco de teste nem para o modelo (eles são apagados).
+ * Espera os backends saírem do modelo: o `end()` do cliente de migrations resolve antes de o
+ * backend terminar, e o CREATE DATABASE ... TEMPLATE falha (55006) com qualquer conexão nele.
+ */
+async function esperarModeloSemConexoes(
+  cliente: pg.Client,
+  modelo: string,
+  esperaMs: number,
+): Promise<void> {
+  const limite = performance.now() + esperaMs;
+  for (;;) {
+    const { rows } = await cliente.query<{ total: string }>(
+      'select count(*) as total from pg_stat_activity where datname = $1',
+      [modelo],
+    );
+    const conexoes = Number(rows[0]?.total);
+    if (conexoes === 0) {
+      return;
+    }
+    if (performance.now() >= limite) {
+      throw new Error(
+        `banco de teste: ${conexoes} conexão(ões) aberta(s) em ${modelo} depois de ` +
+          `${esperaEmTexto(esperaMs)} (psql, DBeaver?); feche-as e tente de novo`,
+      );
+    }
+    await dormir(INTERVALO_DO_MODELO_MS);
+  }
+}
+
+async function tomarOLock(cliente: pg.Client, esperaMs: number, modelo: string): Promise<void> {
+  await cliente.query("select set_config('lock_timeout', $1, false)", [
+    String(Math.trunc(esperaMs)),
+  ]);
+  try {
+    await cliente.query('select pg_advisory_lock($1)', [CHAVE_DO_LOCK]);
+  } catch (erro) {
+    if ((erro as { code?: unknown }).code === LOCK_INDISPONIVEL) {
+      throw new Error(
+        `lock do banco de teste não obtido em ${esperaEmTexto(esperaMs)}: outra execução está ` +
+          `preparando ${modelo}; tente de novo`,
+        { cause: erro },
+      );
+    }
+    throw erro;
+  }
+  await cliente.query('reset lock_timeout');
+}
+
+/**
+ * Garante o modelo em dia com as migrations e recria o banco do worktree a partir dele.
+ * `admin` é o banco de dev; não pode ser o modelo nem nenhum leilao_test_* (são apagados).
+ * Duas execuções simultâneas no mesmo worktree não são suportadas (specs/013).
  */
 export async function prepararBancoDeTeste(
   admin: ConexaoDoBanco,
   opcoes: OpcoesDoBancoDeTeste = {},
 ): Promise<PreparoDoBancoDeTeste> {
-  const pasta = opcoes.pasta ?? PASTA_DAS_MIGRATIONS;
-  const modelo = validarNome(opcoes.modelo ?? BANCO_MODELO);
-  const teste = validarNome(opcoes.teste ?? BANCO_DE_TESTE);
-  if (admin.database === teste || admin.database === modelo) {
+  if (admin.database.startsWith(PREFIXO_DOS_BANCOS_DE_TESTE)) {
     throw new Error(
-      `banco de teste: POSTGRES_DB não pode ser "${admin.database}"; use um banco que não seja ` +
-        `${teste} nem ${modelo} (em dev, o do .env)`,
+      `POSTGRES_DB não pode ser um banco de teste (${PREFIXO_DOS_BANCOS_DE_TESTE}*): ` +
+        'use o banco de dev',
     );
   }
-  const hash = hashDasMigrations(pasta);
+  const pasta = opcoes.pasta ?? PASTA_DAS_MIGRATIONS;
+  const modelo = validarNome(opcoes.modelo ?? BANCO_MODELO);
+  const teste = validarNome(opcoes.teste ?? nomeDoBancoDoWorktree());
+  const esperaDoLock = opcoes.esperaDoLockMs ?? ESPERA_PADRAO_DO_LOCK_MS;
+  const esperaDoModelo = opcoes.esperaDoModeloMs ?? ESPERA_PADRAO_DO_MODELO_MS;
 
   const cliente = new pg.Client(admin);
   let erroDaConexao: Error | undefined;
@@ -117,19 +215,24 @@ export async function prepararBancoDeTeste(
   await cliente.connect();
   try {
     // Fechar a sessão libera o lock, inclusive se algo abaixo falhar.
-    await cliente.query('select pg_advisory_lock($1)', [CHAVE_DO_LOCK]);
+    await tomarOLock(cliente, esperaDoLock, modelo);
+    // O hash depois do lock: quem esperava pode ter outra visão da pasta de migrations.
+    const hash = hashDasMigrations(pasta);
     const modeloRefeito = (await comentarioDoBanco(cliente, modelo)) !== PREFIXO_DO_HASH + hash;
     if (modeloRefeito) {
       await refazerModelo(cliente, admin, modelo, pasta, hash);
     }
+    await esperarModeloSemConexoes(cliente, modelo, esperaDoModelo);
     const inicio = performance.now();
-    await cliente.query(`drop database if exists ${teste} with (force)`);
-    await cliente.query(`create database ${teste} template ${modelo}`);
+    await cliente.query(`drop database if exists ${pg.escapeIdentifier(teste)} with (force)`);
+    await cliente.query(
+      `create database ${pg.escapeIdentifier(teste)} template ${pg.escapeIdentifier(modelo)}`,
+    );
     const msParaRecriar = performance.now() - inicio;
     if (erroDaConexao !== undefined) {
       throw erroDaConexao;
     }
-    return { modeloRefeito, hash, msParaRecriar };
+    return { modeloRefeito, hash, banco: teste, msParaRecriar };
   } finally {
     await cliente.end();
   }
