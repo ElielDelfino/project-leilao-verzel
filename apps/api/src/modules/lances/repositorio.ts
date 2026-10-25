@@ -2,7 +2,7 @@
 // §Dados). Nenhum outro módulo lê estas tabelas. Privilégios do papel da API (ADR 0026): só SELECT
 // e INSERT nas três (append-only, com trigger). O banco não impõe a cadeia: a ordem correta é de
 // quem chama (cadeia.ts), dentro da transação com o lote travado.
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, countDistinct, desc, eq, max } from 'drizzle-orm';
 
 import type { BancoDrizzle, Transacao } from '../../db/banco.js';
 import { bids, lotSeals, signingKeys } from './schema.js';
@@ -97,6 +97,111 @@ export async function buscarLancePorChave(
     .from(bids)
     .where(and(eq(bids.licitanteId, licitanteId), eq(bids.idempotencyKey, idempotencyKey)));
   return linha ?? null;
+}
+
+/** Lance como o histórico o mostra: sem `id`, sem licitante, sem hashes. */
+export interface LinhaDoHistorico {
+  readonly seq: number;
+  readonly pseudonimo: string;
+  readonly valorCentavos: number;
+  readonly criadoEm: Date;
+}
+
+/** Lote em que o usuário deu lance, com os agregados dos lances dele. */
+export interface LoteDoUsuario {
+  readonly loteId: string;
+  readonly meuMaiorLanceCentavos: number;
+  readonly meuUltimoLanceEm: Date;
+}
+
+/** Janela de uma página: `limite` linhas a partir de `deslocamento`. */
+export interface JanelaDePagina {
+  readonly limite: number;
+  readonly deslocamento: number;
+}
+
+/** Total de lances do lote (índice do unique `(lote_id, seq)`). */
+export async function contarLancesDoLote(db: Executor, loteId: string): Promise<number> {
+  const [linha] = await db.select({ total: count() }).from(bids).where(eq(bids.loteId, loteId));
+  return linha?.total ?? 0;
+}
+
+/** Lances do lote por `seq` decrescente (varredura reversa do unique `(lote_id, seq)`). */
+export async function listarLancesDoLote(
+  db: Executor,
+  loteId: string,
+  janela: JanelaDePagina,
+): Promise<LinhaDoHistorico[]> {
+  return db
+    .select({
+      seq: bids.seq,
+      pseudonimo: bids.pseudonimo,
+      valorCentavos: bids.valorCentavos,
+      criadoEm: bids.criadoEm,
+    })
+    .from(bids)
+    .where(eq(bids.loteId, loteId))
+    .orderBy(desc(bids.seq))
+    .limit(janela.limite)
+    .offset(janela.deslocamento);
+}
+
+/** O usuário tem ao menos um lance no lote? (índice `(licitante_id, lote_id)`). */
+export async function usuarioTemLanceNoLote(
+  db: Executor,
+  loteId: string,
+  usuarioId: string,
+): Promise<boolean> {
+  const [linha] = await db
+    .select({ seq: bids.seq })
+    .from(bids)
+    .where(and(eq(bids.loteId, loteId), eq(bids.licitanteId, usuarioId)))
+    .limit(1);
+  return linha !== undefined;
+}
+
+/** Quantos lotes distintos têm lance do usuário (índice `(licitante_id, lote_id)`). */
+export async function contarLotesDoUsuario(db: Executor, usuarioId: string): Promise<number> {
+  const [linha] = await db
+    .select({ total: countDistinct(bids.loteId) })
+    .from(bids)
+    .where(eq(bids.licitanteId, usuarioId));
+  return linha?.total ?? 0;
+}
+
+/**
+ * Um item por lote com lance do usuário, do lance mais recente ao mais antigo (desempate por
+ * `lote_id` decrescente), numa consulta só: o agrupamento percorre o índice do usuário.
+ */
+export async function listarLotesDoUsuario(
+  db: Executor,
+  usuarioId: string,
+  janela: JanelaDePagina,
+): Promise<LoteDoUsuario[]> {
+  const ultimo = max(bids.criadoEm);
+  const linhas = await db
+    .select({
+      loteId: bids.loteId,
+      meuMaiorLanceCentavos: max(bids.valorCentavos),
+      meuUltimoLanceEm: ultimo,
+    })
+    .from(bids)
+    .where(eq(bids.licitanteId, usuarioId))
+    .groupBy(bids.loteId)
+    .orderBy(desc(ultimo), desc(bids.loteId))
+    .limit(janela.limite)
+    .offset(janela.deslocamento);
+  return linhas.map((linha) => {
+    // max() de colunas NOT NULL de um grupo não vazio nunca é nulo.
+    if (linha.meuMaiorLanceCentavos === null || linha.meuUltimoLanceEm === null) {
+      throw new Error('agregado de lances do usuário nulo');
+    }
+    return {
+      loteId: linha.loteId,
+      meuMaiorLanceCentavos: linha.meuMaiorLanceCentavos,
+      meuUltimoLanceEm: linha.meuUltimoLanceEm,
+    };
+  });
 }
 
 /** Insere o lance e devolve o `id` (UUIDv7 do default `uuidv7()`). */

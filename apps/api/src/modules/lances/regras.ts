@@ -139,6 +139,40 @@ export function traduzirFalhaDoLance(erro: unknown): unknown {
   return erro;
 }
 
+/** Posição do usuário no lote (specs/007 §Posição do usuário no lote, ADR 0025). */
+export type PosicaoDoUsuario = 'ganhando' | 'superado' | 'venceu' | 'perdeu' | 'sem_lance';
+
+/** O que a posição lê do lote: status derivado dos horários e as colunas de líder e vencedor. */
+export interface LoteParaPosicao {
+  readonly status: 'agendado' | 'ao_vivo' | 'encerrado' | 'cancelado';
+  readonly liderId: string | null;
+  readonly vencedorId: string | null;
+}
+
+/**
+ * Tabela de specs/007 §Posição do usuário no lote. Sem lance do usuário (inclui lote agendado)
+ * é sempre `sem_lance`. Lote encerrado com `vencedorId` nulo (o job de encerramento da F4 ainda
+ * não gravou o vencedor): `ganhando` para o líder e `perdeu` para quem tem lance e não lidera.
+ */
+export function calcularPosicao(
+  lote: LoteParaPosicao,
+  usuarioId: string,
+  temLance: boolean,
+): PosicaoDoUsuario {
+  if (!temLance) return 'sem_lance';
+  switch (lote.status) {
+    case 'ao_vivo':
+      return lote.liderId === usuarioId ? 'ganhando' : 'superado';
+    case 'encerrado':
+      if (lote.vencedorId === null) return lote.liderId === usuarioId ? 'ganhando' : 'perdeu';
+      return lote.vencedorId === usuarioId ? 'venceu' : 'perdeu';
+    case 'cancelado':
+      return 'perdeu';
+    case 'agendado':
+      return 'sem_lance';
+  }
+}
+
 /** Lance como vai na resposta e no evento: sem id interno nem dado do licitante. */
 export interface LancePublico {
   readonly seq: number;
