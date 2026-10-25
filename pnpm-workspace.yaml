@@ -12,7 +12,14 @@ engineStrict: true
 # (download de fallback) não é necessário.
 # esbuild (via drizzle-kit, só em dev): idem; o binário vem do @esbuild/<plataforma> opcional e o
 # postinstall só valida ou baixa o binário quando a dependência opcional falta.
+# cpu-features e ssh2 (via @testcontainers/postgresql → dockerode, só em dev): o install compila
+# addons nativos opcionais com node-gyp; o ssh2 carrega os dois em try/catch e cai no crypto do
+# Node, e só é usado para Docker via SSH (o Testcontainers usa o socket local).
+# protobufjs (via @grpc/proto-loader, idem): o postinstall só avisa sobre o esquema de versão.
 allowBuilds:
+  cpu-features: false
   esbuild: false
   lefthook: true
+  protobufjs: false
+  ssh2: false
   unrs-resolver: false
