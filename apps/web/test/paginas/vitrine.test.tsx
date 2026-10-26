@@ -326,6 +326,47 @@ describe('/ (vitrine)', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('falha do refetch com a lista em tela mantém os cards e mostra o aviso com "Tentar de novo"', async () => {
+    servidor.use(servirLotes([criarLote()]).handler);
+    const user = userEvent.setup();
+    abrir();
+    await screen.findByRole('listitem');
+
+    servidor.use(http.get(`${ORIGEM}/api/lotes`, () => envelopeDeErro('INDISPONIVEL', 503)));
+    window.dispatchEvent(new Event('visibilitychange'));
+
+    const aviso = await screen.findByRole('alert');
+    expect(aviso).toHaveTextContent(
+      'Não foi possível atualizar a lista. O serviço está indisponível agora. Tente de novo em instantes.',
+    );
+    expect(screen.getByRole('listitem')).toBeInTheDocument();
+    expect(screen.queryByText('Carregando lotes…')).not.toBeInTheDocument();
+
+    servidor.use(servirLotes([criarLote()]).handler);
+    await user.click(screen.getByRole('button', { name: 'Tentar de novo' }));
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByRole('listitem')).toBeInTheDocument();
+  });
+
+  it('o foco não se perde ao tentar de novo depois da falha do refetch', async () => {
+    servidor.use(servirLotes([criarLote()]).handler);
+    const user = userEvent.setup();
+    abrir();
+    await screen.findByRole('listitem');
+
+    servidor.use(http.get(`${ORIGEM}/api/lotes`, () => envelopeDeErro('INDISPONIVEL', 503)));
+    window.dispatchEvent(new Event('visibilitychange'));
+    await screen.findByRole('alert');
+
+    // A nova tentativa também falha: o botão continua o mesmo, com o foco.
+    const botao = screen.getByRole('button', { name: 'Tentar de novo' });
+    await user.click(botao);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Tentar de novo' })).toBe(botao));
+    expect(botao).toHaveFocus();
+    expect(screen.getByRole('listitem')).toBeInTheDocument();
+  });
+
   it('falha de rede também mostra a mensagem de indisponível', async () => {
     servidor.use(http.get(`${ORIGEM}/api/lotes`, () => HttpResponse.error()));
     abrir();

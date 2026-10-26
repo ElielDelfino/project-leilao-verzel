@@ -8,7 +8,7 @@ import {
   type PaginaDeLotes,
   type StatusDaVitrine,
 } from '../api/lotes';
-import { ErroDoServidor } from '../formularios/ErroDoServidor';
+import { ErroDoServidor, textoDoErro } from '../formularios/ErroDoServidor';
 import { tituloDaPagina } from '../layout/site';
 import { CartaoDoLote } from '../lotes/CartaoDoLote';
 import {
@@ -196,17 +196,11 @@ function ConteudoDaLista({
   aoLimpar,
   aoIrParaPagina,
 }: ConteudoProps) {
-  if (consulta.error) {
+  if (consulta.error && !consulta.data) {
     return (
       <div className="flex flex-col items-start gap-4">
         <ErroDoServidor erro={consulta.error} />
-        <button
-          type="button"
-          onClick={() => void consulta.refetch()}
-          className={CLASSE_BOTAO_SECUNDARIO}
-        >
-          Tentar de novo
-        </button>
+        <BotaoTentarDeNovo aoClicar={() => void consulta.refetch()} />
       </div>
     );
   }
@@ -219,7 +213,56 @@ function ConteudoDaLista({
     );
   }
 
-  const { lotes, meta } = consulta.data;
+  // A falha de um refetch (resync) com a lista em tela não a derruba: avisa e mantém os cards.
+  const aviso = consulta.error ? (
+    <div className="mb-4 flex flex-col items-start gap-4">
+      <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+        Não foi possível atualizar a lista. {textoDoErro(consulta.error)}
+      </p>
+      <BotaoTentarDeNovo aoClicar={() => void consulta.refetch()} />
+    </div>
+  ) : null;
+  return (
+    <>
+      {aviso}
+      <ListaDeLotes
+        dados={consulta.data}
+        isPlaceholderData={consulta.isPlaceholderData}
+        filtros={filtros}
+        totalPaginas={totalPaginas}
+        aoLimpar={aoLimpar}
+        aoIrParaPagina={aoIrParaPagina}
+      />
+    </>
+  );
+}
+
+function BotaoTentarDeNovo({ aoClicar }: { aoClicar: () => void }) {
+  return (
+    <button type="button" onClick={aoClicar} className={CLASSE_BOTAO_SECUNDARIO}>
+      Tentar de novo
+    </button>
+  );
+}
+
+interface ListaProps {
+  dados: PaginaDeLotes;
+  isPlaceholderData: boolean;
+  filtros: FiltrosDaVitrine;
+  totalPaginas: number;
+  aoLimpar: () => void;
+  aoIrParaPagina: (pagina: number) => void;
+}
+
+function ListaDeLotes({
+  dados,
+  isPlaceholderData,
+  filtros,
+  totalPaginas,
+  aoLimpar,
+  aoIrParaPagina,
+}: ListaProps) {
+  const { lotes, meta } = dados;
   if (meta.total === 0) {
     return temFiltroDeBusca(filtros) ? (
       <div className="flex flex-col items-start gap-4">
@@ -237,10 +280,7 @@ function ConteudoDaLista({
       <p aria-live="polite" className="mb-4 text-texto-suave">
         {textoDoTotal(meta.total)}
       </p>
-      <ul
-        aria-busy={consulta.isPlaceholderData}
-        className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
-      >
+      <ul aria-busy={isPlaceholderData} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {lotes.map((lote) => (
           <CartaoDoLote key={lote.id} lote={lote} />
         ))}
