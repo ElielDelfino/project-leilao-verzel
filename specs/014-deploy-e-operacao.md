@@ -169,7 +169,7 @@ A API, o runner de migrations (`pnpm db:migrate`) e o seed (`pnpm db:seed`) leem
      - roda a §Verificação de vazamento;
      - remove as imagens antigas, mantendo a atual e a anterior.
   4. Se o health check ou a verificação falhar, `deploy-ssh` volta para as tags anteriores, faz `up -d` e o job falha. No primeiro deploy, sem versão anterior, o job só falha.
-- **Comando forçado:** no `authorized_keys` do `deploy`, a chave de deploy tem `restrict` e `command="/opt/leilao/bin/deploy-ssh"`. O `deploy-ssh` lê `SSH_ORIGINAL_COMMAND` e aceita só `deploy <sha>` (40 caracteres hex), `rollback` e `backup`; qualquer outro comando, inclusive uma sessão sem comando, sai com código 1 sem executar nada. O `deploy-ssh` e os scripts que ele chama pertencem ao root e o `deploy` não pode alterá-los.
+- **Comando forçado:** no `authorized_keys` do `deploy`, a chave de deploy tem `restrict` e `command="/opt/leilao/bin/deploy-ssh"`. O `deploy-ssh` lê `SSH_ORIGINAL_COMMAND` e aceita só `deploy <sha>` (40 caracteres hex) e `rollback` (ADR 0034, item 3); qualquer outro comando (inclusive `backup` e uma sessão sem comando) sai com código 1 sem executar nada. O `deploy-ssh` e os scripts que ele chama pertencem ao root e o `deploy` não pode alterá-los.
 - O rollback não desfaz migrations: toda migration tem de funcionar com a imagem anterior (só aditiva). Uma migration que remove ou altera coluna escala para o humano (specs/002).
 - **GitHub:**
   - secrets `VPS_SSH_KEY` (chave privada ed25519 de deploy) e `VPS_KNOWN_HOSTS`;
@@ -179,34 +179,37 @@ A API, o runner de migrations (`pnpm db:migrate`) e o seed (`pnpm db:seed`) leem
 - **GHCR (provisório, ADR 0033 item 5.6):** pacotes públicos, sem credencial do registry na VPS. Se ficarem privados, o job passa à VPS o próprio `GITHUB_TOKEN`, efêmero, por stdin (`docker login --password-stdin`) e faz `docker logout` no fim. Nunca um token pessoal na VPS.
 - Tags SemVer (`v0.x`, e `v1.0.0` na entrega) geram release no GitHub com o trecho do CHANGELOG.
 
-## Observabilidade (ADR 0018)
+## Observabilidade (ADR 0018, ADR 0034)
 - Logs Pino em JSON com `requestId`; sem PII (e-mail mascarado).
 - `GET /api/health/live` (processo, sem consultar dependências) e `GET /api/health/ready` (Postgres + Redis), ambos públicos. Com sucesso, os dois respondem 200 `{ "sucesso": true, "dados": { "status": "ok" } }`, sem outros campos.
 - No `/ready`, cada verificação tem 2 s para responder. Com uma dependência fora, ou sem verificações registradas, responde 503 `INDISPONIVEL` com mensagem fixa e sem `detalhes`: a resposta não diz qual dependência caiu. O nome da dependência e o motivo vão só para o log (warn), sem host nem senha.
 - Logs do Docker com `json-file`, `max-size=10m`, `max-file=5` e expurgo de 14 dias.
-- Uptime: monitor no plano gratuito do UptimeRobot em `https://<host>/api/health/ready`, com alerta por e-mail, criado pelo humano (ADR 0033, item 7).
+- Uptime: **fora do escopo da entrega** (ADR 0034); opcional depois, com o monitor gratuito do UptimeRobot em `https://<host>/api/health/ready` (ADR 0033, item 7).
 - Sem alerta de orçamento: o único custo é o preço fixo da VPS.
 
-## Backup (ADR 0018, ADR 0033 item 6)
-- Cron diário às 03:00 UTC: `pg_dump -Fc` do banco `leilao`, gravado em `/var/backups/leilao/leilao-<AAAAMMDDTHHMMZ>.dump` (root, 600). Ficam as 7 cópias mais recentes.
-- **Cópia fora da VPS (provisório, ADR 0033 item 6.2):**
-  - um workflow agendado do GitHub Actions (diário, depois das 03:00 UTC) chama `backup` pela chave de deploy;
-  - o `deploy-ssh` devolve no stdout o dump mais recente cifrado com `age` para a chave pública do humano (`/opt/leilao/backup.age.pub`);
-  - o workflow guarda o arquivo como artefato com retenção de 7 dias;
-  - a chave privada `age` fica só com o humano;
-  - o dump em claro nunca sai da VPS.
-- O CI testa o restore: dump → restore num banco limpo → verificação da auditoria de todos os lotes = íntegro.
-- Restauração real, documentada no runbook (`docs/operacao.md`): antes da entrega, o humano baixa a cópia externa, decifra, restaura num Postgres 18.6 descartável fora da VPS e confere a auditoria de todos os lotes. O runbook registra a data, o tamanho do dump e o veredito.
+## Backup (ADR 0034)
+- **Na entrega, só um `pg_dump` manual.** Antes da entrega, o administrador roda uma vez `pg_dump -Fc` do banco `leilao`:
+  - pelo socket local do container (`docker compose exec -T postgres`), sem senha no argv nem no ambiente;
+  - com o dump gravado na VPS fora dos volumes do Docker, com modo 600.
+  Copiá-lo para fora da VPS é opcional.
+- O runbook (`docs/operacao.md`) traz:
+  - o comando completo, com os mesmos `-p` e `-f` do deploy;
+  - o caminho e o nome do arquivo, com a data em UTC;
+  - como conferir o dump com `pg_restore --list`.
+- **Fora do escopo da entrega, opcionais depois** (ADR 0034, que substitui nesses pontos a ADR 0033, item 6, e a ADR 0018):
+  - cron diário de `pg_dump` com 7 cópias;
+  - cópia fora da VPS cifrada com `age` (o comando `backup` do `deploy-ssh` não existe);
+  - teste de restauração no CI e restauração real documentada no runbook.
 
 ## Critérios de aceite
 - [ ] Push na main publica a nova versão em até 10 min depois do CI verde, sem intervenção, e `docker compose images` na VPS mostra `ghcr.io/<owner>/leilao-api:<sha>` e `leilao-web:<sha>` do commit.
 - [ ] Health check falho reverte para a versão anterior: um deploy com `/api/health/ready` quebrado de propósito volta às tags anteriores, o `/ready` responde 200 de novo e o job falha.
-- [ ] Nenhum serviço pago por uso: os únicos serviços externos são a VPS Hostinger (preço fixo), DuckDNS, Let's Encrypt, GitHub (Actions e GHCR) e UptimeRobot (plano gratuito), listados no runbook.
+- [ ] Nenhum serviço pago por uso: os únicos serviços externos são a VPS Hostinger (preço fixo), DuckDNS, Let's Encrypt e GitHub (Actions e GHCR), listados no runbook (ADR 0034, item 4).
 - [ ] `sshd -T` na VPS mostra `permitrootlogin no`, `passwordauthentication no` e `kbdinteractiveauthentication no`; um `ssh root@<host>` e um login por senha são recusados.
 - [ ] `ufw status verbose` mostra `deny (incoming)` e só 22/tcp (LIMIT), 80/tcp e 443/tcp liberadas, em v4 e v6. Uma varredura TCP de 1 a 65535 feita de fora da VPS acha só 22, 80 e 443 abertas, e `docker compose ps` mostra portas publicadas só no Caddy.
 - [ ] `http://<host>/` redireciona para `https://<host>/`; o certificado é do Let's Encrypt, válido para `<host>`; a resposta tem `Strict-Transport-Security`.
 - [ ] `unattended-upgrades` habilitado, com `APT::Periodic::Unattended-Upgrade "1"` e sem `Unattended-Upgrade::Automatic-Reboot "true"`.
-- [ ] A chave de deploy não abre shell: `ssh deploy@<host>` sem comando, `id` e `deploy` com sha inválido saem com código ≠ 0 sem executar nada.
+- [ ] A chave de deploy não abre shell: `ssh deploy@<host>` sem comando, `id`, `backup` e `deploy` com sha inválido saem com código ≠ 0 sem executar nada.
 - [ ] `gerar-env-local.sh` cria um `.env.local` 600 cujos 6 valores passam na forma canônica de §Leitura (teste com o mesmo validador) e sai com código 1 sem alterar nada se o arquivo existir. `materializar-segredos.sh` sai com código 1, citando só o nome, se faltar uma variável ou se o valor estiver fora da forma canônica.
 - [ ] `/api/health/ready` com o Postgres ou o Redis fora → 503 `INDISPONIVEL` sem `detalhes` nem nome da dependência (teste de integração).
 - [ ] A API não sobe sem qualquer uma das variáveis que §Conexão da API com Postgres e Redis lhe atribui (inclusive `WEB_ORIGIN`), e o `db:migrate` e o `db:seed` não sobem sem as que lhes cabem; a mensagem cita o nome, não o valor (teste de unidade do env). Com `DB_PASSWORD` ou `POSTGRES_USER` definidos, a API os ignora.
@@ -228,12 +231,10 @@ A API, o runner de migrations (`pnpm db:migrate`) e o seed (`pnpm db:seed`) leem
 - [ ] Em produção, o `docker inspect` e o `docker compose config` do serviço da API não mostram `DB_PASSWORD_FILE` nem o secret `db_password` (passo do deploy).
 - [ ] Depois de `sudo reboot` da VPS, `/api/health/ready` volta a responder 200 em até 5 min sem intervenção.
 - [ ] Memória: com os limites de §Produção, depois do k6 (rodado de fora da VPS), nenhum container tem `State.OOMKilled` verdadeiro.
-- [ ] Backup:
-  - depois de 8 execuções do cron, `/var/backups/leilao` tem exatamente 7 dumps, todos 600;
-  - a cópia externa do dia existe e decifra com a chave privada do humano;
-  - o runbook registra uma restauração real com veredito `integro` em todos os lotes.
-- [ ] O UptimeRobot alerta por e-mail quando a API é parada de propósito (teste feito uma vez e registrado no runbook).
+- [ ] Backup manual (ADR 0034): o runbook traz o comando de §Backup; antes da entrega, ele roda uma vez na VPS, o dump fica com modo 600 e `pg_restore --list` o lê com saída 0.
 - [ ] O README avisa que o k6 roda de fora da VPS e que `pnpm demo:adulterar` nunca roda em produção.
 
+Fora do escopo da entrega (ADR 0034), sem critério de aceite: backup diário com 7 cópias, cópia externa cifrada com `age`, teste de restauração no CI, restauração real registrada no runbook e alerta do UptimeRobot.
+
 ## Decisões relacionadas
-- decisions/0013-deploy-gcp-e2-micro.md (substituída pela 0033), 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md, 0020-host-publico-e-uptime.md (substituída pela 0033), 0023-segredos-em-arquivo-e-formatos.md, 0024-limites-do-caddy-swap-e-http3.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md, 0033-producao-em-vps-hostinger.md
+- decisions/0013-deploy-gcp-e2-micro.md (substituída pela 0033), 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md (parcialmente substituída pela 0033 e pela 0034), 0020-host-publico-e-uptime.md (substituída pela 0033), 0023-segredos-em-arquivo-e-formatos.md, 0024-limites-do-caddy-swap-e-http3.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md, 0033-producao-em-vps-hostinger.md (parcialmente substituída pela 0034), 0034-backup-e-uptime-fora-da-entrega.md
