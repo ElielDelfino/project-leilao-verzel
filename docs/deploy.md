@@ -132,6 +132,12 @@ sudo usermod -aG systemd-journal deploy
 
 Os dois scripts pertencem ao root e o `deploy` não os altera; quando mudarem no repositório, repita este passo.
 
+**Avisos.**
+
+- Os comandos `sudo` deste roteiro (e o `sudo -n true` do [operacao.md](operacao.md) §3.2) supõem o NOPASSWD do `eliel` em `/etc/sudoers.d/90-eliel`. Sem ele, o `sudo` pede a senha do `eliel`: com a conta sem senha, o `sudo` falha e ele fica sem como administrar a VPS. Confira com `sudo -n true` numa segunda sessão antes de fechar a primeira, e valide qualquer edição do sudoers com `visudo -cf`.
+- O `preparar-vps.sh` recusa o administrador cuja `authorized_keys` não passa no `ssh-keygen -l` ou cujo home, `.ssh` e `authorized_keys` aceitam escrita de grupo/outros, e só recarrega o sshd se o `sshd -T` listar o administrador em `allowusers`; em qualquer recusa ele não fecha o SSH.
+- `pnpm demo:adulterar` **nunca roda na VPS**: ele adultera um lance direto no banco para a demonstração. Só roda na máquina de dev, com `DEMO_ADULTERAR=1` e `POSTGRES_HOST` em loopback; o host `postgres` do compose é recusado.
+
 **2. Chave de deploy.** Na sua máquina, num diretório fora do repositório (sem senha: quem a usa é o CI):
 
 ```sh

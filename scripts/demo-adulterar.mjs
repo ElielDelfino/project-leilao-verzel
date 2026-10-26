@@ -5,8 +5,9 @@
 // `pnpm demo:adulterar --lote <id> --seq <n> --restaurar --valor <centavos>`.
 //
 // Segurança:
-// - recusa antes de conectar: NODE_ENV=production e host fora de loopback e do serviço do compose
-//   (`postgres`, D11);
+// - recusa antes de conectar: NODE_ENV=production, ausência do opt-in explícito `DEMO_ADULTERAR=1`
+//   (task 138) e host fora de loopback (o serviço `postgres` do compose NÃO é aceito: é o host do
+//   banco na VPS, onde o script nunca roda);
 // - conecta como DONO do banco (POSTGRES_USER/DB_PASSWORD[_FILE]); o papel da API não tem UPDATE
 //   em bids e o trigger append-only recusa até o dono, por isso o trigger é desabilitado;
 // - o `DISABLE TRIGGER` vive só dentro de uma transação que o reabilita (DDL é transacional: em
@@ -25,13 +26,12 @@ const INTEIRO = /^[0-9]{1,16}$/;
 // bids_valor_faixa (migration 0003): 100 a Number.MAX_SAFE_INTEGER.
 const VALOR_MINIMO = 100n;
 const VALOR_MAXIMO = BigInt(Number.MAX_SAFE_INTEGER);
-const SERVICO_DO_COMPOSE = 'postgres';
-const HOSTS_LOCAIS = new Set(['127.0.0.1', '::1', 'localhost', SERVICO_DO_COMPOSE]);
+const HOSTS_LOCAIS = new Set(['127.0.0.1', '::1', 'localhost']);
 const LOCK_TIMEOUT = '5s';
 const TRIGGER = 'bids_append_only';
 const USO =
-  'Uso: pnpm demo:adulterar --lote <uuid> --seq <n>\n' +
-  '     pnpm demo:adulterar --lote <uuid> --seq <n> --restaurar --valor <centavos>';
+  'Uso: DEMO_ADULTERAR=1 pnpm demo:adulterar --lote <uuid> --seq <n>\n' +
+  '     DEMO_ADULTERAR=1 pnpm demo:adulterar --lote <uuid> --seq <n> --restaurar --valor <centavos>';
 
 export class ErroDeUso extends Error {
   name = 'ErroDeUso';
@@ -94,13 +94,18 @@ export function exigirAmbienteLocal(env) {
   if (env.NODE_ENV === 'production') {
     throw new ErroDeUso('Recusado: NODE_ENV=production. O script é só para dev/demo.');
   }
+  if (env.DEMO_ADULTERAR !== '1') {
+    throw new ErroDeUso(
+      'Recusado: falta o opt-in explícito. Rode com DEMO_ADULTERAR=1 (só na máquina de dev/demo, nunca na VPS).',
+    );
+  }
   const host = env.POSTGRES_HOST;
   if (host === undefined || host === '') {
     throw new ErroDeUso('POSTGRES_HOST ausente (carregue .env e .env.local).');
   }
   if (!HOSTS_LOCAIS.has(host)) {
     throw new ErroDeUso(
-      'Recusado: POSTGRES_HOST fora de loopback e do serviço do compose. O script é só para dev/demo.',
+      'Recusado: POSTGRES_HOST fora de loopback (127.0.0.1, ::1, localhost). O script é só para dev/demo.',
     );
   }
 }

@@ -66,22 +66,46 @@ describe('lerArgumentos', () => {
 });
 
 describe('exigirAmbienteLocal', () => {
-  for (const host of ['127.0.0.1', '::1', 'localhost', 'postgres']) {
-    it(`aceita o host ${host}`, () => {
-      assert.doesNotThrow(() => exigirAmbienteLocal({ POSTGRES_HOST: host }));
+  for (const host of ['127.0.0.1', '::1', 'localhost']) {
+    it(`aceita o host ${host} com o opt-in`, () => {
+      assert.doesNotThrow(() => exigirAmbienteLocal({ DEMO_ADULTERAR: '1', POSTGRES_HOST: host }));
     });
   }
 
+  for (const optIn of [undefined, '', '0', 'true', 'yes']) {
+    it(`recusa sem o opt-in DEMO_ADULTERAR=1 (valor ${String(optIn)})`, () => {
+      assert.throws(
+        () => exigirAmbienteLocal({ DEMO_ADULTERAR: optIn, POSTGRES_HOST: '127.0.0.1' }),
+        /DEMO_ADULTERAR=1/,
+      );
+    });
+  }
+
+  it('recusa o host postgres do compose mesmo com o opt-in', () => {
+    assert.throws(
+      () => exigirAmbienteLocal({ DEMO_ADULTERAR: '1', POSTGRES_HOST: 'postgres' }),
+      /POSTGRES_HOST fora de loopback/,
+    );
+  });
+
   it('recusa NODE_ENV=production', () => {
     assert.throws(
-      () => exigirAmbienteLocal({ NODE_ENV: 'production', POSTGRES_HOST: '127.0.0.1' }),
+      () =>
+        exigirAmbienteLocal({
+          DEMO_ADULTERAR: '1',
+          NODE_ENV: 'production',
+          POSTGRES_HOST: '127.0.0.1',
+        }),
       /production/,
     );
   });
 
   for (const host of ['db.exemplo.com', '10.0.0.5', '127.0.0.1.exemplo.com', undefined, '']) {
     it(`recusa o host ${String(host)}`, () => {
-      assert.throws(() => exigirAmbienteLocal({ POSTGRES_HOST: host }), ErroDeUso);
+      assert.throws(
+        () => exigirAmbienteLocal({ DEMO_ADULTERAR: '1', POSTGRES_HOST: host }),
+        ErroDeUso,
+      );
     });
   }
 });
@@ -186,6 +210,7 @@ describe('adulterar (cliente simulado)', () => {
 
 describe('execução do script (recusas antes de conectar)', () => {
   const ambiente = {
+    DEMO_ADULTERAR: '1',
     POSTGRES_HOST: '127.0.0.1',
     POSTGRES_PORT: '1',
     POSTGRES_DB: 'leilao',
@@ -204,6 +229,19 @@ describe('execução do script (recusas antes de conectar)', () => {
     const r = executar(['--lote', LOTE, '--seq', '1'], { ...ambiente, NODE_ENV: 'production' });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /production/);
+  });
+
+  it('sem DEMO_ADULTERAR=1 recusa antes de conectar', () => {
+    const semOptIn = { ...ambiente, DEMO_ADULTERAR: undefined };
+    const r = executar(['--lote', LOTE, '--seq', '1'], semOptIn);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /DEMO_ADULTERAR=1/);
+  });
+
+  it('host postgres do compose recusa mesmo com o opt-in', () => {
+    const r = executar(['--lote', LOTE, '--seq', '1'], { ...ambiente, POSTGRES_HOST: 'postgres' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /POSTGRES_HOST fora de loopback/);
   });
 
   it('host remoto recusa sem imprimir segredo', () => {
