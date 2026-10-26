@@ -2,8 +2,6 @@
 
 Fonte: specs/014 (§Servidor, §Segredos, §Backup), ADR 0033 (VPS Hostinger) e ADR 0034 (backup e uptime fora da entrega). Compose e segredos: [deploy.md](deploy.md); nomes e formatos: [variaveis-de-ambiente.md](variaveis-de-ambiente.md). Onde este texto e a specs/014 divergirem, vale a spec.
 
-> Este arquivo será movido pelo spec-guardian para `docs/operacao.md` (tarefa 130); os links acima já apontam para `docs/`.
-
 Quem executa tudo aqui é o humano. Nenhum agente acessa a VPS. Host: `teste-verzel.duckdns.org` (Ubuntu 24.04 LTS, 1 vCPU, 4 GB, IPv4 e IPv6). Administrador: `eliel` (uid 1000, sudo). CI: `deploy` (fora do grupo `sudo`, no grupo `docker`).
 
 **O grupo `docker` equivale a root:** quem fala com o daemon do Docker monta `/` do host num container e faz o que quiser. Não ter `sudo` não contém o `deploy`. Por isso a chave pública do `deploy` só pode entrar no `~deploy/.ssh/authorized_keys` com o prefixo `command="/opt/leilao/bin/deploy-ssh",restrict` (tarefa 131), **nunca como chave livre**; o `preparar-vps.sh` não instala chave nenhuma para ele.
