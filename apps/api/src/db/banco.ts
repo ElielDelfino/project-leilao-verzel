@@ -59,6 +59,14 @@ export interface OpcoesDoBanco {
   readonly aoErroOcioso: (erro: unknown) => void;
   /** Consulta de `verificar`. Padrão `select 1`; os testes usam uma lenta (pg_sleep). */
   readonly consultaDeVerificacao?: string;
+  /**
+   * Sobrescreve `max` e `connectionTimeoutMillis` de LIMITES_DO_POOL. Só para os testes (pool
+   * saturado com espera curta); a API usa os limites padrão.
+   */
+  readonly limitesDoPool?: {
+    readonly max?: number;
+    readonly connectionTimeoutMillis?: number;
+  };
 }
 
 export interface Banco {
@@ -220,6 +228,7 @@ export function criarBanco(opcoes: OpcoesDoBanco): BancoVerificavel {
     user: conexao.user,
     password: conexao.password,
     ...LIMITES_DO_POOL,
+    ...opcoes.limitesDoPool,
   });
   const avisar = criarAvisoDeErro(opcoes.aoErroOcioso);
   pool.on('error', avisar);
