@@ -52,16 +52,20 @@ docker compose -p leilao-prod --env-file .env --env-file infra/prod.env \
 
 ### Teste local
 
-Com segredos descartáveis num diretório próprio (os 6 arquivos, uid 1000, 600, sem quebra de linha; diretório 700) e a CA local do Caddy. As variáveis do shell vencem as dos `--env-file`:
+Com segredos descartáveis num diretório próprio (os 6 arquivos, uid 1000, 600, sem quebra de linha; diretório 700) e a CA local do Caddy. As variáveis do shell vencem as dos `--env-file`.
+
+A imagem da API roda com `NODE_ENV=production` e, desde a tarefa 020, recusa `WEB_ORIGIN` de loopback (`localhost`, `*.localhost`, `127.x`, `::1` e variantes) e não sobe. A recusa fica como está. Use um nome que não seja loopback, mas que o Caddy assine pela CA local (os sufixos `.internal`, `.local` e `.home.arpa`, ou IP, não passam pelo Let's Encrypt) e que o seu cliente resolva para a máquina:
 
 ```sh
-export CADDY_SITE_ADDRESS=localhost LEILAO_SECRETS_DIR=<diretório com os 6 arquivos>
-# Porta 80 ocupada no host? CADDY_HTTP_PORT=18080 (o redirecionamento continua indo para https://localhost/).
+export CADDY_SITE_ADDRESS=leilao.internal LEILAO_SECRETS_DIR=<diretório com os 6 arquivos>
+# Porta 80 ocupada no host? CADDY_HTTP_PORT=18080 (o redirecionamento continua indo para https://leilao.internal/).
 docker compose -p leilao-prod --env-file .env --env-file infra/prod.env -f infra/docker-compose.prod.yml build
 docker compose -p leilao-prod --env-file .env --env-file infra/prod.env -f infra/docker-compose.prod.yml --profile ops run --rm migrate
 docker compose -p leilao-prod --env-file .env --env-file infra/prod.env -f infra/docker-compose.prod.yml up -d --no-build --wait
-curl -k https://localhost/api/health/ready
+curl -k --resolve leilao.internal:443:127.0.0.1 https://leilao.internal/api/health/ready
 ```
+
+O `--resolve` dispensa mexer no `/etc/hosts`; para abrir a SPA no navegador, acrescente `127.0.0.1 leilao.internal` ao `/etc/hosts` e remova depois. O compose fixa a rede `borda` em `10.89.0.0/24` (`BORDA_SUBNET`, repassada à API como `TRUSTED_PROXY_CIDR`); se essa faixa colidir com uma rede da sua máquina, exporte outra `BORDA_SUBNET`.
 
 Para limpar: `docker compose -p leilao-prod -f infra/docker-compose.prod.yml down`, e `docker volume rm leilao-prod_pgdata leilao-prod_caddy_data` só na máquina local.
 

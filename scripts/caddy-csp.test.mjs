@@ -102,3 +102,24 @@ test('compose de produção: a API nunca recebe a senha do dono do banco (specs/
   assert.ok(!('DB_PASSWORD' in api.environment));
   assert.ok(!api.secrets.includes('db_password'));
 });
+
+test('compose de produção: borda com subnet fixa e TRUSTED_PROXY_CIDR igual a ela (task 139)', () => {
+  const [config] = composeProd.networks.borda.ipam.config;
+  const subnet = /^\$\{BORDA_SUBNET:-([0-9.]+\/\d+)\}$/.exec(config.subnet);
+  assert.ok(subnet, 'subnet da borda deve vir de BORDA_SUBNET com padrão fixo');
+  const cidr = /^\$\{BORDA_SUBNET:-([0-9.]+\/\d+)\}$/.exec(
+    composeProd.services.api.environment.TRUSTED_PROXY_CIDR,
+  );
+  assert.ok(cidr, 'TRUSTED_PROXY_CIDR deve vir de BORDA_SUBNET');
+  assert.equal(cidr[1], subnet[1]);
+  assert.match(subnet[1], /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/, 'faixa privada');
+  assert.equal(composeProd.networks.dados.ipam, undefined, 'dados não compete pela faixa');
+  assert.equal(composeProd.services.caddy.environment.TRUSTED_PROXY_CIDR, undefined);
+});
+
+test('Caddyfile não confia em X-Forwarded-For do cliente (sem trusted_proxies)', () => {
+  assert.equal(
+    diretivasDoCaddyfile.some((d) => /trusted_proxies/.test(d)),
+    false,
+  );
+});

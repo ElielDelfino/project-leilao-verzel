@@ -18,6 +18,8 @@
 #                       1000, 600, sem quebra de linha); o `config` não acusa a falta.
 #   API_IMAGE, WEB_IMAGE  imagens a usar (prod: ghcr.io/<owner>/leilao-api:<sha> e leilao-web:<sha>,
 #                       com `pull` e `up --no-build`); sem elas, o compose constrói as imagens locais.
+#   BORDA_SUBNET        CIDR da rede `borda` (padrão 10.89.0.0/24), também passado à API como
+#                       TRUSTED_PROXY_CIDR.
 # Só o Caddy publica portas (80 e 443 TCP). Postgres e Redis ficam na rede `dados`, sem saída.
 name: leilao-prod
 
@@ -231,6 +233,9 @@ services:
       POSTGRES_API_USER: ${POSTGRES_API_USER:-leilao_api}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # Rede de onde vem o X-Forwarded-For confiável: a `borda` (a única por onde o Caddy alcança a
+      # API). Só nome e valor, nunca segredo. A API a lê na tarefa 140 para o `trustProxy`.
+      TRUSTED_PROXY_CIDR: ${BORDA_SUBNET:-10.89.0.0/24}
       # Origem pública da SPA (CORS e cookies `Secure`, specs/003 e ADR 0027).
       WEB_ORIGIN: https://${CADDY_SITE_ADDRESS:-teste-verzel.duckdns.org}
       # Caminhos (não os valores) dos 5 segredos da API: ela lê <VAR> ou <VAR>_FILE (ADR 0023). Sem
@@ -370,7 +375,13 @@ services:
     restart: always
 
 networks:
-  borda: {}
+  # Subnet fixa (10.89.0.0/24, fora dos pools padrão do Docker, 172.17-31.0.0/16 e 192.168.0.0/16):
+  # é o que a API confia como proxy (TRUSTED_PROXY_CIDR). Só o Caddy e a API estão nela. Troque a
+  # faixa em BORDA_SUBNET se colidir com a rede da VPS; o CIDR da API segue a mesma variável.
+  borda:
+    ipam:
+      config:
+        - subnet: ${BORDA_SUBNET:-10.89.0.0/24}
   # Sem rota para fora: Postgres e Redis só falam com a API e com os one-shots.
   dados:
     internal: true
