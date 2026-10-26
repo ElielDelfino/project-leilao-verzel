@@ -1,9 +1,16 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { http } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { simularPreferenciaDoSistema } from './apoio/matchMedia';
 import { renderizarApp } from './apoio/renderizarApp';
-import { usuarioLeiloeiro, usuarioLicitante } from './apoio/servidor';
+import {
+  envelopeDeErro,
+  ORIGEM,
+  servidor,
+  usuarioLeiloeiro,
+  usuarioLicitante,
+} from './apoio/servidor';
 
 // Rotas de specs/012 §Rotas ainda como páginas provisórias (tarefa 005). A vitrine e o detalhe
 // do lote consultam a API e têm os próprios testes (test/paginas/vitrine.test.tsx e lote.test.tsx).
@@ -16,7 +23,6 @@ const ROTAS: Array<[string, string, Usuario]> = [
   ['/painel', 'Painel do leiloeiro', usuarioLeiloeiro],
   ['/painel/lotes/novo', 'Novo lote', usuarioLeiloeiro],
   ['/auditoria/0192f0a0-0000-7000-8000-000000000001', 'Auditoria do lote', null],
-  ['/comprovantes/ABC123', 'Comprovante', null],
 ];
 
 describe('rotas', () => {
@@ -26,6 +32,21 @@ describe('rotas', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: titulo })).toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe(`${titulo} · Casa de Leilões`));
+  });
+
+  it('/comprovantes/:codigo consulta a API e mostra título e <h1> do comprovante', async () => {
+    servidor.use(
+      http.get(`${ORIGEM}/api/comprovantes/:codigo`, () => envelopeDeErro('NAO_ENCONTRADO', 404)),
+    );
+    simularPreferenciaDoSistema(false);
+    renderizarApp('/comprovantes/ABC123');
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Comprovante não encontrado' }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.title).toBe('Comprovante não encontrado · Casa de Leilões'),
+    );
   });
 
   it('URL desconhecida mostra "Página não encontrada" dentro do layout', async () => {
