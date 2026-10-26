@@ -11,6 +11,10 @@ import { bancoFalso } from '../../helpers/app-de-teste.js';
 import { BANCO, cadastrar, criarAppDeIdentidade, INFRA_DISPONIVEL, Navegador } from './ambiente.js';
 import pg from 'pg';
 
+const HORA_MS = 3_600_000;
+const depoisDe = (instante: Date, horas: number): Date =>
+  new Date(instante.getTime() + horas * HORA_MS);
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -52,18 +56,22 @@ describe.skipIf(!INFRA_DISPONIVEL)('expurgarRefreshTokens com Postgres real', ()
     try {
       const { resposta } = await cadastrar(new Navegador(ctx.app, '10.9.0.1'));
       const { id } = (resposta.json() as { dados: { usuario: { id: string } } }).dados.usuario;
-      await cliente.query(
-        `update refresh_tokens set expira_em = '2026-01-01T00:00:00Z' where user_id = $1`,
-        [id],
-      );
+      // Causa da instabilidade: todo app que sobe roda um expurgo com o relógio real (void, no
+      // boot) e apagaria um token expirado há mais de 1 dia. Expirado há 23 h ele escapa desse
+      // expurgo, e os instantes abaixo (12 h e 25 h depois) só alcançam tokens de até ~1 h a mais.
+      const expiraEm = new Date(Date.now() - 23 * HORA_MS);
+      await cliente.query(`update refresh_tokens set expira_em = $2 where user_id = $1`, [
+        id,
+        expiraEm,
+      ]);
       const { criarBanco } = await import('../../../src/db/banco.js');
       const banco = criarBanco({ conexao: BANCO.conexao(), aoErroOcioso: () => undefined });
       try {
-        // 12 h depois da expiração fica (folga de 1 dia); 36 h depois é apagado.
-        expect(await expurgarRefreshTokens(banco, new Date('2026-01-01T12:00:00Z'))).toBe(0);
-        expect(
-          await expurgarRefreshTokens(banco, new Date('2026-01-02T12:00:00Z')),
-        ).toBeGreaterThanOrEqual(1);
+        // 12 h depois da expiração fica (folga de 1 dia); 25 h depois é apagado.
+        expect(await expurgarRefreshTokens(banco, depoisDe(expiraEm, 12))).toBe(0);
+        expect(await expurgarRefreshTokens(banco, depoisDe(expiraEm, 25))).toBeGreaterThanOrEqual(
+          1,
+        );
       } finally {
         await banco.encerrar();
       }

@@ -7,6 +7,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { describe, expect, it } from 'vitest';
 
+import { COMANDO_LOCK_TIMEOUT, repetirEmDisputaDeLock } from '../helpers/disputa-de-lock.js';
+import { TIMEOUT_LONGO_MS } from '../helpers/timeouts.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
 
 const AMBIENTE = ambienteDeTeste(process.env);
@@ -54,6 +56,18 @@ async function codigoDaFalha(
     throw erro;
   }
   throw new Error(`o comando deveria ter falhado: ${comando}`);
+}
+
+/** SQLSTATE do TRUNCATE de `lista` numa transação própria, repetida em disputa de lock. */
+async function codigoDoComandoComLock(lista: string): Promise<string | undefined> {
+  return repetirEmDisputaDeLock(`truncate ${lista}`, async () => {
+    let codigo: string | undefined;
+    await emTransacao(async (cliente) => {
+      await cliente.query(COMANDO_LOCK_TIMEOUT);
+      codigo = await codigoDaFalha(cliente, `truncate ${lista}`);
+    });
+    return codigo;
+  });
 }
 
 async function idDe(cliente: pg.Client, comando: string, parametros: unknown[]): Promise<string> {
@@ -348,21 +362,25 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0003: append-only até para o d
     });
   });
 
-  it('TRUNCATE dá 23001 (com as tabelas que as referenciam, para passar da checagem de FK)', async () => {
-    await emTransacao(async (cliente) => {
-      for (const lista of [
-        'lot_seals',
-        'bids, ledger_entries',
+  // Causa da instabilidade: o comando pede ACCESS EXCLUSIVE antes de o trigger recusar, e outros
+  // arquivos escrevendo nas mesmas tabelas travam (55P03) ou entram em deadlock (40P01) com ele.
+  it(
+    'TRUNCATE dá 23001 (com as tabelas que as referenciam, para passar da checagem de FK)',
+    async () => {
+      for (const [lista, esperado] of [
+        ['lot_seals', SQLSTATE.appendOnly],
+        ['bids, ledger_entries', SQLSTATE.appendOnly],
         // receipts.key_id também referencia signing_keys (migration 0005, tarefa 102).
-        'signing_keys, bids, lot_seals, ledger_entries, receipts',
-      ]) {
-        expect(await codigoDaFalha(cliente, `truncate ${lista}`), lista).toBe(SQLSTATE.appendOnly);
+        ['signing_keys, bids, lot_seals, ledger_entries, receipts', SQLSTATE.appendOnly],
+        // Sozinhas, bids e signing_keys param antes, na checagem de FK (feature_not_supported).
+        ['bids', '0A000'],
+        ['signing_keys', '0A000'],
+      ] as const) {
+        expect(await codigoDoComandoComLock(lista), lista).toBe(esperado);
       }
-      // Sozinhas, bids e signing_keys param antes, na checagem de FK (feature_not_supported).
-      expect(await codigoDaFalha(cliente, 'truncate bids')).toBe('0A000');
-      expect(await codigoDaFalha(cliente, 'truncate signing_keys')).toBe('0A000');
-    });
-  });
+    },
+    TIMEOUT_LONGO_MS,
+  );
 });
 
 describe.skipIf(!AMBIENTE.disponivel)('migration 0003: restrições de bids', () => {

@@ -22,6 +22,7 @@ import {
   sincronizarSenhaDoPapelDaApi,
 } from '../../src/db/migrate.js';
 import { verificadorConfere, verificadorScram } from '../../src/db/scram.js';
+import { TIMEOUT_LONGO_MS } from '../helpers/timeouts.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
 
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
@@ -174,13 +175,13 @@ describe('descreverFalha', () => {
 describe.skipIf(!AMBIENTE.disponivel)('com Postgres', () => {
   beforeAll(async () => {
     await comCliente(admin(), (cliente) => cliente.query(`create database ${NOME_DO_BANCO}`));
-  });
+  }, TIMEOUT_LONGO_MS);
 
   afterAll(async () => {
     await comCliente(admin(), (cliente) =>
       cliente.query(`drop database if exists ${NOME_DO_BANCO} with (force)`),
     );
-  });
+  }, TIMEOUT_LONGO_MS); // CREATE/DROP DATABASE de outro verify no mesmo Postgres passam de 10 s
 
   describe('pnpm db:migrate (aplicarMigrations)', () => {
     it('aplica do zero, mesmo com duas execuções simultâneas', async () => {

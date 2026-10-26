@@ -9,6 +9,8 @@ import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { COMANDO_LOCK_TIMEOUT, repetirEmDisputaDeLock } from '../helpers/disputa-de-lock.js';
+import { TIMEOUT_LONGO_MS } from '../helpers/timeouts.js';
 import { criarLoteELance, inserirChaveDeTeste } from '../helpers/lance-por-sql.js';
 import { inserirLote, inserirUsuario } from '../helpers/lotes-por-sql.js';
 import { ambienteDeTeste } from './ambiente-de-teste.js';
@@ -206,27 +208,41 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0005: receipts e unicidade por 
     });
   });
 
-  it('como dono: UPDATE, DELETE e TRUNCATE dão 23001 pelo trigger', async () => {
-    const c = await comprovanteNovo();
-    await emTransacao(async (cliente) => {
-      await cliente.query(INSERIR_COMPROVANTE, parametros(c));
-      const append = (op: string): Falha => ({
-        codigo: SQLSTATE.appendOnly,
-        restricao: undefined,
-        mensagem: `a tabela receipts é append-only: ${op} não é permitido`,
-      });
+  it(
+    'como dono: UPDATE, DELETE e TRUNCATE dão 23001 pelo trigger',
+    async () => {
+      const c = await comprovanteNovo();
+      await emTransacao(async (cliente) => {
+        await cliente.query(INSERIR_COMPROVANTE, parametros(c));
+        const append = (op: string): Falha => ({
+          codigo: SQLSTATE.appendOnly,
+          restricao: undefined,
+          mensagem: `a tabela receipts é append-only: ${op} não é permitido`,
+        });
 
-      expect(
-        await falhaDe(cliente, 'update receipts set valor_centavos = 100 where lote_id = $1', [
-          c.loteId,
-        ]),
-      ).toEqual(append('UPDATE'));
-      expect(await falhaDe(cliente, 'delete from receipts where lote_id = $1', [c.loteId])).toEqual(
-        append('DELETE'),
-      );
-      expect(await falhaDe(cliente, 'truncate receipts')).toEqual(append('TRUNCATE'));
-    });
-  });
+        expect(
+          await falhaDe(cliente, 'update receipts set valor_centavos = 100 where lote_id = $1', [
+            c.loteId,
+          ]),
+        ).toEqual(append('UPDATE'));
+        expect(
+          await falhaDe(cliente, 'delete from receipts where lote_id = $1', [c.loteId]),
+        ).toEqual(append('DELETE'));
+      });
+      // Em transação própria, sem INSERT antes (RowExclusive → AccessExclusive no mesmo tx é
+      // receita de deadlock), com lock_timeout curto e repetição em disputa de lock.
+      const codigo = await repetirEmDisputaDeLock('truncate receipts como dono', async () => {
+        let obtido: string | undefined;
+        await emTransacao(async (cliente) => {
+          await cliente.query(COMANDO_LOCK_TIMEOUT);
+          obtido = (await falhaDe(cliente, 'truncate receipts')).codigo;
+        });
+        return obtido;
+      });
+      expect(codigo).toBe(SQLSTATE.appendOnly);
+    },
+    TIMEOUT_LONGO_MS,
+  );
 
   it.each([
     ['receipts_codigo_publico_formato', { codigo: 'curto' }],

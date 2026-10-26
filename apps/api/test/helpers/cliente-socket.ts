@@ -7,7 +7,7 @@ import { validarAckDeEntrada } from '../modules/tempo-real/contrato-asyncapi.js'
 
 export const ORIGEM_DO_TESTE = 'http://localhost:15173';
 /** Timeout dos testes que fazem rajada, espera ou reconexão (o padrão de 5 s não basta). */
-export const TIMEOUT_LONGO_MS = 90_000;
+export { TIMEOUT_LONGO_MS } from './timeouts.js';
 export const ESPERA_MS = 10_000;
 export const SILENCIO_MS = 300;
 const INTERVALO_PADRAO_MS = 10;
