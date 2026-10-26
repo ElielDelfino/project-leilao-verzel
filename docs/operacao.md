@@ -1,6 +1,6 @@
 # Operação da VPS (runbook)
 
-Fonte: specs/014 (§Servidor, §Segredos, §Backup), ADR 0033 (VPS Hostinger) e ADR 0034 (backup e uptime fora da entrega). Compose e segredos: [deploy.md](deploy.md); nomes e formatos: [variaveis-de-ambiente.md](variaveis-de-ambiente.md). Onde este texto e a specs/014 divergirem, vale a spec.
+Fonte: specs/014 (§Servidor, §Segredos, §Backup), ADR 0033 (VPS Hostinger) e ADR 0034 (backup e uptime fora da entrega). Compose, segredos e deploy: [deploy.md](deploy.md) (instalação do `deploy-ssh`, da chave de deploy e dos secrets do GitHub em [§Instalação na VPS e no GitHub](deploy.md#instalação-na-vps-e-no-github)); nomes e formatos: [variaveis-de-ambiente.md](variaveis-de-ambiente.md). Onde este texto e a specs/014 divergirem, vale a spec.
 
 Quem executa tudo aqui é o humano. Nenhum agente acessa a VPS. Host: `teste-verzel.duckdns.org` (Ubuntu 24.04 LTS, 1 vCPU, 4 GB, IPv4 e IPv6). Administrador: `eliel` (uid 1000, sudo). CI: `deploy` (fora do grupo `sudo`, no grupo `docker`).
 
@@ -187,7 +187,7 @@ EOF
 sudo /opt/leilao/bin/materializar-segredos.sh
 ```
 
-Depois, recrie os serviços que usam o segredo com `up -d --force-recreate` seguido dos nomes da coluna "Recriar" (por exemplo `up -d --force-recreate api`; o `up -d` sozinho não recria: o bind mount do secret continua no arquivo antigo até o container ser recriado), usando os mesmos `-p`, `--env-file` e `-f` do deploy (§7). Consequências (ADR 0023 e 0031):
+Depois, recrie os serviços que usam o segredo com `up -d --force-recreate` seguido dos nomes da coluna "Recriar" (por exemplo `up -d --force-recreate api`; o `up -d` sozinho não recria: o bind mount do secret continua no arquivo antigo até o container ser recriado), usando o `$COMPOSE` de §7, que já traz os `-p`, `--env-file` e `-f` do deploy e as imagens do sha no ar (`sudo sh -c "$COMPOSE up -d --no-build --pull never --force-recreate api"`). Consequências (ADR 0023 e 0031):
 
 | Segredo | Recriar | Consequência |
 |---|---|---|
@@ -206,11 +206,22 @@ Na entrega há só um `pg_dump -Fc` manual do banco `leilao`, feito uma vez pelo
 
 O dump sai pelo socket local do container do Postgres (`docker compose exec -T postgres`, sem senha no argv nem no ambiente) e é gravado em `/var/backups/leilao/` (root, 700), fora dos volumes do Docker, com modo 600 (`umask 077`). A saída do `pg_dump` vai direto ao arquivo, nunca ao terminal. O dump contém os e-mails e os hashes de senha dos usuários: não o copie para lugar compartilhado.
 
-Os `-p`, `--env-file` e `-f` são os do deploy (specs/014 §Produção). O diretório do compose na VPS é definido pelo `deploy-ssh` (tarefa 131); até ela, use o do comando abaixo e ajuste se mudar:
+Os `-p`, `--env-file` e `-f` são os do deploy (specs/014 §Produção). O `deploy-ssh` (tarefa 131, instalado por [deploy.md §Instalação na VPS e no GitHub](deploy.md#instalação-na-vps-e-no-github)) guarda os arquivos do compose em `/home/deploy/leilao/releases/<sha>/`, e `/home/deploy/leilao/atual` é o link para a versão no ar: é esse o diretório do compose, nunca `/opt/leilao` (lá ficam só `bin/` e o `.env.local`). Sem nenhum deploy concluído, o `atual` não existe e não há o que copiar: pare aqui.
+
+**Permissões:** o `deploy-ssh` roda como `deploy` com `umask 077`, então `/home/deploy/leilao` e cada `releases/<sha>/` são 700 do `deploy` (e o home dele já é 750 no Ubuntu 24.04). O `eliel` não lê esse diretório e não está no grupo `docker`, por isso cada comando abaixo que toca o diretório ou o Docker roda inteiro dentro de `sudo` (o root resolve o link e lê os arquivos). Não afrouxe as permissões do `/home/deploy/leilao` nem ponha o `eliel` no grupo `docker` para dispensar o `sudo`; e não use `sudo -u deploy`, que não grava em `/var/backups/leilao` (700 root). As variáveis `R`, `SHA` e `COMPOSE` são só texto no shell do `eliel`: quem lê o diretório é o `sudo`.
+
+`API_IMAGE` e `WEB_IMAGE` repetem as imagens do sha no ar, como o `deploy-ssh` faz: o `exec` não depende delas, mas o mesmo `$COMPOSE` serve ao recreate de §6, e sem elas o compose usaria `leilao-api:local` e tentaria construir a imagem na VPS (ADR 0033, item 5.1).
 
 ```sh
-cd /opt/leilao
-COMPOSE='docker compose -p leilao-prod --env-file .env --env-file infra/prod.env -f infra/docker-compose.prod.yml'
+R=/home/deploy/leilao/atual
+SHA="$(basename "$(sudo readlink "$R")")"
+printf '%s\n' "$SHA"      # 40 caracteres hex; vazio ou erro = sem deploy concluído: pare
+COMPOSE="env API_IMAGE=ghcr.io/elieldelfino/leilao-api:$SHA WEB_IMAGE=ghcr.io/elieldelfino/leilao-web:$SHA \
+docker compose -p leilao-prod --env-file \"$R/.env\" --env-file \"$R/infra/prod.env\" \
+-f \"$R/infra/docker-compose.prod.yml\""
+
+# O compose da release é legível pelo root e o Postgres está de pé (sem imprimir o modelo)
+sudo sh -c "$COMPOSE config --quiet && $COMPOSE ps postgres"
 
 # Dump: /var/backups/leilao/leilao-AAAAMMDDTHHMMZ.dump, data em UTC
 sudo sh -c "umask 077 && $COMPOSE exec -T postgres pg_dump -Fc -U leilao -d leilao \
@@ -232,7 +243,7 @@ sudo sh -c "$COMPOSE exec -T postgres pg_restore --list < \"\$1\" > /dev/null" s
 
 ## 8. Registro de verificação (saídas coladas, sem segredos)
 
-Preencha com a data (UTC) e a saída de cada comando de §4, §5 e §7. Nunca cole valores de `.env.local` ou de `/run/leilao/secrets/`.
+Preencha com a data (UTC) e a saída de cada comando de §4, §5 e §7 e dos passos 6 e 7 de [deploy.md §Instalação na VPS e no GitHub](deploy.md#instalação-na-vps-e-no-github). Nunca cole valores de `.env.local` ou de `/run/leilao/secrets/`, nem a chave `deploy_key`.
 
 | Verificação | Data (UTC) | Resultado |
 |---|---|---|
@@ -245,6 +256,10 @@ Preencha com a data (UTC) e a saída de cada comando de §4, §5 e §7. Nunca co
 | segredos: `.env.local` 600 root; `/run/leilao/secrets` 700, 6 arquivos 600 uid 1000 com 43 bytes | | |
 | depois de `sudo reboot`: `leilao-segredos` ativo antes do Docker e `/api/health/ready` 200 em até 5 min | | |
 | backup manual: dump 600 em `/var/backups/leilao/` e `pg_restore --list` com saída 0 | | |
+| chave de deploy não abre shell: `ssh -i deploy_key deploy@<host>` sem comando, `id`, `backup` e `'deploy abc'` mostram "comando recusado" e saída ≠ 0 (deploy.md, passo 6) | | |
+| push na `main`: run do Deploy verde em até 10 min depois do CI verde; `docker compose images` na VPS mostra `leilao-api:<sha>` e `leilao-web:<sha>` do commit (deploy.md, passo 6) | | |
+| `/api/health/ready` quebrado de propósito: o `deploy <sha>` sai ≠ 0, a versão anterior volta sozinha, `/ready` responde 200 de novo e o job falha (deploy.md, passo 7) | | |
+| log do run do Deploy: mostra `nenhum segredo nas saídas do Docker` e nenhum valor de segredo, da `VPS_SSH_KEY` ou do `VPS_KNOWN_HOSTS` | | |
 
 ```text
 (cole aqui as saídas, uma por bloco, com a data)
