@@ -1,5 +1,14 @@
-# Imagem da API (specs/014 §Produção, ADR 0013). Contexto de build: raiz do repositório.
-#   docker build -f apps/api/Dockerfile -t leilao-api:<versão>-alpine .
+# Imagem da API (specs/014 §Produção, ADR 0033). Contexto de build: raiz do repositório, mais o
+# contexto nomeado `migrations` (database/postgres/migrations, que o .dockerignore da raiz deixa
+# de fora):
+#   docker build -f apps/api/Dockerfile \
+#       --build-context migrations=database/postgres/migrations \
+#       -t leilao-api:<versão>-alpine .
+# Sem o --build-context, o COPY --from=migrations tenta baixar uma imagem com esse nome e o build
+# falha: nunca sai uma imagem sem as migrations. O compose de produção passa o contexto sozinho
+# (build.additional_contexts).
+# A mesma imagem roda a API (CMD padrão) e os one-shots `migrate` e `seed` do compose de produção
+# (node dist/db/migrate.js e node dist/db/seed.js).
 # Estágios: pnpm (binário) → deps (só lockfile) → build (tsc + pnpm deploy --prod) → runtime.
 # Ordem para o cache: a camada de dependências só é refeita quando o pnpm-lock.yaml muda.
 
@@ -26,6 +35,8 @@ COPY        apps/api/package.json apps/api/
 COPY        apps/web/package.json apps/web/
 COPY        packages/contracts/package.json packages/contracts/
 RUN         ["pnpm", "install", "--offline", "--frozen-lockfile", "--ignore-scripts"]
+# @leilao/contracts: só tipos (import type), lidos pelo tsc no build e apagados do dist/.
+COPY        packages/contracts/ packages/contracts/
 COPY        apps/api/ apps/api/
 RUN         ["pnpm", "--filter", "@leilao/api", "run", "build"]
 # Diretório autônomo só com as dependências de produção da API (pnpm.io/cli/deploy). Sem
@@ -36,11 +47,16 @@ RUN         ["pnpm", "--filter", "@leilao/api", "deploy", "--prod", "--ignore-sc
 FROM        node:24.22.1-alpine3.24 AS runtime
 # Atualizações de segurança da base Alpine.
 RUN         ["apk", "upgrade", "--no-cache"]
-WORKDIR     /app
+# Mesmo layout do repositório (/app = raiz): o runner de migrations procura a pasta 4 níveis acima
+# de dist/db/ (PASTA_DAS_MIGRATIONS em apps/api/src/db/migrate.ts), isto é, em
+# /app/database/postgres/migrations.
+WORKDIR     /app/apps/api
 # Dono root e só leitura para o usuário node: o processo não altera o próprio código.
 COPY        --from=build  /out/package.json  ./package.json
 COPY        --from=build  /out/node_modules  ./node_modules
 COPY        --from=build  /out/dist          ./dist
+# SQL e meta/_journal.json lidos pelo migrator do Drizzle (forward-only, ADR 0001).
+COPY        --from=migrations  /  /app/database/postgres/migrations/
 ENV         NODE_ENV=production \
             API_PORT=13000 \
             LOG_LEVEL=info \

@@ -1,8 +1,13 @@
-# Caddy de produção (specs/014 §Produção, ADR 0013 e 0020). Embutido na imagem da web
+# Caddy de produção (specs/014 §Produção, ADR 0024 e 0033). Embutido na imagem da web
 # (apps/web/Dockerfile), junto com a SPA buildada em /srv.
 # Variáveis lidas no início (placeholders {$VAR}, avaliados ao carregar o arquivo):
-#   CADDY_SITE_ADDRESS  host público (prod: <ip-com-hifens>.sslip.io; padrão localhost, com a CA local)
+#   CADDY_SITE_ADDRESS  host público (prod: teste-verzel.duckdns.org, de infra/prod.env, com
+#                       certificado do Let's Encrypt por HTTP-01 na porta 80; padrão localhost,
+#                       com a CA local do Caddy)
 #   API_PORT            porta da API na rede interna do compose (padrão 13000)
+# HTTPS automático: com um host no endereço do site, o Caddy escuta em :80 e :443 em todas as
+# interfaces (IPv4 e IPv6) e responde no :80 com redirecionamento permanente para https://
+# (ADR 0033, item 2). Nada a configurar aqui para isso.
 {
 	# Sem API de administração: nada na rede do contêiner reconfigura o Caddy. Trocar a config
 	# exige reiniciar o contêiner (o deploy já recria os serviços).
@@ -11,7 +16,7 @@
 	# Com localhost o Caddy emite pela CA local; não tenta instalar a raiz no trust store.
 	skip_install_trust
 	servers {
-		# Sem HTTP/3 (ADR 0024): o firewall da VM libera só 80 e 443 TCP, e o compose não publica 443/udp.
+		# Sem HTTP/3 (ADR 0024): o UFW da VPS libera só 80 e 443 TCP, e o compose não publica 443/udp.
 		protocols h1 h2
 		# Cabeçalhos em até 10 s (slowloris) e conexão keep-alive ociosa por até 2 min.
 		# Sem read_body: ele vira o ReadTimeout do Go, cujo prazo continua valendo na conexão
@@ -26,7 +31,7 @@
 }
 
 {$CADDY_SITE_ADDRESS:localhost} {
-	# gzip e não zstd: o encoder zstd gasta mais memória, e o limite do contêiner é 64 MB (ADR 0024).
+	# gzip e não zstd: o encoder zstd gasta mais memória, e o limite do contêiner é 128 MB (ADR 0033).
 	encode gzip
 
 	# Headers de segurança em todas as respostas (SPA e proxy). A SPA não tem script nem estilo

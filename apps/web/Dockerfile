@@ -23,6 +23,8 @@ COPY        apps/api/package.json apps/api/
 COPY        apps/web/package.json apps/web/
 COPY        packages/contracts/package.json packages/contracts/
 RUN         ["pnpm", "install", "--offline", "--frozen-lockfile", "--ignore-scripts"]
+# @leilao/contracts: só tipos (import type), lidos pelo tsc no build e apagados pelo Vite.
+COPY        packages/contracts/ packages/contracts/
 COPY        apps/web/ apps/web/
 # tsc --noEmit && vite build: gera apps/web/dist.
 RUN         ["pnpm", "--filter", "@leilao/web", "run", "build"]
