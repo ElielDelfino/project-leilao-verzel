@@ -1,0 +1,223 @@
+# Deploy da main na VPS (task 131; specs/014 §CI/CD, ADR 0017, ADR 0033 item 5 e ADR 0034 item 3).
+# Roda só depois do CI verde do mesmo commit num push na main (workflow_run), nunca em pull
+# request nem com pull_request_target. Jobs:
+#   guarda   só a ponta da main publica: se o head_sha já não é o último commit da main (outro push
+#            chegou antes), o run termina verde com um aviso e não publica nada;
+#   imagens  build linux/amd64 das duas imagens e push no GHCR como
+#            ghcr.io/<owner>/leilao-{api,web}:<sha> (único job com packages: write);
+#   deploy   SSH para deploy@<VPS_HOST> com a chave de deploy e o known_hosts fixado; a chave só
+#            executa /opt/leilao/bin/deploy-ssh (comando forçado), que recebe `deploy <sha>` e, no
+#            stdin, um tar com o .env, o infra/prod.env e o infra/docker-compose.prod.yml do commit.
+#            Antes do SSH ele confere de novo a ponta da main: um "Re-run failed jobs" reaproveita
+#            a saída da guarda do run antigo e não pode publicar um sha velho.
+# Nenhum segredo da aplicação passa por aqui: eles ficam só na VPS (/opt/leilao/.env.local). No
+# GitHub ficam os secrets VPS_SSH_KEY e VPS_KNOWN_HOSTS e a variável VPS_HOST (docs/deploy.md).
+# Pacotes do GHCR públicos (ADR 0033 item 5.6): a VPS não guarda credencial do registry.
+# Actions fixadas por SHA de commit, com a versão no comentário; o Dependabot as atualiza.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# Nada por padrão; cada job pede só o que usa.
+permissions: {}
+
+# Um deploy por vez e nenhum cancelado no meio (o deploy-ssh também trava na VPS).
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+defaults:
+  run:
+    # bash com -e e -o pipefail.
+    shell: bash
+
+env:
+  # Commit que o CI testou (o GITHUB_SHA de um workflow_run é o último da branch padrão).
+  SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  guarda:
+    name: Só a ponta da main publica
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      ponta: ${{ steps.ponta.outputs.ponta }}
+    steps:
+      # GET /repos/{owner}/{repo}/commits/heads/main: o último commit da main agora.
+      - name: O head_sha ainda é a ponta da main?
+        id: ponta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head_sha fora do formato"; exit 1; }
+          ponta_da_main="$(gh api "repos/${GITHUB_REPOSITORY}/commits/heads/main" --jq .sha)"
+          if [[ $ponta_da_main == "$SHA" ]]; then
+            echo "ponta=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::${SHA} não é mais a ponta da main (${ponta_da_main}); nada a publicar"
+            echo "ponta=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  imagens:
+    name: Imagens linux/amd64 no GHCR
+    needs: guarda
+    if: >-
+      needs.guarda.outputs.ponta == 'true' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout do commit testado
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      # O GHCR exige nome em minúsculas; o deploy-ssh espera ghcr.io/elieldelfino/leilao-{api,web}.
+      - name: Nomes das imagens
+        id: nomes
+        env:
+          DONO: ${{ github.repository_owner }}
+        run: |
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head_sha fora do formato"; exit 1; }
+          [[ $(git rev-parse HEAD) == "$SHA" ]] || { echo "::error::o checkout não é o commit do CI"; exit 1; }
+          dono="${DONO,,}"
+          {
+            echo "api=ghcr.io/${dono}/leilao-api:${SHA}"
+            echo "web=ghcr.io/${dono}/leilao-web:${SHA}"
+          } >>"$GITHUB_OUTPUT"
+
+      # Driver docker-container: necessário para o cache type=gha.
+      - name: Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # GITHUB_TOKEN efêmero do job; o login-action faz logout no fim do job.
+      - name: Login no GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Contexto = checkout (não o contexto Git da action, que seria o GITHUB_SHA da branch padrão).
+      # As migrations entram pelo contexto nomeado `migrations` (apps/api/Dockerfile).
+      - name: Imagem da API
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          build-contexts: migrations=database/postgres/migrations
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.nomes.outputs.api }}
+          # Liga o pacote do GHCR a este repositório.
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=leilao-api
+          cache-to: type=gha,mode=max,scope=leilao-api
+
+      - name: Imagem da web (Caddy com a SPA)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.nomes.outputs.web }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=leilao-web
+          cache-to: type=gha,mode=max,scope=leilao-web
+
+  deploy:
+    name: deploy <sha> na VPS
+    needs: [guarda, imagens]
+    if: needs.guarda.outputs.ponta == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # De novo aqui: "Re-run failed jobs" de um run antigo reaproveita a saída da guarda.
+      - name: O head_sha ainda é a ponta da main?
+        id: ponta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ponta_da_main="$(gh api "repos/${GITHUB_REPOSITORY}/commits/heads/main" --jq .sha)"
+          if [[ $ponta_da_main == "$SHA" ]]; then
+            echo "ponta=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::${SHA} não é mais a ponta da main (${ponta_da_main}); nada a publicar"
+            echo "ponta=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout do commit testado
+        if: steps.ponta.outputs.ponta == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      # Exatamente os 3 arquivos que o deploy-ssh aceita, como arquivos comuns.
+      - name: Pacote do compose
+        if: steps.ponta.outputs.ponta == 'true'
+        run: |
+          [[ $(git rev-parse HEAD) == "$SHA" ]] || { echo "::error::o checkout não é o commit do CI"; exit 1; }
+          tar -cf "$RUNNER_TEMP/pacote.tar" --owner=0 --group=0 --numeric-owner -- \
+            .env infra/prod.env infra/docker-compose.prod.yml
+          tar -tvf "$RUNNER_TEMP/pacote.tar"
+
+      # Os valores só passam pelo printf (builtin do bash): não entram em argv nem no log.
+      - name: Chave de deploy e known_hosts
+        if: steps.ponta.outputs.ponta == 'true'
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [[ -z $VPS_SSH_KEY || -z $VPS_KNOWN_HOSTS ]]; then
+            echo "::error::faltam os secrets VPS_SSH_KEY e VPS_KNOWN_HOSTS (docs/deploy.md)"
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$VPS_SSH_KEY" >"$RUNNER_TEMP/ssh/deploy_key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" >"$RUNNER_TEMP/ssh/known_hosts"
+
+      # Chave de host fixada pelo VPS_KNOWN_HOSTS (StrictHostKeyChecking=yes, sem o known_hosts do
+      # runner). O comando forçado ignora qualquer outro pedido; a saída é a do deploy-ssh, que só
+      # imprime nomes de passos, de segredos e de fontes.
+      - name: deploy <sha>
+        if: steps.ponta.outputs.ponta == 'true'
+        env:
+          VPS_HOST: ${{ vars.VPS_HOST }}
+        run: |
+          if [[ ! $VPS_HOST =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+            echo "::error::variável VPS_HOST ausente ou fora do formato (docs/deploy.md)"
+            exit 1
+          fi
+          ssh -T -i "$RUNNER_TEMP/ssh/deploy_key" \
+            -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+            -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            "deploy@${VPS_HOST}" "deploy ${SHA}" <"$RUNNER_TEMP/pacote.tar"
+
+      - name: Apagar a chave do runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ssh"
