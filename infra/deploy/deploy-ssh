@@ -1,0 +1,371 @@
+#!/bin/bash
+# Comando forçado da chave de deploy (task 131; specs/014 §CI/CD, ADR 0033 item 5 e ADR 0034
+# item 3). Instalado pelo administrador em /opt/leilao/bin/deploy-ssh (root:root, 755), ao lado de
+# verificar-vazamento.sh, e chamado só pelo sshd, pela linha do ~deploy/.ssh/authorized_keys
+# (infra/deploy/authorized_keys.exemplo):
+#   command="/opt/leilao/bin/deploy-ssh",restrict ssh-ed25519 AAAA... deploy@github-actions
+# Roda como o usuário `deploy` (grupo docker, que equivale a root: docs/operacao.md). O pedido
+# vem de SSH_ORIGINAL_COMMAND e só dois são aceitos:
+#   deploy <sha>  sha de 40 caracteres hex minúsculos; o stdin traz um tar com exatamente .env,
+#                 infra/prod.env e infra/docker-compose.prod.yml do commit (deploy.yml)
+#   rollback      volta para a versão anterior registrada
+# Qualquer outra coisa (sessão sem comando, `id`, `backup`, sha inválido, argumento a mais) sai
+# com código 1 antes de executar qualquer comando.
+#
+# deploy <sha>, nesta ordem (para no primeiro erro):
+#   1. pacote do stdin (até 1 MiB em até 60 s, tar sem compressão, só os 3 arquivos comuns, cada
+#      um com até 1 MiB) num diretório provisório;
+#   2. o compose resolvido tem de usar API_IMAGE e WEB_IMAGE (ghcr.io/<owner>/leilao-{api,web}:<sha>);
+#   3. `docker compose pull` e as duas imagens presentes (nunca há build na VPS: ADR 0033 item 5.1);
+#   4. os 6 arquivos de segredo existem, são arquivos comuns e não vazios, legíveis pelo uid 1000;
+#   5. `swapon --show` mostra swap ativa;
+#   6. migrations no one-shot (`--profile ops run --rm -T --pull never migrate`);
+#   7. `up -d --no-build --pull never --remove-orphans`;
+#   8. https://<host>/api/health/ready 200 por até 60 s e https://<host>/ 200;
+#   9. verificar-vazamento.sh (specs/014 §Verificação de vazamento);
+#  10. o diretório provisório vira releases/<sha>, `atual` aponta para ele e `anterior` para a
+#      versão que estava no ar; imagens e releases fora dessas duas são removidas.
+# Falha nos passos 1 a 6: a versão no ar não muda e o script sai 1. Falha nos passos 7 a 9: volta
+# para a versão que estava no ar (o compose e as imagens dela, intactos), confere o health e sai 1;
+# no primeiro deploy, sem versão no ar, só sai 1. O rollback não desfaz migrations (specs/014
+# §CI/CD). O passo 3 vem antes do 4 porque o `deploy` não lê /run/leilao/secrets (700 root): quem
+# confere os arquivos é um container descartável da imagem da API, sem rede, que os monta como o
+# uid 1000.
+#
+# Estado (padrão ~deploy/leilao): releases/<sha>/ e os links `atual` e `anterior` para elas. O
+# diretório do compose para comandos manuais é <estado>/atual (docs/deploy.md). Resíduos de uma
+# execução morta (releases/.novo.* e releases/.pacote.*) são apagados no início, já com a trava.
+#
+# Queda do SSH ou cancelamento do job no meio: SIGHUP e SIGPIPE são ignorados (também pelos
+# processos filhos) e a saída passa por dois repassadores que, quando o cliente some, continuam
+# lendo e descartam o resto. Assim nenhuma escrita falha, o fluxo vai até o fim e uma falha
+# depois do `up` ainda volta para a versão no ar.
+#
+# Variáveis só para os testes (scripts/deploy-ssh.test.mjs): LEILAO_DEPLOY_DIR, LEILAO_SECRETS_DIR,
+# LEILAO_SECRETS_UID, LEILAO_REGISTRO, LEILAO_HEALTH_TIMEOUT, LEILAO_HEALTH_INTERVALO e
+# LEILAO_PACOTE_TIMEOUT. O cliente SSH não as define: o AcceptEnv do OpenSSH não aceita nenhuma
+# variável por padrão (o sshd_config do Ubuntu libera só LANG e LC_*, e o LC_ALL=C abaixo anula
+# essas), e o PermitUserEnvironment no (padrão) ignora ~/.ssh/environment e environment= no
+# authorized_keys.
+set -euo pipefail
+trap '' HUP PIPE
+export LC_ALL=C
+umask 077
+
+recusar() {
+  printf 'deploy-ssh: comando recusado; aceitos: "deploy <sha de 40 hex>" e "rollback"\n' >&2 || true
+  exit 1
+}
+
+# O pedido é validado antes de qualquer outro comando.
+[[ $# -eq 0 ]] || recusar
+PEDIDO="${SSH_ORIGINAL_COMMAND-}"
+SHA=''
+if [[ $PEDIDO =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
+  ACAO=deploy
+  SHA="${BASH_REMATCH[1]}"
+elif [[ $PEDIDO == rollback ]]; then
+  ACAO=rollback
+else
+  recusar
+fi
+readonly ACAO SHA
+
+readonly PROJETO=leilao-prod
+readonly REGISTRO="${LEILAO_REGISTRO:-ghcr.io/elieldelfino}"
+readonly ESTADO="${LEILAO_DEPLOY_DIR:-$HOME/leilao}"
+readonly SEGREDOS="${LEILAO_SECRETS_DIR:-/run/leilao/secrets}"
+readonly DONO_DOS_SEGREDOS="${LEILAO_SECRETS_UID:-1000}"
+readonly ESPERA_DO_HEALTH="${LEILAO_HEALTH_TIMEOUT:-60}"
+readonly INTERVALO_DO_HEALTH="${LEILAO_HEALTH_INTERVALO:-2}"
+readonly LIMITE_DO_PACOTE=1048576
+readonly LIMITE_POR_ARQUIVO=1048576
+# Um cliente parado não segura a trava: o pacote tem de chegar inteiro neste prazo.
+readonly ESPERA_DO_PACOTE="${LEILAO_PACOTE_TIMEOUT:-60}"
+readonly NOMES_DOS_SEGREDOS=(db_password db_api_password redis_password jwt_secret
+  pseudonym_hmac_key ed25519_private_key)
+# Em ordem de `LC_ALL=C sort`, para comparar com a lista do tar.
+readonly ARQUIVOS_DO_PACOTE=(.env infra/docker-compose.prod.yml infra/prod.env)
+readonly FORMA_DO_SHA='^[0-9a-f]{40}$'
+readonly FORMA_DO_HOST='^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+AQUI="$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+readonly VERIFICAR_VAZAMENTO="$AQUI/verificar-vazamento.sh"
+# Diretório provisório do pacote recebido (vira releases/<sha> só se o deploy der certo).
+readonly NOVA="$ESTADO/releases/.novo.$$"
+
+TEMPORARIOS=()
+limpar() { [[ ${#TEMPORARIOS[@]} -eq 0 ]] || rm -rf -- "${TEMPORARIOS[@]}"; }
+trap limpar EXIT
+
+# Com o cliente fora, escrever não pode derrubar o script (o repassador já evita o EPIPE).
+log() { printf 'deploy-ssh: %s\n' "$*" || true; }
+falhar() {
+  printf 'deploy-ssh: %s\n' "$*" >&2 || true
+  exit 1
+}
+
+# Repassa o pipe para a saída original; se o cliente sumir, continua lendo e descarta, para que
+# nem o script nem o docker recebam EPIPE.
+repassar() {
+  cat 2>/dev/null || true
+  cat >/dev/null
+}
+
+imagem() { printf '%s/leilao-%s:%s' "$REGISTRO" "$1" "$2"; }
+release() { printf '%s/releases/%s' "$ESTADO" "$1"; }
+
+# Compose de um diretório de release (mesmos -p, --env-file e -f do runbook), com as imagens do sha.
+compose_de() {
+  local dir=$1 sha=$2
+  shift 2
+  API_IMAGE="$(imagem api "$sha")" WEB_IMAGE="$(imagem web "$sha")" \
+    docker compose -p "$PROJETO" --env-file "$dir/.env" --env-file "$dir/infra/prod.env" \
+    -f "$dir/infra/docker-compose.prod.yml" "$@" </dev/null
+}
+
+# sha para o qual o link aponta, ou vazio.
+sha_de() {
+  local alvo
+  alvo="$(readlink -- "$ESTADO/$1" 2>/dev/null)" || return 0
+  alvo="${alvo##*/}"
+  if [[ $alvo =~ $FORMA_DO_SHA && -d $(release "$alvo") ]]; then printf '%s' "$alvo"; fi
+}
+
+apontar() {
+  ln -sfn -- "releases/$2" "$ESTADO/.$1.novo"
+  mv -fT -- "$ESTADO/.$1.novo" "$ESTADO/$1"
+}
+
+# Host público (CADDY_SITE_ADDRESS do infra/prod.env do diretório, o mesmo que o Caddy usa).
+host_de() {
+  local linha host
+  linha="$(grep -E '^CADDY_SITE_ADDRESS=' -- "$1/infra/prod.env" | tail -n 1)" || return 1
+  host="${linha#*=}"
+  [[ $host =~ $FORMA_DO_HOST ]] || return 1
+  printf '%s' "$host"
+}
+
+# ---------------------------------------------------------------- passos do deploy
+
+# O tar sempre lê pelo stdin (`-f -`): de um arquivo, o GNU tar detectaria e abriria um pacote
+# comprimido sozinho; pelo stdin, ele o recusa.
+receber_pacote() {
+  local pacote="$ESTADO/releases/.pacote.$$.tar" tamanho lista esperada modo tamanho_do_membro
+  local arquivo resto
+  TEMPORARIOS+=("$NOVA" "$pacote")
+  mkdir -- "$NOVA"
+  timeout "$ESPERA_DO_PACOTE" head -c "$((LIMITE_DO_PACOTE + 1))" >"$pacote" ||
+    falhar "o pacote não chegou em $ESPERA_DO_PACOTE s"
+  tamanho="$(stat -c '%s' -- "$pacote")"
+  [[ $tamanho -gt 0 ]] || falhar "stdin vazio: o deploy precisa do pacote (tar) do commit"
+  [[ $tamanho -le $LIMITE_DO_PACOTE ]] || falhar "pacote maior que $LIMITE_DO_PACOTE bytes"
+  lista="$(tar -tf - <"$pacote" 2>/dev/null | sort)" ||
+    falhar "o stdin não é um tar válido (sem compressão)"
+  esperada="$(printf '%s\n' "${ARQUIVOS_DO_PACOTE[@]}")"
+  [[ $lista == "$esperada" ]] ||
+    falhar "o pacote tem de conter exatamente: ${ARQUIVOS_DO_PACOTE[*]}"
+  # `tar -tv`: modo (`-` é arquivo comum, sem link, diretório nem dispositivo), dono, tamanho
+  # (o real, inclusive de membro esparso), data, hora e nome.
+  while read -r modo _ tamanho_do_membro resto; do
+    [[ $modo == -* ]] || falhar "o pacote só pode ter arquivos comuns"
+    [[ $tamanho_do_membro =~ ^[0-9]+$ && $tamanho_do_membro -le $LIMITE_POR_ARQUIVO ]] ||
+      falhar "${resto##* } maior que $LIMITE_POR_ARQUIVO bytes"
+  done < <(tar -tvf - <"$pacote" 2>/dev/null || printf '?\n')
+  # Teto de escrita por arquivo também na extração (ulimit -f em blocos de 1 KiB).
+  (
+    ulimit -f "$((LIMITE_POR_ARQUIVO / 1024))"
+    tar -xf - -C "$NOVA" --no-same-owner --no-same-permissions -- "${ARQUIVOS_DO_PACOTE[@]}" \
+      <"$pacote"
+  ) || falhar "não consegui extrair o pacote"
+  for arquivo in "${ARQUIVOS_DO_PACOTE[@]}"; do
+    [[ -f $NOVA/$arquivo && ! -L $NOVA/$arquivo ]] || falhar "$arquivo ausente no pacote"
+    [[ $(stat -c '%s' -- "$NOVA/$arquivo") -le $LIMITE_POR_ARQUIVO ]] ||
+      falhar "$arquivo maior que $LIMITE_POR_ARQUIVO bytes"
+  done
+  log "pacote de $SHA recebido"
+}
+
+# Resíduos de uma execução morta (só com a trava, então nenhuma outra execução os usa).
+limpar_residuos() {
+  rm -rf -- "$ESTADO"/releases/.novo.* "$ESTADO"/releases/.pacote.* \
+    "$ESTADO"/.atual.novo "$ESTADO"/.anterior.novo
+}
+
+conferir_imagens_do_compose() {
+  local imagens tipo
+  imagens="$(compose_de "$NOVA" "$SHA" config --images)" || falhar "docker compose config falhou"
+  for tipo in api web; do
+    grep -qxF -- "$(imagem "$tipo" "$SHA")" <<<"$imagens" ||
+      falhar "o compose não usa API_IMAGE e WEB_IMAGE; nada foi alterado"
+  done
+}
+
+puxar_imagens() {
+  log "pull das imagens de $SHA"
+  compose_de "$NOVA" "$SHA" pull --quiet ||
+    falhar "docker compose pull falhou; a versão no ar não mudou"
+  docker image inspect "$(imagem api "$SHA")" "$(imagem web "$SHA")" >/dev/null ||
+    falhar "imagens de $SHA ausentes depois do pull; a versão no ar não mudou"
+}
+
+# Container descartável, sem rede, que monta cada arquivo como no compose e o testa como o uid
+# dono. `--mount` (e não `-v`) para um arquivo ausente falhar em vez de virar diretório.
+conferir_segredos() {
+  local nome montagens=() testes=()
+  for nome in "${NOMES_DOS_SEGREDOS[@]}"; do
+    montagens+=(--mount "type=bind,src=$SEGREDOS/$nome,dst=$SEGREDOS/$nome,readonly")
+    [[ ${#testes[@]} -eq 0 ]] || testes+=(-a)
+    testes+=(-f "$SEGREDOS/$nome" -a -r "$SEGREDOS/$nome" -a -s "$SEGREDOS/$nome")
+  done
+  docker run --rm --network none --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --user "$DONO_DOS_SEGREDOS:$DONO_DOS_SEGREDOS" \
+    --pids-limit 16 --memory 32m "${montagens[@]}" \
+    --entrypoint test "$(imagem api "$SHA")" "${testes[@]}" </dev/null ||
+    falhar "faltam os 6 arquivos de segredo em $SEGREDOS (materializar-segredos.sh); a versão no ar não mudou"
+  log "6 arquivos de segredo presentes"
+}
+
+conferir_swap() {
+  [[ -n $(swapon --show --noheadings 2>/dev/null) ]] ||
+    falhar "sem swap ativa (swapon --show vazio); a versão no ar não mudou"
+}
+
+migrar() {
+  log "migrations"
+  compose_de "$NOVA" "$SHA" --profile ops run --rm -T --pull never migrate ||
+    falhar "migrations falharam; a versão no ar não mudou"
+}
+
+codigo_http() {
+  curl --silent --output /dev/null --write-out '%{http_code}' --max-time 5 --proto '=https' \
+    -- "$1" 2>/dev/null || true
+}
+
+saudavel() {
+  local host=$1 fim=$((SECONDS + ESPERA_DO_HEALTH)) pronto=000 raiz=000
+  while :; do
+    pronto="$(codigo_http "https://$host/api/health/ready")"
+    if [[ $pronto == 200 ]]; then
+      raiz="$(codigo_http "https://$host/")"
+      [[ $raiz != 200 ]] || return 0
+    fi
+    [[ $SECONDS -lt $fim ]] || break
+    sleep "$INTERVALO_DO_HEALTH"
+  done
+  log "health falhou: /api/health/ready=$pronto /=$raiz"
+  return 1
+}
+
+subir() {
+  compose_de "$1" "$2" up -d --no-build --pull never --remove-orphans
+}
+
+# Chamada só dentro de `if`: cada falha é tratada com `return`.
+subir_e_verificar() {
+  local host=$1
+  log "up -d --no-build de $SHA"
+  subir "$NOVA" "$SHA" || return 1
+  saudavel "$host" || return 1
+  API_IMAGE="$(imagem api "$SHA")" WEB_IMAGE="$(imagem web "$SHA")" \
+    LEILAO_SECRETS_DIR="$SEGREDOS" LEILAO_SECRETS_UID="$DONO_DOS_SEGREDOS" \
+    "$VERIFICAR_VAZAMENTO" "$NOVA" || return 1
+}
+
+voltar_para() {
+  local alvo=$1 host
+  log "voltando para $alvo"
+  host="$(host_de "$(release "$alvo")")" || {
+    log "host inválido no infra/prod.env de $alvo; intervenção manual (docs/deploy.md)"
+    return 0
+  }
+  if subir "$(release "$alvo")" "$alvo" && saudavel "$host"; then
+    log "versão $alvo de volta no ar"
+  else
+    log "a versão $alvo também não respondeu; intervenção manual (docs/deploy.md)"
+  fi
+}
+
+mantida() {
+  local sha=$1 manter
+  for manter in "$(sha_de atual)" "$(sha_de anterior)"; do
+    [[ -z $manter || $sha != "$manter" ]] || return 0
+  done
+  return 1
+}
+
+# Mantém a atual e a anterior; falha aqui só gera aviso (o deploy já está no ar).
+podar() {
+  local repo ref tag dir
+  for repo in "$REGISTRO/leilao-api" "$REGISTRO/leilao-web"; do
+    while IFS= read -r ref; do
+      tag="${ref##*:}"
+      [[ $tag =~ $FORMA_DO_SHA ]] || continue
+      mantida "$tag" && continue
+      docker image rm "$ref" >/dev/null || log "aviso: não consegui remover $ref"
+    done < <(docker image ls --format '{{.Repository}}:{{.Tag}}' "$repo" || true)
+  done
+  for dir in "$ESTADO"/releases/*/; do
+    tag="$(basename -- "$dir")"
+    [[ $tag =~ $FORMA_DO_SHA ]] || continue
+    mantida "$tag" || rm -rf -- "$dir"
+  done
+}
+
+fazer_deploy() {
+  local no_ar host
+  no_ar="$(sha_de atual)"
+  receber_pacote
+  host="$(host_de "$NOVA")" || falhar "CADDY_SITE_ADDRESS ausente ou inválido no infra/prod.env"
+  conferir_imagens_do_compose
+  puxar_imagens
+  conferir_segredos
+  conferir_swap
+  migrar
+  if subir_e_verificar "$host"; then
+    rm -rf -- "$(release "$SHA")"
+    mv -T -- "$NOVA" "$(release "$SHA")"
+    apontar atual "$SHA"
+    [[ -z $no_ar || $no_ar == "$SHA" ]] || apontar anterior "$no_ar"
+    podar
+    log "deploy de $SHA concluído"
+    exit 0
+  fi
+  if [[ -n $no_ar ]]; then
+    voltar_para "$no_ar"
+  else
+    log "primeiro deploy: não há versão anterior para restaurar"
+  fi
+  falhar "deploy de $SHA falhou"
+}
+
+fazer_rollback() {
+  local atual anterior host
+  atual="$(sha_de atual)"
+  anterior="$(sha_de anterior)"
+  [[ -n $anterior ]] || falhar "não há versão anterior registrada"
+  host="$(host_de "$(release "$anterior")")" || falhar "host inválido no infra/prod.env de $anterior"
+  log "rollback de ${atual:-nenhuma} para $anterior"
+  if subir "$(release "$anterior")" "$anterior" && saudavel "$host"; then
+    apontar atual "$anterior"
+    [[ -z $atual ]] || apontar anterior "$atual"
+    log "rollback concluído: $anterior no ar"
+    exit 0
+  fi
+  [[ -z $atual ]] || voltar_para "$atual"
+  falhar "rollback para $anterior falhou"
+}
+
+# Antes da trava, para os repassadores não herdarem o descritor dela. O do stderr nasce primeiro e
+# escreve no stderr original; o do stdout, no stdout original.
+exec 2> >(repassar >&2)
+exec > >(repassar)
+
+mkdir -p -- "$ESTADO/releases"
+exec 9>"$ESTADO/.trava"
+flock -n 9 || falhar "outro deploy ou rollback em andamento"
+limpar_residuos
+
+case $ACAO in
+  deploy) fazer_deploy ;;
+  rollback) fazer_rollback ;;
+esac

@@ -2,7 +2,7 @@
 
 Fonte: specs/014 (§Servidor, §Produção, §Segredos, §CI/CD, §Backup), ADR 0023, ADR 0033 (VPS Hostinger, que substitui a 0013 e a 0020) e ADR 0034 (backup e uptime fora da entrega). Variáveis e formatos: [variaveis-de-ambiente.md](variaveis-de-ambiente.md).
 
-Este documento descreve o compose de produção para a VPS (tarefa 129) e a entrega dos segredos. O hardening do servidor, a instalação dos segredos na VPS, a verificação, a rotação e o backup manual estão no runbook [operacao.md](operacao.md) (tarefa 130); o workflow de deploy chega com a próxima tarefa do infra da F5. Não há backup agendado nem monitor de uptime na entrega (ADR 0034): só um `pg_dump` manual, descrito no runbook. Onde este texto e a specs/014 divergirem, vale a spec.
+Este documento descreve o compose de produção para a VPS (tarefa 129), a entrega dos segredos e o deploy pela main (tarefa 131). O hardening do servidor, a instalação dos segredos e do comando forçado na VPS, a verificação, a rotação e o backup manual estão no runbook [operacao.md](operacao.md). Não há backup agendado nem monitor de uptime na entrega (ADR 0034): só um `pg_dump` manual, descrito no runbook. Onde este texto e a specs/014 divergirem, vale a spec.
 
 ## Compose de produção
 
@@ -46,7 +46,8 @@ docker compose -p leilao-prod --env-file .env --env-file infra/prod.env \
 - O `migrate` roda antes do `up -d` da API: sem ele, num banco novo, o papel `leilao_api` não tem senha e a API não sobe (28P01). Ele é idempotente: a segunda execução sai com 0 e diz `senha do papel da API já em dia`.
 - A imagem da API contém `database/postgres/migrations` em `/app/database/postgres/migrations` (o mesmo layout do repositório, com a API em `/app/apps/api`). Como o `.dockerignore` da raiz deixa `database/` fora do contexto, as migrations entram por um contexto nomeado:
   - no compose, `build.additional_contexts.migrations: ../database/postgres/migrations`;
-  - num `docker build` direto (CI), `--build-context migrations=database/postgres/migrations`.
+  - num `docker build` direto, `--build-context migrations=database/postgres/migrations`;
+  - no workflow de deploy, `build-contexts: migrations=database/postgres/migrations` do `docker/build-push-action`.
   Sem esse contexto o build falha (`failed to resolve source metadata for docker.io/library/migrations:latest`), nunca gera uma imagem sem as migrations.
 
 ### Teste local
@@ -63,6 +64,151 @@ curl -k https://localhost/api/health/ready
 ```
 
 Para limpar: `docker compose -p leilao-prod -f infra/docker-compose.prod.yml down`, e `docker volume rm leilao-prod_pgdata leilao-prod_caddy_data` só na máquina local.
+
+## Deploy pela main (tarefa 131)
+
+`.github/workflows/deploy.yml` roda por `workflow_run` quando o workflow `CI` termina com sucesso num push na `main` (nunca em pull request, nunca com `pull_request_target`), com `concurrency` sem cancelamento. Ele trabalha sobre o `head_sha` que o CI testou.
+
+1. **`guarda`** (`contents: read`): só a ponta da `main` publica. Ela compara o `head_sha` com o último commit da `main` (`gh api repos/<owner>/<repo>/commits/heads/main`); se outro push já chegou, o run termina verde com um aviso (`::notice::`) e os jobs seguintes são pulados. Assim um run atrasado não troca uma versão nova por uma velha.
+2. **`imagens`** (único job com `packages: write`): build `linux/amd64` de `apps/api/Dockerfile` e `apps/web/Dockerfile` com contexto no checkout do commit, cache `type=gha` por imagem e push para `ghcr.io/<owner>/leilao-api:<sha>` e `leilao-web:<sha>` (dono em minúsculas), com o label `org.opencontainers.image.source` apontando para o repositório (o pacote do GHCR fica ligado a ele). Login no GHCR com o `GITHUB_TOKEN` do job.
+3. **`deploy`** (`contents: read`): confere de novo a ponta da `main` (um "Re-run failed jobs" de um run antigo reaproveita a saída da `guarda` e, sem isso, publicaria um sha velho); se não for a ponta, termina verde com o aviso. Depois monta um tar com exatamente `.env`, `infra/prod.env` e `infra/docker-compose.prod.yml` do commit e o envia pelo stdin de `ssh deploy@<VPS_HOST> "deploy <sha>"`. A chave vem de `VPS_SSH_KEY` e a chave de host fica fixada por `VPS_KNOWN_HOSTS` (`StrictHostKeyChecking=yes`, sem o `known_hosts` do runner). Os dois valores só passam por `printf` para arquivos 600 no `$RUNNER_TEMP`, apagados no fim.
+
+Actions fixadas por SHA de commit. Nenhum segredo da aplicação vai para o GitHub; lá ficam só `VPS_SSH_KEY`, `VPS_KNOWN_HOSTS` e a variável `VPS_HOST`, no nível do repositório: no plano Free, Environments só existem em repositório público, e o repositório é privado (specs/014 §CI/CD aceita os dois lugares). Os pacotes do GHCR são públicos (ADR 0033 item 5.6): a VPS não guarda credencial do registry.
+
+**RISCO ACEITO:** a chave de deploy equivale a root na VPS de demo, porque o `deploy` está no grupo `docker` e o compose que o `deploy-ssh` sobe vem do cliente (o pacote do commit). Mitigação: a chave privada só existe no GitHub Secret `VPS_SSH_KEY`, as actions são fixadas por SHA e o job `deploy` não executa código do repositório (só monta o tar e chama o `ssh`). Melhoria futura registrada: extrair o compose de dentro da imagem publicada, em vez de recebê-lo do cliente.
+
+### Na VPS: `deploy-ssh`
+
+A chave de deploy só executa `/opt/leilao/bin/deploy-ssh` (`command=...,restrict` no `authorized_keys`, modelo em `infra/deploy/authorized_keys.exemplo`). Ele lê `SSH_ORIGINAL_COMMAND` e aceita só `deploy <sha de 40 hex>` e `rollback`; qualquer outra coisa (sessão sem comando, `id`, `backup`, sha inválido) sai 1 sem executar nada.
+
+`deploy <sha>`, nesta ordem:
+
+1. recebe o tar num diretório provisório: até 1 MiB, inteiro em até 60 s (um cliente parado não segura a trava), sem compressão (o `tar` lê sempre pelo stdin, que recusa um `.tgz`; lido de um arquivo, ele o abriria sozinho), só os 3 arquivos comuns e cada um com até 1 MiB depois de extraído (um membro esparso declara o tamanho real e é recusado antes da extração, que ainda roda com `ulimit -f`);
+2. confere que o compose resolvido usa `API_IMAGE` e `WEB_IMAGE` do sha (`config --images`);
+3. `docker compose pull` e as duas imagens presentes;
+4. confere os 6 arquivos de segredo (arquivos comuns, não vazios, legíveis pelo uid 1000) num container descartável da imagem da API, sem rede, porque o `deploy` não lê `/run/leilao/secrets` (700 root);
+5. `swapon --show` com swap ativa;
+6. `--profile ops run --rm -T --pull never migrate`;
+7. `up -d --no-build --pull never --remove-orphans` (nunca há build na VPS);
+8. `https://<host>/api/health/ready` 200 por até 60 s e `https://<host>/` 200 (`<host>` é o `CADDY_SITE_ADDRESS` do `infra/prod.env`);
+9. `verificar-vazamento.sh` (specs/014 §Verificação de vazamento);
+10. o diretório provisório vira `releases/<sha>`, `atual` aponta para ele e `anterior` para a versão que estava no ar; imagens e releases fora dessas duas são removidas.
+
+Falha em 1 a 6: nada no ar muda e o job falha. Falha em 7 a 9: volta para a versão que estava no ar (o compose e as imagens dela), confere o health e o job falha; no primeiro deploy, só falha. O rollback não desfaz migrations: toda migration tem de funcionar com a imagem anterior (specs/014 §CI/CD).
+
+O estado fica em `/home/deploy/leilao`: `releases/<sha>/` (os 3 arquivos) e os links `atual` e `anterior`. Os comandos do runbook usam `/home/deploy/leilao/atual` como diretório do compose. Resíduos de uma execução morta (`releases/.novo.*` e `releases/.pacote.*`) são apagados no início da seguinte, já com a trava.
+
+Queda do SSH ou cancelamento do job no meio do deploy não interrompem o `deploy-ssh`: ele ignora SIGHUP e SIGPIPE, e a saída passa por repassadores que, com o cliente fora, descartam o resto em vez de falhar. O fluxo vai até o fim, inclusive o rollback se o health falhar depois do `up`; o job fica vermelho (o `ssh` sai 255) e o resultado real aparece em `readlink /home/deploy/leilao/atual`.
+
+### Verificação de vazamento
+
+`verificar-vazamento.sh` aplica `grep -qF -f /run/leilao/secrets/<nome>` às saídas de `docker inspect` dos containers do projeto, `docker compose config` (sem `--quiet`), `docker history --no-trunc` das duas imagens, `ps -eww -o args=` e `journalctl -u leilao-segredos.service`. O grep roda num container auxiliar da imagem da API (sem rede, só leitura, sem capabilities, uid 1000) que monta só os 6 arquivos; as saídas só passam pelo pipe. Ele imprime só `<segredo>: <fonte>` e sai 1 se houver ocorrência, ou `nenhum segredo nas saídas do Docker`. Uma fonte que falha, ou o journal da unidade vazio ou ilegível, sai 2 (falha fechada): o `deploy` precisa estar no grupo `systemd-journal`.
+
+### Instalação na VPS e no GitHub
+
+Quem executa é o humano; nenhum agente acessa a VPS nem os secrets do GitHub. Pré-requisitos: [operacao.md](operacao.md) §3 (servidor preparado, `leilao-segredos.service` ativo).
+
+**1. Comando forçado.** Da sua máquina, na raiz do repositório:
+
+```sh
+scp infra/deploy/deploy-ssh infra/deploy/verificar-vazamento.sh eliel@teste-verzel.duckdns.org:~/leilao-setup/
+```
+
+Na VPS, como `eliel`:
+
+```sh
+sudo install -o root -g root -m 755 ~/leilao-setup/deploy-ssh ~/leilao-setup/verificar-vazamento.sh /opt/leilao/bin/
+# A verificação de vazamento lê o journal da leilao-segredos.service (o deploy já equivale a root pelo grupo docker).
+sudo usermod -aG systemd-journal deploy
+```
+
+Os dois scripts pertencem ao root e o `deploy` não os altera; quando mudarem no repositório, repita este passo.
+
+**2. Chave de deploy.** Na sua máquina, num diretório fora do repositório (sem senha: quem a usa é o CI):
+
+```sh
+ssh-keygen -t ed25519 -N '' -C deploy@github-actions -f deploy_key
+scp deploy_key.pub eliel@teste-verzel.duckdns.org:~/leilao-setup/
+```
+
+Na VPS, a chave pública entra como **a única linha** do `authorized_keys` do `deploy`, sempre com o prefixo de `infra/deploy/authorized_keys.exemplo`:
+
+```sh
+sudo install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
+{ printf 'command="/opt/leilao/bin/deploy-ssh",restrict '; cat ~/leilao-setup/deploy_key.pub; } \
+  | sudo tee /home/deploy/.ssh/authorized_keys >/dev/null
+sudo chown deploy:deploy /home/deploy/.ssh/authorized_keys
+sudo chmod 600 /home/deploy/.ssh/authorized_keys
+sudo cat /home/deploy/.ssh/authorized_keys   # 1 linha: command="/opt/leilao/bin/deploy-ssh",restrict ssh-ed25519 ...
+```
+
+**3. Chave de host fixada.** Na VPS, por uma sessão em que você já confia:
+
+```sh
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Na sua máquina; a impressão digital (`SHA256:...`) tem de ser a mesma, senão pare:
+
+```sh
+ssh-keyscan -t ed25519 teste-verzel.duckdns.org > known_hosts.vps
+ssh-keygen -lf known_hosts.vps
+```
+
+**4. GitHub** (no nível do repositório; os valores vêm do stdin, sem passar por argv):
+
+```sh
+gh secret set VPS_SSH_KEY < deploy_key
+gh secret set VPS_KNOWN_HOSTS < known_hosts.vps
+gh variable set VPS_HOST --body teste-verzel.duckdns.org
+```
+
+Guarde a `deploy_key` local até o fim do passo 7, que ainda a usa; ela nunca vai para a VPS nem para o Git.
+
+**5. Primeiro run e GHCR público** (ADR 0033 item 5.6). A ordem esperada do primeiro run é:
+
+1. o job `imagens` cria `leilao-api` e `leilao-web` como pacotes **privados**, e o job `deploy` falha no pull (`denied`): falha esperada, nada no ar muda;
+2. em github.com → seu perfil → Packages → `leilao-api` → Package settings → Change visibility → Public; repita para `leilao-web`. Isso é irreversível (um pacote público não volta a privado) e as imagens não têm segredo (a verificação de vazamento olha o `docker history`);
+3. em Actions, "Re-run failed jobs" no run do Deploy.
+
+No **primeiro** deploy, o health pode falhar se o Caddy demorar mais de 60 s para obter o certificado ACME do Let's Encrypt (sem versão anterior, o `deploy-ssh` só sai ≠ 0 e deixa os containers no ar). A solução é outro "Re-run failed jobs", sem mudar nada: o certificado já obtido fica no volume `caddy_data`.
+
+**6. Verificação.** A chave não abre shell nem roda outro comando (cada linha mostra "comando recusado" e saída 1):
+
+```sh
+ssh -i deploy_key -o IdentitiesOnly=yes deploy@teste-verzel.duckdns.org; echo "saída $?"
+ssh -i deploy_key -o IdentitiesOnly=yes deploy@teste-verzel.duckdns.org id; echo "saída $?"
+ssh -i deploy_key -o IdentitiesOnly=yes deploy@teste-verzel.duckdns.org backup; echo "saída $?"
+ssh -i deploy_key -o IdentitiesOnly=yes deploy@teste-verzel.duckdns.org 'deploy abc'; echo "saída $?"
+```
+
+Depois de um push na `main`, o run do Deploy termina verde em até 10 min depois do CI, e o log mostra `nenhum segredo nas saídas do Docker` e nenhum valor. Na VPS, as imagens no ar são as do commit:
+
+```sh
+SHA="$(basename "$(sudo readlink /home/deploy/leilao/atual)")"; echo "$SHA"
+R=/home/deploy/leilao/atual
+sudo env API_IMAGE="ghcr.io/elieldelfino/leilao-api:$SHA" WEB_IMAGE="ghcr.io/elieldelfino/leilao-web:$SHA" \
+  docker compose -p leilao-prod --env-file "$R/.env" --env-file "$R/infra/prod.env" \
+  -f "$R/infra/docker-compose.prod.yml" images
+```
+
+**7. Rollback automático com `/ready` quebrado.** Ainda com a `deploy_key` local, reenvie o commit no ar com um compose em que a API não alcança o Redis (`/api/health/ready` responde 503). O `deploy-ssh` volta sozinho para os arquivos e as imagens que estavam no ar e sai 1:
+
+```sh
+SHA=<sha no ar, do passo 6>
+d="$(mktemp -d)"
+git archive "$SHA" .env infra/prod.env infra/docker-compose.prod.yml | tar -x -C "$d"
+sed -i 's/^      REDIS_HOST: redis$/      REDIS_HOST: redis-quebrado/' "$d/infra/docker-compose.prod.yml"
+tar -cf "$d.tar" -C "$d" --owner=0 --group=0 --numeric-owner .env infra/prod.env infra/docker-compose.prod.yml
+ssh -i deploy_key -o IdentitiesOnly=yes deploy@teste-verzel.duckdns.org "deploy $SHA" < "$d.tar"; echo "saída $?"   # ≠ 0
+curl -fsS -o /dev/null -w '%{http_code}\n' https://teste-verzel.duckdns.org/api/health/ready                      # 200
+```
+
+Pelo job, o mesmo teste é um commit na `main` com essa troca, seguido do revert (o run do Deploy do primeiro falha e o site continua na versão anterior).
+
+Terminado o passo 7, apague a cópia local da chave privada (`shred -u deploy_key`) ou guarde-a num gerenciador de senhas; o rollback manual abaixo funciona sem ela, direto na VPS.
+
+**Rollback manual** (volta para a versão `anterior`; um segundo rollback desfaz o primeiro): `ssh -i deploy_key deploy@teste-verzel.duckdns.org rollback`, ou, sem a chave, na VPS: `sudo -u deploy -H env SSH_ORIGINAL_COMMAND=rollback /opt/leilao/bin/deploy-ssh`. O rollback não desfaz migrations.
 
 ## Segredos em produção (ADR 0023)
 

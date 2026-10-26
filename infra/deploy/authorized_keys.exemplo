@@ -1,0 +1,12 @@
+# Modelo da linha da chave de deploy no ~deploy/.ssh/authorized_keys da VPS (task 131; specs/014
+# §CI/CD, ADR 0033 item 5.3 e ADR 0034 item 3). Instalação: docs/deploy.md
+# §Instalação na VPS e no GitHub.
+#
+# O `deploy` está no grupo docker, que equivale a root: a chave dele NUNCA entra sem este prefixo.
+# - command="/opt/leilao/bin/deploy-ssh": o sshd ignora o comando pedido pelo cliente (shell,
+#   comando ou subsistema, como o sftp) e executa só o deploy-ssh, que lê o pedido em
+#   SSH_ORIGINAL_COMMAND e aceita apenas `deploy <sha de 40 hex>` e `rollback`.
+# - restrict: sem encaminhamento de porta, de agente e de X11, sem PTY e sem ~/.ssh/rc.
+# Troque a chave abaixo pela linha do deploy_key.pub gerado para o CI (ssh-keygen -t ed25519). A
+# chave privada vai só para o secret VPS_SSH_KEY do GitHub; nunca para a VPS nem para o Git.
+command="/opt/leilao/bin/deploy-ssh",restrict ssh-ed25519 AAAA...substitua-pela-chave-publica... deploy@github-actions
