@@ -8,10 +8,12 @@
 #
 # <administrador> é o usuário com sudo criado pelo humano: tem de existir, estar no grupo sudo, ter
 # uid 1000 (dono dos arquivos de segredo, ADR 0033 §Consequências) e ter chave em
-# ~/.ssh/authorized_keys (sem ela, o drop-in do sshd o trancaria para fora).
+# ~/.ssh/authorized_keys com chave válida para o `ssh-keygen -l` e sem escrita de grupo/outros no
+# home, no .ssh e no arquivo (sem isso, o drop-in do sshd o trancaria para fora). Antes do reload,
+# `sshd -T -C` precisa listar o administrador em `allowusers`.
 #
 # Faz: Docker Engine + plugin Compose pelo apt oficial da Docker (se ausentes), swap de 2 GB em
-# /swapfile, usuário `deploy` fora dos grupos sudo/admin e no grupo `docker`, drop-in do sshd (com
+# /swapfile, usuário `deploy` fora dos grupos sudo/admin e nos grupos `docker` e `systemd-journal`, drop-in do sshd (com
 # `sshd -t` antes do reload), UFW, unattended-upgrades só de segurança sem reinício, journald com
 # 500 MB e os diretórios /opt/leilao, /opt/leilao/bin e /var/backups/leilao.
 #
@@ -156,7 +158,23 @@ verificar_administrador() {
   chaves="$RAIZ$home/.ssh/authorized_keys"
   [[ -s $chaves ]] ||
     falhar "$home/.ssh/authorized_keys de $ADMIN está vazio ou ausente; sem chave o SSH ficaria trancado"
-  log "administrador $ADMIN: uid $uid, grupo sudo, com chave SSH"
+  # Uma chave ilegível (arquivo com lixo, chave truncada) também trancaria o administrador para fora.
+  ssh-keygen -l -f "$chaves" >/dev/null 2>&1 ||
+    falhar "$home/.ssh/authorized_keys de $ADMIN não tem nenhuma chave pública válida (ssh-keygen -l); o SSH ficaria trancado"
+  verificar_modos_do_ssh "$home"
+  log "administrador $ADMIN: uid $uid, grupo sudo, com chave SSH válida"
+}
+
+# O sshd (StrictModes, padrão) ignora o authorized_keys se o home, o .ssh ou o arquivo aceitarem
+# escrita de grupo ou de outros: o administrador seria trancado para fora.
+verificar_modos_do_ssh() {
+  local home="$1" caminho modo
+  for caminho in "$home" "$home/.ssh" "$home/.ssh/authorized_keys"; do
+    modo="$(stat -c '%a' -- "$RAIZ$caminho")"
+    # Dígitos de grupo e de outros (os dois últimos do modo): o bit de escrita é o 2.
+    (((8#$modo & 8#022) == 0)) ||
+      falhar "$caminho tem modo $modo, com escrita para grupo ou outros; o sshd (StrictModes) ignoraria a chave de $ADMIN (chmod go-w $caminho)"
+  done
 }
 
 conflitos_do_docker() {
@@ -240,6 +258,14 @@ configurar_deploy() {
   elif ! membro_do_grupo "$USUARIO_DEPLOY" docker; then
     mudar usermod -aG docker "$USUARIO_DEPLOY"
   fi
+  # O deploy-ssh lê o journal da leilao-segredos.service (verificar-vazamento.sh, tarefa 131).
+  if [[ -z $(campo_getent group systemd-journal 1) ]]; then
+    [[ $SECO -eq 1 ]] || falhar "o grupo systemd-journal não existe"
+    log "[dry-run] o grupo systemd-journal não existe aqui; o $USUARIO_DEPLOY entraria nele"
+    ALTERACOES=$((ALTERACOES + 1))
+  elif ! membro_do_grupo "$USUARIO_DEPLOY" systemd-journal; then
+    mudar usermod -aG systemd-journal "$USUARIO_DEPLOY"
+  fi
   for grupo in sudo admin; do
     if membro_do_grupo "$USUARIO_DEPLOY" "$grupo"; then
       mudar gpasswd -d "$USUARIO_DEPLOY" "$grupo"
@@ -247,8 +273,18 @@ configurar_deploy() {
   done
 }
 
+# restaurar_dropin <cópia anterior ou vazio> <destino no sistema>
+restaurar_dropin() {
+  if [[ -n $1 ]]; then
+    cp -p -- "$1" "$RAIZ$2"
+    rm -f -- "$1"
+  else
+    rm -f -- "$RAIZ$2"
+  fi
+}
+
 configurar_sshd() {
-  local destino=/etc/ssh/sshd_config.d/00-leilao.conf anterior=''
+  local destino=/etc/ssh/sshd_config.d/00-leilao.conf anterior='' efetivo
   if [[ -f $RAIZ$destino ]]; then
     anterior="$(mktemp)"
     cp -p -- "$RAIZ$destino" "$anterior"
@@ -257,9 +293,17 @@ configurar_sshd() {
   garantir_arquivo "$destino" 644 < <(sed "s/@ADMIN@/$ADMIN/g" "$AQUI/sshd/00-leilao.conf")
   if [[ $MUDOU -eq 1 && $SECO -eq 0 ]]; then
     if ! sshd -t; then
-      if [[ -n $anterior ]]; then cp -p -- "$anterior" "$RAIZ$destino"; else rm -f -- "$RAIZ$destino"; fi
-      rm -f -- "$anterior"
+      restaurar_dropin "$anterior" "$destino"
       falhar "sshd -t recusou a configuração; o drop-in anterior foi restaurado e o sshd não foi recarregado"
+    fi
+    # Valor efetivo (um arquivo de sshd_config.d lido antes poderia vencer o nosso): sem o
+    # administrador em AllowUsers, o reload o trancaria para fora.
+    efetivo="$(sshd -T -C "user=$ADMIN,host=localhost,addr=127.0.0.1" 2>/dev/null || true)"
+    # Aceita uma linha por usuário ou uma linha só; o nome tem de ser um token exato.
+    if ! awk -v u="$ADMIN" '$1 == "allowusers" { for (i = 2; i <= NF; i++) if ($i == u) ok = 1 }
+      END { exit !ok }' <<<"$efetivo"; then
+      restaurar_dropin "$anterior" "$destino"
+      falhar "sshd -T não mostra $ADMIN em allowusers; o drop-in anterior foi restaurado e o sshd não foi recarregado"
     fi
     # Ubuntu 24.04 ativa o ssh pelo ssh.socket: recarrega se o serviço estiver rodando; senão, a
     # próxima conexão já sobe com a configuração nova. Sessões abertas não caem.

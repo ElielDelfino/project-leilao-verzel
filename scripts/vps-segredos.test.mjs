@@ -375,8 +375,16 @@ awk -F: -v g="$3" -v u="$2" 'BEGIN { OFS = ":" } $1 == g { n = split($4, m, ",")
   "$R/etc/group" >"$R/fake/tmp" && cat "$R/fake/tmp" >"$R/etc/group" && rm "$R/fake/tmp"`,
   systemctl: `case "$1" in is-enabled|is-active) echo enabled; exit 0 ;; esac
 log "systemctl $*"`,
-  sshd: `[ "$1" = -t ] || exit 1
-[ -z "$FAKE_SSHD_FALHA" ] || { echo 'linha 9: opção inválida' >&2; exit 255; }`,
+  sshd: `case "$1" in
+  -t) [ -z "$FAKE_SSHD_FALHA" ] || { echo 'linha 9: opção inválida' >&2; exit 255; } ;;
+  -T) log "sshd $*"
+    [ -z "$FAKE_SSHD_SEM_ADMIN" ] || exit 0
+    [ -z "$FAKE_SSHD_SAIDA" ] || { printf '%b' "$FAKE_SSHD_SAIDA"; exit 0; }
+    sed -n 's/^AllowUsers //p' "$R/etc/ssh/sshd_config.d/00-leilao.conf" | tr ' ' '\\n' | sed 's/^/allowusers /' ;;
+  *) exit 1 ;;
+esac`,
+  'ssh-keygen': `[ "$1" = -l ] && [ "$2" = -f ] || exit 1
+grep -q '^ssh-' "$3" || { echo "$3 is not a public key file." >&2; exit 255; }`,
   fallocate: `log "fallocate $*"
 log "fallocate umask $(umask)"
 for f; do :; done
@@ -427,15 +435,19 @@ function criarServidor({ feitoAMao = false, adminUid = 1000, comChave = true, ex
   const raiz = novoDiretorio('vps');
   escrever(raiz, 'etc/os-release', 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n');
   const usuarios = [`eliel:x:${adminUid}:${adminUid}::/home/eliel:/bin/bash`];
-  const grupos = ['sudo:x:27:eliel'];
+  const grupos = ['sudo:x:27:eliel', 'systemd-journal:x:101:'];
   if (feitoAMao) {
     usuarios.push('deploy:x:1001:1001::/home/deploy:/bin/bash');
     grupos.push('deploy:x:1001:', 'docker:x:999:deploy');
+    grupos[1] = 'systemd-journal:x:101:deploy';
   }
   escrever(raiz, 'etc/passwd', `${usuarios.join('\n')}\n`);
   escrever(raiz, 'etc/group', `${grupos.join('\n')}\n`);
-  if (comChave)
+  if (comChave) {
     escrever(raiz, 'home/eliel/.ssh/authorized_keys', 'ssh-ed25519 AAAA teste\n', 0o600);
+    chmodSync(join(raiz, 'home/eliel/.ssh'), 0o700);
+    chmodSync(join(raiz, 'home/eliel'), 0o755);
+  }
   escrever(raiz, 'etc/default/ufw', `IPV6=${feitoAMao ? 'yes' : 'no'}\n`);
   const pacotes = [
     'ufw',
@@ -539,6 +551,9 @@ describe('preparar-vps.sh', () => {
     assert.match(ler(raiz, 'etc/fstab'), /^\/swapfile none swap sw,nofail 0 0$/m);
     assert.match(ler(raiz, 'etc/passwd'), /^deploy:/m);
     assert.match(ler(raiz, 'etc/group'), /^docker:x:999:deploy$/m);
+    assert.match(ler(raiz, 'etc/group'), /^systemd-journal:x:101:deploy$/m);
+    assert.match(primeira.log, /^usermod -aG systemd-journal deploy$/m);
+    assert.match(primeira.log, /^sshd -T -C user=eliel,host=localhost,addr=127\.0\.0\.1$/m);
     assert.doesNotMatch(ler(raiz, 'etc/group'), /^sudo:.*deploy/m);
     assert.equal(ler(raiz, 'etc/default/ufw'), 'IPV6=yes\n');
     assert.equal(ler(raiz, 'fake/ufw/status'), 'active\n');
@@ -607,9 +622,64 @@ describe('preparar-vps.sh', () => {
     assert.doesNotMatch(saida.log, /systemctl .*ssh/);
   });
 
+  it('recusa authorized_keys sem chave válida (ssh-keygen -l), sem alterar nada', () => {
+    const raiz = criarServidor({
+      extras: { 'home/eliel/.ssh/authorized_keys': 'lixo que não é chave\n' },
+    });
+    const antes = retrato(raiz);
+    const saida = preparar(raiz, ['eliel']);
+    assert.equal(saida.status, 1);
+    assert.match(saida.stderr, /nenhuma chave pública válida \(ssh-keygen -l\)/);
+    assert.deepEqual(retrato(raiz), antes);
+    assert.equal(saida.log, '');
+  });
+
+  for (const alvo of ['home/eliel', 'home/eliel/.ssh', 'home/eliel/.ssh/authorized_keys']) {
+    it(`recusa ${alvo} com escrita para grupo ou outros (StrictModes), sem alterar nada`, () => {
+      const raiz = criarServidor();
+      chmodSync(join(raiz, alvo), 0o775);
+      const antes = retrato(raiz);
+      const saida = preparar(raiz, ['--dry-run', 'eliel']);
+      assert.equal(saida.status, 1);
+      assert.match(saida.stderr, new RegExp(`/${alvo.replaceAll('.', '\\.')} tem modo 775`));
+      assert.deepEqual(retrato(raiz), antes);
+    });
+  }
+
+  it('sshd -T sem o administrador em allowusers: restaura o drop-in e não recarrega o sshd', () => {
+    const raiz = criarServidor({ feitoAMao: true });
+    escrever(raiz, 'etc/ssh/sshd_config.d/00-leilao.conf', 'AllowUsers antigo deploy\n');
+    const saida = preparar(raiz, ['eliel'], { FAKE_SSHD_SEM_ADMIN: '1' });
+    assert.equal(saida.status, 1);
+    assert.match(saida.stderr, /sshd -T não mostra eliel em allowusers/);
+    assert.equal(ler(raiz, 'etc/ssh/sshd_config.d/00-leilao.conf'), 'AllowUsers antigo deploy\n');
+    assert.doesNotMatch(saida.log, /systemctl .*ssh/);
+  });
+
+  const formatos = {
+    'uma linha só': ['port 22\\nallowusers eliel deploy\\nx11forwarding no\\n', 0],
+    'uma linha por usuário': ['allowusers eliel\\nallowusers deploy\\n', 0],
+    'só um nome que tem o administrador como prefixo': ['allowusers eliel2 deploy\\n', 1],
+    'só um nome que termina com o administrador': ['allowusers xeliel deploy\\n', 1],
+  };
+  for (const [nome, [saidaDoSshd, status]] of Object.entries(formatos)) {
+    it(`sshd -T com allowusers em ${nome}: sai ${status}`, () => {
+      const raiz = criarServidor({ feitoAMao: true });
+      escrever(raiz, 'etc/ssh/sshd_config.d/00-leilao.conf', 'AllowUsers antigo deploy\n');
+      const saida = preparar(raiz, ['eliel'], { FAKE_SSHD_SAIDA: saidaDoSshd });
+      assert.equal(saida.status, status, saida.stderr);
+      if (status === 0) assert.match(saida.log, /^systemctl try-reload-or-restart ssh\.service$/m);
+      else assert.doesNotMatch(saida.log, /systemctl .*ssh/);
+    });
+  }
+
   it('tira o deploy do grupo sudo e avisa regras extras do UFW', () => {
     const raiz = criarServidor({ feitoAMao: true });
-    escrever(raiz, 'etc/group', 'sudo:x:27:eliel,deploy\ndeploy:x:1001:\ndocker:x:999:deploy\n');
+    escrever(
+      raiz,
+      'etc/group',
+      'sudo:x:27:eliel,deploy\ndeploy:x:1001:\ndocker:x:999:deploy\nsystemd-journal:x:101:deploy\n',
+    );
     escrever(
       raiz,
       'fake/ufw/rules',
