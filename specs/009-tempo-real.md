@@ -19,7 +19,12 @@ Depende de: 001, 006, 007
   - Payload inválido (`loteId` que não é UUID, campo desconhecido) em `entrar_lote` → ack de erro `DADOS_INVALIDOS`; nos eventos sem ack, é ignorado e logado sem dado sensível.
 - Eventos só são publicados **depois do COMMIT** (barramento interno, specs/001). Se o processo cair entre o COMMIT e a publicação, o cliente se recupera no resync.
 - Reconexão: o cliente refaz `entrar_lote` e substitui o estado local (resync). Se nenhum evento chegar em 30 s numa sala ao vivo, o cliente faz um resync preventivo.
+- Ordem e repetição de `lance_aceito` (por `seq`): o cliente ignora `lance_aceito` com `seq` menor ou igual ao do lance mais recente do estado local (repetido ou já refletido num resync), sem mudar o estado nem anunciar. Se `seq` for maior que o último + 1 (lacuna: algum evento se perdeu; sem lances, o último é 0), o cliente não aplica o evento e faz `entrar_lote` imediato (resync), sem esperar os 30 s.
 - Limites: 50 conexões por lote (`entrar_lote` acima disso → ack de erro `SALA_CHEIA`) e 200 no total (a 201ª conexão é recusada no handshake com `connect_error` de mensagem `SERVIDOR_CHEIO`).
+- Limites por socket, contra cliente que abusa (o `asyncapi.yaml` não tem código próprio para eles, então reusam os do ack):
+  - **Teto de rooms de lote:** no máximo 10 rooms `lote:{id}` por socket. `entrar_lote` do 11º lote distinto → ack `DADOS_INVALIDOS` (mensagem "Você já acompanha o máximo de lotes ao mesmo tempo."); refazer `entrar_lote` de um lote em que o socket já está (resync) não conta para o teto e nunca é recusado por ele. Os rooms `vitrine` e `usuario:{id}` não contam.
+  - **Eventos por segundo:** no máximo 20 eventos do cliente por socket em janela fixa de 1 s (todos os eventos de §Cliente → servidor). `entrar_lote` acima disso → ack `INDISPONIVEL`; nos eventos sem ack, o excedente é ignorado e logado uma vez por socket, sem dado sensível.
+  - **`entrar_lote` por segundo:** no máximo **5 `entrar_lote` por socket por segundo** (cada um monta o estado no banco), contados também dentro dos 20 eventos; acima disso → ack `INDISPONIVEL`. Um cliente que reconecta e refaz `entrar_lote` de poucos lotes fica dentro do limite; o cliente que passar do limite tenta de novo depois de 1 s.
 
 ### Ack de `entrar_lote`
 O ack é o objeto `{sucesso: true, estado}` ou `{sucesso: false, erro: {codigo, mensagem}}`, com `codigo` em `DADOS_INVALIDOS`, `NAO_ENCONTRADO` (lote inexistente), `SALA_CHEIA` ou `INDISPONIVEL`. O socket só entra no room `lote:{id}` quando o ack é de sucesso.
@@ -64,6 +69,8 @@ Nenhum dado persistido.
 - [ ] Um lance aceito chega ao room `lote:{id}` e ao room `vitrine`; `voce_foi_superado` e `saldo_atualizado` só chegam ao `usuario:{id}` certo; anônimo não recebe evento privado.
 - [ ] Com `transports: ['polling']` a conexão é recusada.
 - [ ] A 51ª entrada em um lote responde `SALA_CHEIA` e a 201ª conexão é recusada com `SERVIDOR_CHEIO`.
+- [ ] Limites por socket: o `entrar_lote` do 11º lote distinto responde `DADOS_INVALIDOS`; o 6º `entrar_lote` no mesmo segundo responde `INDISPONIVEL`; o 21º evento do cliente no mesmo segundo é descartado.
+- [ ] Teste de unidade do estado da sala: `lance_aceito` repetido (`seq` menor ou igual ao último) não muda o estado nem gera anúncio; `lance_aceito` com salto de `seq` não é aplicado e dispara exatamente um `entrar_lote`.
 - [ ] Rollback do lance não publica nenhum evento.
 - [ ] Nenhum payload público (evento ou estado) contém nome, e-mail ou id de usuário.
 
