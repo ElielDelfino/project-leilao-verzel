@@ -26,6 +26,7 @@ import {
   terminarEm,
 } from '../helpers/lances-por-sql.js';
 import { inserirUsuario, iso } from '../helpers/lotes-por-sql.js';
+import { TIMEOUT_LONGO_MS } from '../helpers/timeouts.js';
 import {
   type AppDeIdentidade,
   BANCO,
@@ -59,7 +60,6 @@ const JANELA_DO_LIMITE_MS = 1000;
 const MARGEM_DA_RAJADA_MS = 200;
 const TENTATIVAS_DA_RAJADA = 5;
 const LIMITE_POR_SEGUNDO = 10;
-const TIMEOUT_LONGO_MS = 90_000;
 const LICITANTES_DA_PAGINACAO = 20;
 const LANCES_DA_PAGINACAO = 55;
 const POR_PAGINA_DO_HISTORICO = 50;
@@ -224,6 +224,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('aceite dos lances (Postgres e Redis reais)',
    * dentro da rajada. Todo INCR cai entre o início e o fim de `disparar`: se ela durou menos que a
    * janela menos uma margem, a rajada coube inteira numa janela. Caso contrário, repete com
    * `preparar` de novo, no máximo `TENTATIVAS_DA_RAJADA` vezes.
+   * Causa da instabilidade: sob carga a rajada passava de 800 ms e uma tentativa só valia a janela
+   * de 1 s; por isso as 5 tentativas cabem no `TIMEOUT_LONGO_MS` dos testes de limite, não nos 5 s.
    */
   async function rajadaNumaJanela<P, R>(
     preparar: () => Promise<P>,
@@ -704,89 +706,101 @@ describe.skipIf(!INFRA_DISPONIVEL)('aceite dos lances (Postgres e Redis reais)',
       expect([da.statusCode, db.statusCode]).toEqual([201, 201]);
     });
 
-    it('a repetição conta no limite de tentativas: 1 lance + 10 repetições → uma 429', async () => {
-      // O 1º lance e as 10 repetições (11 tentativas) cabem numa só janela de 1 s.
-      const { preparado, resultado: repetidas } = await rajadaNumaJanela(
-        async () => ({ a: await licitante(), loteId: await apoio.lote(), chave: randomUUID() }),
-        async ({ a, loteId, chave }) => {
-          const primeiro = await apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS, chave);
-          expect(primeiro.statusCode, primeiro.body).toBe(201);
-          return Promise.all(
-            Array.from({ length: LIMITE_POR_SEGUNDO }, () =>
-              apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS, chave),
-            ),
-          );
-        },
-      );
+    it(
+      'a repetição conta no limite de tentativas: 1 lance + 10 repetições → uma 429',
+      async () => {
+        // O 1º lance e as 10 repetições (11 tentativas) cabem numa só janela de 1 s.
+        const { preparado, resultado: repetidas } = await rajadaNumaJanela(
+          async () => ({ a: await licitante(), loteId: await apoio.lote(), chave: randomUUID() }),
+          async ({ a, loteId, chave }) => {
+            const primeiro = await apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS, chave);
+            expect(primeiro.statusCode, primeiro.body).toBe(201);
+            return Promise.all(
+              Array.from({ length: LIMITE_POR_SEGUNDO }, () =>
+                apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS, chave),
+              ),
+            );
+          },
+        );
 
-      const status = repetidas.map((r) => r.statusCode).sort((x, y) => x - y);
-      expect(status).toEqual([...Array.from({ length: LIMITE_POR_SEGUNDO - 1 }, () => 200), 429]);
-      expect((await contagemDoLote(pool, preparado.loteId)).lances).toBe(1);
-    });
+        const status = repetidas.map((r) => r.statusCode).sort((x, y) => x - y);
+        expect(status).toEqual([...Array.from({ length: LIMITE_POR_SEGUNDO - 1 }, () => 200), 429]);
+        expect((await contagemDoLote(pool, preparado.loteId)).lances).toBe(1);
+      },
+      TIMEOUT_LONGO_MS,
+    );
   });
 
   // --- rate limit ----------------------------------------------------------------------------
 
   describe('limite de tentativas (RNF-02): 10 lances/s por usuário', () => {
-    it('11 lances em 1 s: o 11º → 429 MUITAS_TENTATIVAS com Retry-After: 1; o limite é por usuário', async () => {
-      const {
-        preparado: { b, loteId },
-        resultado: respostas,
-      } = await rajadaNumaJanela(
-        async () => {
-          const [conta1, conta2] = (await apoio.licitantesComSaldo(2)) as [Conta, Conta];
-          return { a: conta1, b: conta2, loteId: await apoio.lote() };
-        },
-        ({ a: licitanteDaRajada, loteId: loteDaRajada }) =>
-          Promise.all(
-            Array.from({ length: LIMITE_POR_SEGUNDO + 1 }, (_, i) =>
-              apoio.lancar(
-                licitanteDaRajada,
-                loteDaRajada,
-                LANCE_INICIAL_CENTAVOS + i * INCREMENTO_CENTAVOS,
+    it(
+      '11 lances em 1 s: o 11º → 429 MUITAS_TENTATIVAS com Retry-After: 1; o limite é por usuário',
+      async () => {
+        const {
+          preparado: { b, loteId },
+          resultado: respostas,
+        } = await rajadaNumaJanela(
+          async () => {
+            const [conta1, conta2] = (await apoio.licitantesComSaldo(2)) as [Conta, Conta];
+            return { a: conta1, b: conta2, loteId: await apoio.lote() };
+          },
+          ({ a: licitanteDaRajada, loteId: loteDaRajada }) =>
+            Promise.all(
+              Array.from({ length: LIMITE_POR_SEGUNDO + 1 }, (_, i) =>
+                apoio.lancar(
+                  licitanteDaRajada,
+                  loteDaRajada,
+                  LANCE_INICIAL_CENTAVOS + i * INCREMENTO_CENTAVOS,
+                ),
               ),
             ),
-          ),
-      );
+        );
 
-      const limitadas = respostas.filter((r) => r.statusCode === 429);
-      expect(limitadas).toHaveLength(1);
-      expect(limitadas[0]?.headers['retry-after']).toBe('1');
-      expect(erro(limitadas[0] as LightMyRequestResponse).codigo).toBe('MUITAS_TENTATIVAS');
-      // As outras 10 foram avaliadas pelas regras: nenhuma 5xx, e só o primeiro lance de `a` entra.
-      for (const r of respostas.filter((x) => x.statusCode !== 429)) {
-        expect([201, 422]).toContain(r.statusCode);
-      }
-      expect(respostas.filter((r) => r.statusCode === 201)).toHaveLength(1);
-      // Outro usuário, no mesmo segundo, não é afetado.
-      const doOutro = await apoio.lancar(b, loteId, 50_000);
-      expect(doOutro.statusCode).toBe(201);
-      await apoio.conferirLote(loteId);
-    });
+        const limitadas = respostas.filter((r) => r.statusCode === 429);
+        expect(limitadas).toHaveLength(1);
+        expect(limitadas[0]?.headers['retry-after']).toBe('1');
+        expect(erro(limitadas[0] as LightMyRequestResponse).codigo).toBe('MUITAS_TENTATIVAS');
+        // As outras 10 foram avaliadas pelas regras: nenhuma 5xx, e só o primeiro lance de `a` entra.
+        for (const r of respostas.filter((x) => x.statusCode !== 429)) {
+          expect([201, 422]).toContain(r.statusCode);
+        }
+        expect(respostas.filter((r) => r.statusCode === 201)).toHaveLength(1);
+        // Outro usuário, no mesmo segundo, não é afetado.
+        const doOutro = await apoio.lancar(b, loteId, 50_000);
+        expect(doOutro.statusCode).toBe(201);
+        await apoio.conferirLote(loteId);
+      },
+      TIMEOUT_LONGO_MS,
+    );
 
-    it('passada a janela de 1 s, o mesmo usuário volta a ser avaliado pelas regras', async () => {
-      const {
-        preparado: { a, loteId },
-        resultado: rajada,
-      } = await rajadaNumaJanela(
-        async () => ({ a: await licitante(), loteId: await apoio.lote() }),
-        ({ a, loteId }) =>
-          Promise.all(
-            Array.from({ length: LIMITE_POR_SEGUNDO + 1 }, () =>
-              apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS),
+    it(
+      'passada a janela de 1 s, o mesmo usuário volta a ser avaliado pelas regras',
+      async () => {
+        const {
+          preparado: { a, loteId },
+          resultado: rajada,
+        } = await rajadaNumaJanela(
+          async () => ({ a: await licitante(), loteId: await apoio.lote() }),
+          ({ a, loteId }) =>
+            Promise.all(
+              Array.from({ length: LIMITE_POR_SEGUNDO + 1 }, () =>
+                apoio.lancar(a, loteId, LANCE_INICIAL_CENTAVOS),
+              ),
             ),
-          ),
-      );
-      // Sem isto, a retomada abaixo passaria mesmo se o limite nunca tivesse barrado nada.
-      expect(rajada.filter((r) => r.statusCode === 429).length).toBeGreaterThanOrEqual(1);
+        );
+        // Sem isto, a retomada abaixo passaria mesmo se o limite nunca tivesse barrado nada.
+        expect(rajada.filter((r) => r.statusCode === 429).length).toBeGreaterThanOrEqual(1);
 
-      await esperar(JANELA_DO_LIMITE_MS + 200);
-      const depois = await apoio.lancar(a, loteId, 50_000);
+        await esperar(JANELA_DO_LIMITE_MS + 200);
+        const depois = await apoio.lancar(a, loteId, 50_000);
 
-      // `a` lidera o lote: a recusa é a das regras (422), não a do limite (429).
-      expect(depois.statusCode).toBe(422);
-      expect(erro(depois).codigo).toBe('JA_ESTA_GANHANDO');
-    });
+        // `a` lidera o lote: a recusa é a das regras (422), não a do limite (429).
+        expect(depois.statusCode).toBe(422);
+        expect(erro(depois).codigo).toBe('JA_ESTA_GANHANDO');
+      },
+      TIMEOUT_LONGO_MS,
+    );
   });
 
   // --- leituras: paginação e privacidade -----------------------------------------------------
