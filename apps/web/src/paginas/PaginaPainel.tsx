@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 
 import { tituloDaPagina } from '../layout/site';
+import type { AvisoDoPainel } from '../painel/CancelarLote';
 import { ListaMeusLotes } from '../painel/ListaMeusLotes';
 import { ResumoDoPainel } from '../painel/ResumoDoPainel';
 
@@ -35,6 +36,12 @@ export function PaginaPainel() {
     // Só na montagem.
   }, []);
 
+  const [aviso, setAviso] = useState<AvisoDoPainel | null>(null);
+  const refAviso = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (aviso?.tipo === 'sucesso') refAviso.current?.focus();
+  }, [aviso]);
+
   function irParaPagina(destino: number, substituir = false) {
     setParams(destino > 1 ? { pagina: String(destino) } : {}, { replace: substituir });
   }
@@ -48,6 +55,16 @@ export function PaginaPainel() {
           Lote criado.
         </p>
       ) : null}
+      {aviso ? (
+        <p
+          ref={refAviso}
+          tabIndex={-1}
+          role={aviso.tipo === 'sucesso' ? 'status' : 'alert'}
+          className="mt-4 rounded-md border border-borda-controle p-3 font-medium"
+        >
+          {aviso.texto}
+        </p>
+      ) : null}
       <p className="mt-4">
         <Link
           to="/painel/lotes/novo"
@@ -58,7 +75,11 @@ export function PaginaPainel() {
       </p>
       <ResumoDoPainel />
       <section className="mt-8">
-        <ListaMeusLotes pagina={pagina} aoIrParaPagina={irParaPagina} />
+        <ListaMeusLotes
+          pagina={pagina}
+          aoIrParaPagina={irParaPagina}
+          aoConcluirCancelamento={setAviso}
+        />
       </section>
     </>
   );

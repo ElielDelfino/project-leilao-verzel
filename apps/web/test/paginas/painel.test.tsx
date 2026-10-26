@@ -73,7 +73,7 @@ describe('/painel', () => {
       within(tabela)
         .getAllByRole('columnheader')
         .map((c) => c.textContent),
-    ).toEqual(['Lote', 'Status', 'Início', 'Fim', 'Lances', 'Resultado']);
+    ).toEqual(['Lote', 'Status', 'Início', 'Fim', 'Lances', 'Resultado', 'Ações']);
     const linhas = within(tabela).getAllByRole('row').slice(1);
     expect(linhas).toHaveLength(4);
     expect(within(tabela).getByRole('link', { name: 'Vivo' })).toHaveAttribute('href', '/lotes/a');

@@ -6,7 +6,12 @@ import { formatarCentavos } from '../formatacao/dinheiro';
 
 /** Resumo do painel (specs/012 §Painel do leiloeiro). */
 export function ResumoDoPainel() {
-  const consulta = useQuery({ queryKey: ['painel', 'resumo'], queryFn: obterResumo, retry: false });
+  const consulta = useQuery({
+    queryKey: ['painel', 'resumo'],
+    queryFn: obterResumo,
+    retry: false,
+    refetchOnWindowFocus: 'always',
+  });
 
   return (
     <section aria-labelledby="titulo-resumo" className="mt-6">

@@ -23,3 +23,12 @@ export async function listarMeusLotes(pagina: number): Promise<PaginaDeLotesDoPa
   );
   return { lotes: resposta.dados, meta: resposta.meta };
 }
+
+/** `POST /api/painel/lotes/{id}/cancelamento` (specs/010 §Cancelamento); sem corpo, CSRF pelo cliente. */
+export async function cancelarLote(id: string): Promise<Lote> {
+  const resposta = await requisitar<{ dados: Lote }>(
+    'POST',
+    `/api/painel/lotes/${encodeURIComponent(id)}/cancelamento`,
+  );
+  return resposta.dados;
+}
