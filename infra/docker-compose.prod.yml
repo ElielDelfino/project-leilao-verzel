@@ -1,21 +1,24 @@
-# Compose de produção (specs/014 §Produção, ADR 0013, 0023 e 0024): Postgres, Redis, API e Caddy
-# numa e2-micro.
-#   docker compose -p leilao-prod --env-file .env -f infra/docker-compose.prod.yml up -d
-# Os valores vêm do .env da raiz (defaults não sensíveis); cada interpolação repete o default para o
-# compose também funcionar sem --env-file (o projeto fica em infra/, então o .env da raiz só é lido
-# com --env-file). O -p é obrigatório junto com o --env-file: o COMPOSE_PROJECT_NAME=leilao do .env
-# tem precedência sobre o `name:` abaixo e poria estes contêineres no projeto de dev (os volumes
-# têm nome fixo, leilao-prod_*, e não se misturam com os de dev).
-# Nenhuma senha passa por `environment:` ou `command:`: as senhas são arquivos montados pelo
-# Compose `secrets:` em /run/secrets/<nome> (ADR 0023).
+# Compose de produção (specs/014 §Produção, ADR 0023, 0024 e 0033): Postgres, Redis, API e Caddy
+# na VPS, mais os one-shots `migrate` e `seed` (profile ops). Da raiz do repositório:
+#   docker compose -p leilao-prod --env-file .env --env-file infra/prod.env \
+#       -f infra/docker-compose.prod.yml up -d
+#   docker compose -p leilao-prod --env-file .env --env-file infra/prod.env \
+#       -f infra/docker-compose.prod.yml --profile ops run --rm migrate
+# O .env traz os defaults de dev; o infra/prod.env, lido depois, troca os valores de produção
+# (limites de memória, host público, diretório dos segredos). Cada interpolação abaixo repete o
+# valor de produção como default, para o arquivo resolver o mesmo modelo sem os --env-file.
+# O nome do projeto vem do `name:` (o .env não define COMPOSE_PROJECT_NAME); o -p só o repete.
+# Nenhuma senha passa por `environment:`, `command:`, healthcheck ou build: as senhas são
+# arquivos montados pelo Compose `secrets:` em /run/secrets/<nome> (ADR 0023). O
+# /opt/leilao/.env.local da VPS nunca é passado ao Compose (ADR 0033, item 4.4).
 #   LEILAO_SECRETS_DIR  diretório com os 6 arquivos de segredo (db_password, db_api_password,
-#                       redis_password, jwt_secret, pseudonym_hmac_key, ed25519_private_key). O padrão
-#                       ../.secrets só tem db_password e redis_password (`pnpm keys:generate`): para
-#                       subir a API localmente, falta criar os outros 4. Na VM, /run/leilao/secrets, gravado pelo
-#                       infra/deploy/fetch-secrets.sh a partir do Secret Manager (tarefa 008).
+#                       redis_password, jwt_secret, pseudonym_hmac_key, ed25519_private_key). Na
+#                       VPS, /run/leilao/secrets, gravado por infra/deploy/materializar-segredos.sh.
+#                       Para testar localmente, aponte para um diretório com os 6 arquivos (uid
+#                       1000, 600, sem quebra de linha); o `config` não acusa a falta.
 #   API_IMAGE, WEB_IMAGE  imagens a usar (prod: ghcr.io/<owner>/leilao-api:<sha> e leilao-web:<sha>,
 #                       com `pull` e `up --no-build`); sem elas, o compose constrói as imagens locais.
-# Só o Caddy publica portas (80 e 443). Postgres e Redis ficam numa rede sem saída para a internet.
+# Só o Caddy publica portas (80 e 443 TCP). Postgres e Redis ficam na rede `dados`, sem saída.
 name: leilao-prod
 
 # Logs do Docker (specs/014 §Observabilidade): json-file, 10 MB por arquivo, 5 arquivos.
@@ -24,6 +27,52 @@ x-logging: &logging
   options:
     max-size: 10m
     max-file: '5'
+
+# Endereço do Postgres e ambiente comuns à API e aos one-shots (specs/014 §Conexão).
+x-postgres-endereco: &postgres-endereco
+  NODE_ENV: production
+  TZ: ${TZ:-UTC}
+  # Heap do Node em 75% do limite de RAM da API (ADR 0033, item 8). Os one-shots usam o mesmo
+  # limite de contêiner da API.
+  NODE_OPTIONS: --max-old-space-size=576
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-leilao}
+
+# Contêiner Node da imagem da API (uid 1000, sem capabilities): API e one-shots.
+x-node-endurecido: &node-endurecido
+  read_only: true
+  tmpfs:
+    - /run:size=8m,nosuid,nodev,noexec
+    - /tmp:size=16m,nosuid,nodev,noexec
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  ulimits:
+    nofile:
+      soft: ${API_NOFILE:-8192}
+      hard: ${API_NOFILE:-8192}
+  deploy:
+    resources:
+      limits:
+        cpus: '${API_CPUS:-1}'
+        memory: ${API_MEM:-768m}
+        pids: ${API_PIDS:-128}
+  # RAM + swap: 2× o limite só para Postgres e API (ADR 0024, item 2).
+  memswap_limit: ${API_MEMSWAP:-1536m}
+  logging: *logging
+
+# Imagem da API: construída só no GitHub Actions em produção (ADR 0033, item 5.1). O contexto
+# nomeado `migrations` entra na imagem (apps/api/Dockerfile); o .dockerignore da raiz o exclui do
+# contexto principal.
+x-imagem-da-api: &imagem-da-api
+  image: ${API_IMAGE:-leilao-api:local}
+  build:
+    context: ..
+    dockerfile: apps/api/Dockerfile
+    additional_contexts:
+      migrations: ../database/postgres/migrations
 
 services:
   postgres:
@@ -44,13 +93,18 @@ services:
       - /run:size=8m,nosuid,nodev,noexec
       - /var/run/postgresql:size=8m,nosuid,nodev,noexec
       - /tmp:size=16m,nosuid,nodev,noexec
-    # Mesmas capabilities do compose de dev (database/postgres/docker-compose.yml): só o entrypoint,
-    # como root, as usa (PGDATA, leitura do segredo, gosu); o postgres roda sem nenhuma.
+    # Mesmas capabilities do compose de dev (database/postgres/docker-compose.yml, tarefa 023): só
+    # o entrypoint, como root, as usa. DAC_READ_SEARCH lê o segredo (dono uid 1000 no host, 600) e
+    # percorre o PGDATA (700, dono postgres) só para leitura, sem a escrita que o DAC_OVERRIDE
+    # daria; CHOWN dá o PGDATA ao usuário postgres; SETUID e SETGID trocam de usuário (gosu). O
+    # postgres roda sem nenhuma.
+    # Não acrescente `user:`: o entrypoint precisa começar como root para ler o segredo e fazer o
+    # chown, e o healthcheck (pg_isready) roda como root. Um `user:` exige rever os dois e este cap_add.
     cap_drop:
       - ALL
     cap_add:
       - CHOWN
-      - DAC_OVERRIDE
+      - DAC_READ_SEARCH
       - SETUID
       - SETGID
     security_opt:
@@ -63,11 +117,11 @@ services:
       resources:
         limits:
           cpus: '${POSTGRES_CPUS:-1}'
-          memory: ${POSTGRES_MEM:-300m}
+          memory: ${POSTGRES_MEM:-1g}
           pids: ${POSTGRES_PIDS:-200}
-    # RAM + swap (ADR 0013 e 0024): o banco pode usar swap até 2× o limite em vez de ser morto pelo
+    # RAM + swap (ADR 0024 e 0033): o banco pode usar swap até 2× o limite em vez de ser morto pelo
     # OOM do cgroup.
-    memswap_limit: ${POSTGRES_MEMSWAP:-600m}
+    memswap_limit: ${POSTGRES_MEMSWAP:-2g}
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
@@ -112,7 +166,7 @@ services:
       - redis-server
       - /run/redis/redis.conf
       - --maxmemory
-      - ${REDIS_MAXMEMORY:-48mb}
+      - ${REDIS_MAXMEMORY:-96mb}
       - --maxmemory-policy
       - volatile-lru
       - --save
@@ -147,11 +201,11 @@ services:
       resources:
         limits:
           cpus: '${REDIS_CPUS:-0.5}'
-          memory: ${REDIS_MEM:-64m}
+          memory: ${REDIS_MEM:-128m}
           pids: ${REDIS_PIDS:-64}
-    # Sem swap (ADR 0024): o maxmemory limita o Redis abaixo do limite do contêiner, e sem
+    # Sem swap (ADR 0024 e 0033): o maxmemory limita o Redis abaixo do limite do contêiner, e sem
     # persistência não há fork.
-    memswap_limit: ${REDIS_MEMSWAP:-64m}
+    memswap_limit: ${REDIS_MEMSWAP:-128m}
     healthcheck:
       test:
         [
@@ -167,38 +221,30 @@ services:
     restart: always
 
   api:
-    image: ${API_IMAGE:-leilao-api:local}
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
+    <<: [*node-endurecido, *imagem-da-api]
     environment:
-      NODE_ENV: production
+      <<: *postgres-endereco
       API_PORT: ${API_PORT:-13000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      TZ: ${TZ:-UTC}
       SCRYFALL_USER_AGENT: ${SCRYFALL_USER_AGENT:-LeilaoVerzel/0.1}
-      # Conexão em partes (specs/014 §Conexão da API com Postgres e Redis), pelos nomes dos serviços.
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-leilao}
       # A API conecta como o papel `leilao_api` (ADR 0026), nunca como o dono `leilao`.
       POSTGRES_API_USER: ${POSTGRES_API_USER:-leilao_api}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Origem pública da SPA (CORS e cookies); a validação no boot é do api-dev.
-      WEB_ORIGIN: https://${CADDY_SITE_ADDRESS:-localhost}
+      # Origem pública da SPA (CORS e cookies `Secure`, specs/003 e ADR 0027).
+      WEB_ORIGIN: https://${CADDY_SITE_ADDRESS:-teste-verzel.duckdns.org}
       # Caminhos (não os valores) dos 5 segredos da API: ela lê <VAR> ou <VAR>_FILE (ADR 0023). Sem
-      # DB_PASSWORD_FILE: a senha do dono do banco não chega à API (specs/014 §Produção, ADR 0026).
+      # DB_PASSWORD_FILE: a senha do dono do banco não chega à API (specs/014 §Segredos, ADR 0026).
       DB_API_PASSWORD_FILE: /run/secrets/db_api_password
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
       JWT_SECRET_FILE: /run/secrets/jwt_secret
       PSEUDONYM_HMAC_KEY_FILE: /run/secrets/pseudonym_hmac_key
       ED25519_PRIVATE_KEY_FILE: /run/secrets/ed25519_private_key
     # Os arquivos montados por `secrets:` (bind) mantêm dono e modo do host; uid/gid/mode do
-    # Compose valem só no Swarm. A API roda como uid 1000 sem capabilities, então os arquivos que ela
-    # lê precisam ser do uid 1000 e só dele: `chown 1000:1000` e modo 600 (specs/014 §Segredos) ou
-    # 0400, diretório 700, nunca 644 (keys:generate: tarefa 023; fetch-secrets na VM: tarefa 008).
-    # O Postgres e o Redis leem como root no entrypoint (DAC_OVERRIDE e DAC_READ_SEARCH).
+    # Compose valem só no Swarm. A API roda como uid 1000 sem capabilities, então os arquivos que
+    # ela lê precisam ser do uid 1000 e só dele: 600, diretório 700 (materializar-segredos.sh na
+    # VPS; specs/014 §Segredos). O Postgres e o Redis leem como root no entrypoint
+    # (DAC_READ_SEARCH).
     secrets:
       - db_api_password
       - redis_password
@@ -214,29 +260,58 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    read_only: true
-    tmpfs:
-      - /run:size=8m,nosuid,nodev,noexec
-      - /tmp:size=16m,nosuid,nodev,noexec
-    # Usuário node (uid 1000) da imagem, porta 13000: nenhuma capability.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    ulimits:
-      nofile:
-        soft: ${API_NOFILE:-8192}
-        hard: ${API_NOFILE:-8192}
-    deploy:
-      resources:
-        limits:
-          cpus: '${API_CPUS:-1}'
-          memory: ${API_MEM:-300m}
-          pids: ${API_PIDS:-128}
-    memswap_limit: ${API_MEMSWAP:-600m}
-    # Healthcheck: o HEALTHCHECK de apps/api/Dockerfile (provisório em /api/health/live até a 017).
-    logging: *logging
+    # Healthcheck: o HEALTHCHECK de apps/api/Dockerfile.
     restart: always
+
+  # One-shot de migrations (specs/014 §Produção e §CI/CD): só roda quando chamado, com
+  # `--profile ops run --rm migrate`. Conecta como o dono e aplica a senha do papel da API (ADR
+  # 0026), por isso recebe só DB_PASSWORD_FILE e DB_API_PASSWORD_FILE.
+  migrate:
+    <<: [*node-endurecido, *imagem-da-api]
+    profiles: [ops]
+    command: ['node', 'dist/db/migrate.js']
+    environment:
+      <<: *postgres-endereco
+      POSTGRES_USER: ${POSTGRES_USER:-leilao}
+      POSTGRES_API_USER: ${POSTGRES_API_USER:-leilao_api}
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_API_PASSWORD_FILE: /run/secrets/db_api_password
+    secrets:
+      - db_password
+      - db_api_password
+    # Só a rede de dados: o one-shot não fala com a internet nem com o Caddy.
+    networks:
+      - dados
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # O HEALTHCHECK da imagem é o da API (porta 13000); num one-shot ele só falharia.
+    healthcheck:
+      disable: true
+    restart: 'no'
+
+  # One-shot de seed (specs/014 §Produção): `--profile ops run --rm seed`, depois do migrate.
+  # Conecta como o dono (DB_PASSWORD_FILE). As etapas de hoje (identidade: contas demo) usam só
+  # SEED_DEMO_PASSWORD, que não é segredo (specs/003 RF-03); nenhum outro secret é montado.
+  seed:
+    <<: [*node-endurecido, *imagem-da-api]
+    profiles: [ops]
+    command: ['node', 'dist/db/seed.js']
+    environment:
+      <<: *postgres-endereco
+      POSTGRES_USER: ${POSTGRES_USER:-leilao}
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-leilao-demo-2026}
+    secrets:
+      - db_password
+    networks:
+      - dados
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: 'no'
 
   caddy:
     image: ${WEB_IMAGE:-leilao-web:local}
@@ -244,16 +319,18 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
     environment:
-      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-localhost}
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-teste-verzel.duckdns.org}
       API_PORT: ${API_PORT:-13000}
-      # Teto de heap do runtime Go em ~75% do limite do contêiner (o GC aperta antes do OOM).
-      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-48MiB}
+      # Teto de heap do runtime Go em 75% do limite do contêiner (o GC aperta antes do OOM).
+      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-96MiB}
     networks:
       - borda
     depends_on:
       api:
         condition: service_healthy
-    # Única exceção a portas < 1024 (80 e 443 públicas). Locais: CADDY_HTTP_PORT/CADDY_HTTPS_PORT.
+    # Única exceção a portas < 1024 (80 e 443 TCP, ADR 0033 item 3.4), publicadas em todas as
+    # interfaces do host, IPv4 e IPv6. Sem 443/udp: HTTP/3 desligado (ADR 0024). Para testes
+    # locais com as portas ocupadas: CADDY_HTTP_PORT e CADDY_HTTPS_PORT.
     ports:
       - '${CADDY_HTTP_PORT:-80}:80/tcp'
       - '${CADDY_HTTPS_PORT:-443}:443/tcp'
@@ -262,7 +339,8 @@ services:
     sysctls:
       net.ipv4.ip_unprivileged_port_start: 0
     volumes:
-      # Certificados e conta ACME: precisam persistir (o diretório de dados não é cache).
+      # Conta ACME e certificados do Let's Encrypt: precisam persistir (limite de 5 certificados
+      # idênticos por semana; specs/014 §Produção). Não é cache: nunca `down -v`.
       - caddy_data:/data
     read_only: true
     tmpfs:
@@ -279,40 +357,40 @@ services:
       nofile:
         soft: ${CADDY_NOFILE:-8192}
         hard: ${CADDY_NOFILE:-8192}
-    # 64 MB para TLS + WebSocket, sem swap (memswap igual ao limite): ADR 0024.
+    # 128 MB para TLS + WebSocket, sem swap (memswap igual ao limite): ADR 0033, item 8.
     deploy:
       resources:
         limits:
           cpus: '${CADDY_CPUS:-0.5}'
-          memory: ${CADDY_MEM:-64m}
+          memory: ${CADDY_MEM:-128m}
           pids: ${CADDY_PIDS:-64}
-    memswap_limit: ${CADDY_MEMSWAP:-64m}
+    memswap_limit: ${CADDY_MEMSWAP:-128m}
     # Healthcheck: o HEALTHCHECK de apps/web/Dockerfile (http://127.0.0.1:2020/saude).
     logging: *logging
     restart: always
 
 networks:
   borda: {}
-  # Sem rota para fora: Postgres e Redis só falam com a API.
+  # Sem rota para fora: Postgres e Redis só falam com a API e com os one-shots.
   dados:
     internal: true
 
 secrets:
   db_password:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/db_password
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/db_password
   db_api_password:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/db_api_password
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/db_api_password
   redis_password:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/redis_password
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/redis_password
   jwt_secret:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/jwt_secret
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/jwt_secret
   pseudonym_hmac_key:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/pseudonym_hmac_key
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/pseudonym_hmac_key
   ed25519_private_key:
-    file: ${LEILAO_SECRETS_DIR:-../.secrets}/ed25519_private_key
+    file: ${LEILAO_SECRETS_DIR:-/run/leilao/secrets}/ed25519_private_key
 
-# Nomes explícitos: mesmo com o projeto errado (COMPOSE_PROJECT_NAME=leilao do .env, sem -p), o
-# compose de prod nunca anexa o volume leilao_pgdata do dev.
+# Nomes explícitos e fixos: o compose de produção nunca anexa o volume leilao_pgdata do dev,
+# qualquer que seja o projeto.
 volumes:
   pgdata:
     name: leilao-prod_pgdata
