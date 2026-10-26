@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 
 import type { LoteDetalhe } from '../api/lotes';
 import { formatarDataHora } from '../formatacao/data';
@@ -34,22 +35,40 @@ function PainelSemEstado({ detalhe, semEstado }: { detalhe: LoteDetalhe; semEsta
   );
 }
 
+function LinkDaAuditoria({ loteId }: { loteId: string }) {
+  return (
+    <p>
+      <Link to={`/auditoria/${loteId}`}>Ver auditoria</Link>
+    </p>
+  );
+}
+
 function Situacao({ sala }: { sala: EstadoDaSala }) {
   const { lote, suaPosicao } = sala;
-  if (lote.status === 'cancelado') return <p role="status">Este lote foi cancelado.</p>;
+  if (lote.status === 'cancelado') {
+    return (
+      <>
+        <p role="status">Este lote foi cancelado.</p>
+        <LinkDaAuditoria loteId={lote.id} />
+      </>
+    );
+  }
   if (lote.status === 'agendado') {
     return <p>Este lote ainda não começou. Abre em {formatarDataHora(lote.inicioEm)}.</p>;
   }
   if (lote.status === 'encerrado') {
     return (
-      <div role="status" className="flex flex-col gap-1">
-        <p>Este lote foi encerrado.</p>
-        {lote.valorArremateCentavos === null ? null : (
-          <p>Arrematado por {formatarCentavos(lote.valorArremateCentavos)}.</p>
-        )}
-        {suaPosicao === 'venceu' ? <p>Você venceu este lote.</p> : null}
-        {suaPosicao === 'perdeu' ? <p>Você não venceu este lote.</p> : null}
-      </div>
+      <>
+        <div role="status" className="flex flex-col gap-1">
+          <p>Este lote foi encerrado.</p>
+          {lote.valorArremateCentavos === null ? null : (
+            <p>Arrematado por {formatarCentavos(lote.valorArremateCentavos)}.</p>
+          )}
+          {suaPosicao === 'venceu' ? <p>Você venceu este lote.</p> : null}
+          {suaPosicao === 'perdeu' ? <p>Você não venceu este lote.</p> : null}
+        </div>
+        <LinkDaAuditoria loteId={lote.id} />
+      </>
     );
   }
   return null;

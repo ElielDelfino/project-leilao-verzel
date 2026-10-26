@@ -43,7 +43,10 @@ export function aplicarFimEstendido(
   queryClient: QueryClient,
   evento: EventosDoServidor['fim_estendido'],
 ): void {
-  atualizarLote(queryClient, evento.loteId, (lote) => ({ ...lote, fimEm: evento.fimEm }));
+  atualizarLote(queryClient, evento.loteId, (lote) =>
+    // O fim só cresce (anti-sniping): evento atrasado não recua o card.
+    Date.parse(evento.fimEm) >= Date.parse(lote.fimEm) ? { ...lote, fimEm: evento.fimEm } : lote,
+  );
 }
 
 /** O lote muda de aba (ou sai da lista): refaz as consultas da vitrine. */

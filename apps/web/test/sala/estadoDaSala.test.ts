@@ -9,6 +9,8 @@ import {
   aplicarSuperado,
   criarEstadoDaSala,
   type EstadoDaSala,
+  haLacunaDeSeq,
+  mesclarResync,
 } from '../../src/sala/estadoDaSala';
 import { criarEstado, lanceAceito, FIM, ID } from '../apoio/salaApoio';
 
@@ -152,5 +154,93 @@ describe('estadoDaSala: fimEm só cresce', () => {
 
     expect(novo.lote.fimEm).toBe(FIM_MAIOR);
     expect(FIM).not.toBe(FIM_MAIOR);
+  });
+});
+
+describe('estadoDaSala: fim só avança', () => {
+  it('fim_estendido atrasado (fim menor que o exibido) não recua o fim', () => {
+    const base = aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR }));
+
+    const depois = aplicarFimEstendido(base, { loteId: ID, fimEm: '2026-10-25T14:04:00Z' });
+
+    expect(depois.lote.fimEm).toBe(FIM_MAIOR);
+  });
+
+  it('fim_estendido igual ao exibido não muda o fim', () => {
+    const base = aplicarLance(sala(), lanceAceito({ fimEm: FIM_MAIOR }));
+
+    expect(aplicarFimEstendido(base, { loteId: ID, fimEm: FIM_MAIOR }).lote.fimEm).toBe(FIM_MAIOR);
+  });
+});
+
+describe('estadoDaSala: lacuna de seq', () => {
+  it('seq maior que o último + 1 é lacuna; o seguinte, repetido ou menor não', () => {
+    const base = sala();
+
+    expect(haLacunaDeSeq(base, lanceAceito({ seq: 5 }))).toBe(true);
+    expect(haLacunaDeSeq(base, lanceAceito({ seq: 4 }))).toBe(false);
+    expect(haLacunaDeSeq(base, lanceAceito({ seq: 3 }))).toBe(false);
+    expect(haLacunaDeSeq(base, lanceAceito({ seq: 1 }))).toBe(false);
+  });
+
+  it('sem lances o último é 0: seq 1 é o seguinte e seq 2 é lacuna', () => {
+    const vazio = sala({ lanceAtualCentavos: null, totalLances: 0 }, { ultimosLances: [] });
+
+    expect(haLacunaDeSeq(vazio, lanceAceito({ seq: 1 }))).toBe(false);
+    expect(haLacunaDeSeq(vazio, lanceAceito({ seq: 2 }))).toBe(true);
+  });
+
+  it('lacuna não é aplicada ao estado', () => {
+    const base = sala();
+
+    expect(aplicarLance(base, lanceAceito({ seq: 6, totalLances: 6 }))).toBe(base);
+  });
+
+  it('sala terminal não tem lacuna', () => {
+    expect(haLacunaDeSeq(encerrada(), lanceAceito({ seq: 9 }))).toBe(false);
+  });
+});
+
+describe('estadoDaSala: resync preserva o aviso de fim estendido', () => {
+  const agora = Date.parse('2026-10-25T12:00:00Z');
+  const resposta = (fimEm: string) => criarEstadoDaSala(criarEstado({ fimEm }), agora);
+
+  it('fimEm igual mantém aviso e marca anunciada, sem pedir novo selo', () => {
+    const anterior = aplicarFimEstendido(sala(), { loteId: ID, fimEm: FIM_MAIOR });
+
+    const mesclado = mesclarResync(anterior, resposta(FIM_MAIOR));
+
+    expect(mesclado.estado.avisoFimEstendido).toBe(anterior.avisoFimEstendido);
+    expect(mesclado.estado.avisoFimEstendido).not.toBe('');
+    expect(mesclado.novaExtensao).toBe(false);
+  });
+
+  it('fimEm maior anuncia a extensão uma vez e pede o selo', () => {
+    const anterior = sala();
+
+    const mesclado = mesclarResync(anterior, resposta(FIM_MAIOR));
+
+    expect(mesclado.estado.avisoFimEstendido).toMatch(/^O fim do lote foi estendido para /);
+    expect(mesclado.novaExtensao).toBe(true);
+    // O mesmo fim depois do resync é repetido: o fim_estendido seguinte não anuncia de novo.
+    const repetido = aplicarFimEstendido(mesclado.estado, { loteId: ID, fimEm: FIM_MAIOR });
+    expect(repetido).toBe(mesclado.estado);
+  });
+
+  it('fimEm menor do resync não apaga o aviso nem recua o anunciado', () => {
+    const anterior = aplicarFimEstendido(sala(), { loteId: ID, fimEm: FIM_MAIOR });
+
+    const mesclado = mesclarResync(anterior, resposta(FIM_MENOR));
+
+    expect(mesclado.estado.avisoFimEstendido).toBe(anterior.avisoFimEstendido);
+    expect(mesclado.estado.fimAnunciadoEm).toBe(FIM_MAIOR);
+    expect(mesclado.novaExtensao).toBe(false);
+  });
+
+  it('sem estado anterior (primeira entrada) nunca anuncia', () => {
+    const mesclado = mesclarResync(null, resposta(FIM_MAIOR));
+
+    expect(mesclado.estado.avisoFimEstendido).toBe('');
+    expect(mesclado.novaExtensao).toBe(false);
   });
 });

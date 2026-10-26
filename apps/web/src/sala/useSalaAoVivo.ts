@@ -12,6 +12,8 @@ import {
   aplicarSuperado,
   criarEstadoDaSala,
   type EstadoDaSala,
+  haLacunaDeSeq,
+  mesclarResync,
 } from './estadoDaSala';
 
 import type { CodigoDeErroDaSala } from './tiposDoServidor';
@@ -22,6 +24,12 @@ export type { CodigoDeErroDaSala };
 export const INTERVALO_DO_RESYNC_MS = 30_000;
 /** Duração do selo "Fim estendido" (specs/012). */
 export const DURACAO_DO_SELO_MS = 10_000;
+/** Depois de `fimEm`/`inicioEm`, espera isto antes de refazer o `entrar_lote` (specs/012). */
+export const ATRASO_APOS_O_PRAZO_MS = 1_500;
+/** Se o servidor ainda não mudou o status no prazo, tenta de novo neste intervalo. */
+export const RETENTATIVA_DO_PRAZO_MS = 3_000;
+/** Teto do `setTimeout` (2^31 - 1 ms); acima disso ele dispararia na hora. */
+const TETO_DO_TEMPORIZADOR_MS = 2_147_483_647;
 /** Espera máxima pelo ack do `entrar_lote`; passado isso a entrada conta como falha. */
 export const TIMEOUT_DA_ENTRADA_MS = 5_000;
 /** Sem conexão e sem estado por este tempo, a tela de carregamento vira erro de rede. */
@@ -58,10 +66,12 @@ export function useSalaAoVivo(loteId: string): SalaAoVivo {
     let temporizadorDoResync: ReturnType<typeof setTimeout> | undefined;
     let temporizadorDoSelo: ReturnType<typeof setTimeout> | undefined;
     let temporizadorDoPrazo: ReturnType<typeof setTimeout> | undefined;
+    let temporizadorDoStatus: ReturnType<typeof setTimeout> | undefined;
 
     const publicar = (novo: EstadoDaSala) => {
       estadoRef.current = novo;
       setEstado(novo);
+      agendarMudancaDeStatus(novo);
     };
     /** Aplica a transformação ao estado atual; devolve se algo mudou. */
     const atualizar = (transformar: (anterior: EstadoDaSala) => EstadoDaSala): boolean => {
@@ -85,10 +95,38 @@ export function useSalaAoVivo(loteId: string): SalaAoVivo {
       }, PRAZO_SEM_ESTADO_MS);
     };
 
+    /**
+     * Refaz o `entrar_lote` logo depois de `fimEm` (ao vivo) ou `inicioEm` (agendado), pelo
+     * relógio do servidor, em vez de esperar o resync de 30 s ou o evento. Se o status não mudou,
+     * tenta de novo em `RETENTATIVA_DO_PRAZO_MS`.
+     */
+    function agendarMudancaDeStatus(atual: EstadoDaSala) {
+      clearTimeout(temporizadorDoStatus);
+      temporizadorDoStatus = undefined;
+      const { status, fimEm, inicioEm } = atual.lote;
+      if (status !== 'ao_vivo' && status !== 'agendado') return;
+      const alvo = Date.parse(status === 'ao_vivo' ? fimEm : inicioEm);
+      const faltaMs = alvo - (Date.now() + atual.deslocamentoMs) + ATRASO_APOS_O_PRAZO_MS;
+      const espera = faltaMs > 0 ? faltaMs : RETENTATIVA_DO_PRAZO_MS;
+      temporizadorDoStatus = setTimeout(
+        () => {
+          if (estadoRef.current === atual) entrar();
+        },
+        Math.min(espera, TETO_DO_TEMPORIZADOR_MS),
+      );
+    }
+
+    const mostrarSelo = () => {
+      setSelo(true);
+      clearTimeout(temporizadorDoSelo);
+      temporizadorDoSelo = setTimeout(() => setSelo(false), DURACAO_DO_SELO_MS);
+    };
+
     const agendarResync = () => {
       clearTimeout(temporizadorDoResync);
       temporizadorDoResync = setTimeout(() => {
-        if (estadoRef.current?.lote.status === 'ao_vivo') entrar();
+        const status = estadoRef.current?.lote.status;
+        if (status === 'ao_vivo' || status === 'agendado') entrar();
         else agendarResync();
       }, INTERVALO_DO_RESYNC_MS);
     };
@@ -105,7 +143,12 @@ export function useSalaAoVivo(loteId: string): SalaAoVivo {
       const resultado = interpretarAck(ack);
       if (resultado.sucesso) {
         setErro(null);
-        publicar(criarEstadoDaSala(resultado.estado, Date.now()));
+        const { estado: novo, novaExtensao } = mesclarResync(
+          estadoRef.current,
+          criarEstadoDaSala(resultado.estado, Date.now()),
+        );
+        publicar(novo);
+        if (novaExtensao) mostrarSelo();
       } else {
         setErro(resultado.codigo);
       }
@@ -131,14 +174,14 @@ export function useSalaAoVivo(loteId: string): SalaAoVivo {
       };
     };
 
-    const aoLance = doLote((e: EventosDoServidor['lance_aceito']) =>
-      atualizar((s) => aplicarLance(s, e)),
-    );
+    const aoLance = doLote((e: EventosDoServidor['lance_aceito']) => {
+      const atual = estadoRef.current;
+      // Lacuna de seq: um evento se perdeu; não aplica e ressincroniza já.
+      if (atual && haLacunaDeSeq(atual, e)) entrar();
+      else atualizar((s) => aplicarLance(s, e));
+    });
     const aoFimEstendido = doLote((e: EventosDoServidor['fim_estendido']) => {
-      if (!atualizar((s) => aplicarFimEstendido(s, e))) return;
-      setSelo(true);
-      clearTimeout(temporizadorDoSelo);
-      temporizadorDoSelo = setTimeout(() => setSelo(false), DURACAO_DO_SELO_MS);
+      if (atualizar((s) => aplicarFimEstendido(s, e))) mostrarSelo();
     });
     const aoIniciar = doLote<EventosDoServidor['lote_iniciado']>(() => atualizar(aplicarIniciado));
     const aoEncerrar = doLote((e: EventosDoServidor['lote_encerrado']) =>
@@ -177,6 +220,7 @@ export function useSalaAoVivo(loteId: string): SalaAoVivo {
       clearTimeout(temporizadorDoResync);
       clearTimeout(temporizadorDoSelo);
       clearTimeout(temporizadorDoPrazo);
+      clearTimeout(temporizadorDoStatus);
       setSelo(false);
       socket.off('connect', aoConectar);
       socket.off('disconnect', aoPerder);
