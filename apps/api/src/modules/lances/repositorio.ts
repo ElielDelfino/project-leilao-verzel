@@ -239,10 +239,16 @@ const paraHex = (bytes: Buffer): string => bytes.toString('hex');
 const paraBase64url = (bytes: Buffer): string => bytes.toString('base64url');
 
 /**
- * Cadeia inteira do lote por `seq` crescente, sem paginação (ADR 0031 D7; índice do unique
- * `(lote_id, seq)`). Nunca seleciona `licitante_id` nem `idempotency_key`.
+ * Cadeia do lote por `seq` crescente, sem paginação (ADR 0031 D7; índice do unique
+ * `(lote_id, seq)`), com no máximo `limite` linhas: quem chama pede uma além do teto para
+ * detectar a cadeia longa demais e recusá-la, nunca para truncá-la. Nunca seleciona
+ * `licitante_id` nem `idempotency_key`.
  */
-export async function listarCadeiaDoLote(db: Executor, loteId: string): Promise<LinhaDaCadeia[]> {
+export async function listarCadeiaDoLote(
+  db: Executor,
+  loteId: string,
+  limite: number,
+): Promise<LinhaDaCadeia[]> {
   const linhas = await db
     .select({
       seq: bids.seq,
@@ -256,7 +262,8 @@ export async function listarCadeiaDoLote(db: Executor, loteId: string): Promise<
     })
     .from(bids)
     .where(eq(bids.loteId, loteId))
-    .orderBy(asc(bids.seq));
+    .orderBy(asc(bids.seq))
+    .limit(limite);
   return linhas.map((linha) => ({
     ...linha,
     hashAnterior: paraHex(linha.hashAnterior),
