@@ -7,8 +7,8 @@ As especificações em ./specs/ são a fonte da verdade. Toda mudança de compor
 Carregue cada spec sob demanda a partir do índice.
 
 @specs/INDEX.md
-@specs/PLAN.md
-@specs/002-organizacao-do-trabalho.md
+
+Leia `specs/PLAN.md` ao escolher a fase ou o lote. Leia `specs/002-organizacao-do-trabalho.md` ao delegar, revisar, fazer merge ou escalar ao humano (papéis, Definition of Done, escalonamento).
 
 ## Antes de propor mudanças
 Consulte ./specs/decisions/ (comece pelo HISTORY.md). Não reabra uma decisão aceita sem um fato novo. Para mudá-la, proponha uma nova ADR.
@@ -26,14 +26,7 @@ Consulte ./specs/decisions/ (comece pelo HISTORY.md). Não reabra uma decisão a
 - Subagentes: quick por padrão; full só quando quem delegou pedir.
 
 ## Comandos
-Disponíveis após as tarefas 001, 004, 005 e 011 da fase F0.
-- Instalar: `pnpm install` (Node 24 LTS, pnpm 12)
-- Segredos locais: `pnpm keys:generate` (cria `.env.local`)
-- Infra local: `pnpm infra:up` (= `docker compose --env-file .env --env-file .env.local up -d`)
-- Rodar: `pnpm dev` (API em :13000, web em :15173)
-- Migrations e seed: `pnpm db:migrate` · `pnpm db:seed`
-- Testar: `pnpm verify:quick` · `pnpm verify:full [--e2e]`
-- Lint e formatação: `pnpm lint` · `pnpm format`
+Os scripts estão no `package.json`. O passo a passo do ambiente local (Node 24.7 ou mais, pnpm 12, `keys:generate`, `infra:up`, `db:migrate`, `db:seed`, `dev`) está no README §Setup local. `pnpm dev` serve a API em :13000 e a web em :15173.
 
 ## Regras que não podem ser quebradas
 - Dinheiro em centavos inteiros; nunca float.
@@ -44,16 +37,13 @@ Disponíveis após as tarefas 001, 004, 005 e 011 da fase F0.
 - Vitrine, sala, auditoria e comprovante nunca chamam a Scryfall.
 - Respostas públicas nunca contêm nome ou e-mail de licitante.
 
-## Estrutura
-- ./specs/: especificações (fonte da verdade)
-- ./specs/decisions/: registro de decisões (ADRs) e HISTORY.md
-- ./tasks/: fila de trabalho (fora do Git)
-- ./tmp/: arquivos temporários (fora do Git)
-- ./docs/: documentação derivada
-- ./apps/api/, ./apps/web/, ./packages/contracts/: código
-- ./database/, ./eventbus/, ./cache/: definições dos sistemas auxiliares
-- ./infra/, ./scripts/: deploy, backup e utilitários; ./scripts/agents/: hook de fronteira e verificador de specs
-- ./.claude/agents/: orquestrador e agentes de papel
+## Onde fica cada coisa
+- `./tasks/` (fila de trabalho) e `./tmp/` (relatórios e estado do orquestrador) ficam fora do Git.
+- `./docs/` é documentação derivada das specs; na divergência, vale a spec.
+- `./scripts/agents/` guarda o hook de fronteira e o verificador de specs.
+- `./.claude/agents/` tem o orquestrador e os agentes de papel.
+- `./.claude/rules/` tem as convenções por área (`api`, `web`, `banco`), que carregam ao editar aquela área.
+- `./.claude/skills/` tem os procedimentos `nova-migracao` e `deploy-e-rollback`.
 
 ## Template de tarefa (`./tasks/nnn-titulo.md`)
 ```markdown
