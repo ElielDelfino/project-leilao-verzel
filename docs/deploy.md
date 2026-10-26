@@ -100,6 +100,10 @@ O estado fica em `/home/deploy/leilao`: `releases/<sha>/` (os 3 arquivos) e os l
 
 Queda do SSH ou cancelamento do job no meio do deploy não interrompem o `deploy-ssh`: ele ignora SIGHUP e SIGPIPE, e a saída passa por repassadores que, com o cliente fora, descartam o resto em vez de falhar. O fluxo vai até o fim, inclusive o rollback se o health falhar depois do `up`; o job fica vermelho (o `ssh` sai 255) e o resultado real aparece em `readlink /home/deploy/leilao/atual`.
 
+Enquanto isso, o `deploy-ssh` que ficou rodando na VPS segura a trava (`/home/deploy/leilao/.trava`): o run seguinte que chegar nesse intervalo falha com `outro deploy ou rollback em andamento`, sem mudar nada no ar. Espere alguns minutos (o deploy anterior termina sozinho) e dê "Re-run failed jobs" no run da ponta da `main`.
+
+Um run intermediário substituído pelo `concurrency` (outro push chegou antes de ele rodar) não publica, e se o commit seguinte falhar no CI, aquele commit intermediário nunca é publicado: por desenho, só a ponta da `main` publica.
+
 ### Verificação de vazamento
 
 `verificar-vazamento.sh` aplica `grep -qF -f /run/leilao/secrets/<nome>` às saídas de `docker inspect` dos containers do projeto, `docker compose config` (sem `--quiet`), `docker history --no-trunc` das duas imagens, `ps -eww -o args=` e `journalctl -u leilao-segredos.service`. O grep roda num container auxiliar da imagem da API (sem rede, só leitura, sem capabilities, uid 1000) que monta só os 6 arquivos; as saídas só passam pelo pipe. Ele imprime só `<segredo>: <fonte>` e sai 1 se houver ocorrência, ou `nenhum segredo nas saídas do Docker`. Uma fonte que falha, ou o journal da unidade vazio ou ilegível, sai 2 (falha fechada): o `deploy` precisa estar no grupo `systemd-journal`.
@@ -170,6 +174,8 @@ Guarde a `deploy_key` local até o fim do passo 7, que ainda a usa; ela nunca va
 1. o job `imagens` cria `leilao-api` e `leilao-web` como pacotes **privados**, e o job `deploy` falha no pull (`denied`): falha esperada, nada no ar muda;
 2. em github.com → seu perfil → Packages → `leilao-api` → Package settings → Change visibility → Public; repita para `leilao-web`. Isso é irreversível (um pacote público não volta a privado) e as imagens não têm segredo (a verificação de vazamento olha o `docker history`);
 3. em Actions, "Re-run failed jobs" no run do Deploy.
+
+**AVISO:** não deixe a `main` andar (nenhum push) entre o primeiro run e o "Re-run failed jobs". Se ela andar, o re-run do run antigo termina **verde sem publicar nada**: o job `deploy` vê que o sha já não é a ponta e sai com o aviso `::notice::<sha> não é mais a ponta da main (...); nada a publicar`. Nesse caso, quem faz o deploy é o run do commit novo, depois de os pacotes ficarem públicos (se ele já tiver falhado no pull, dê "Re-run failed jobs" nele). Verde não quer dizer publicado: confira sempre `sudo readlink /home/deploy/leilao/atual` na VPS (o diretório é do `deploy`) ou o log do job `deploy`.
 
 No **primeiro** deploy, o health pode falhar se o Caddy demorar mais de 60 s para obter o certificado ACME do Let's Encrypt (sem versão anterior, o `deploy-ssh` só sai ≠ 0 e deixa os containers no ar). A solução é outro "Re-run failed jobs", sem mudar nada: o certificado já obtido fica no volume `caddy_data`.
 

@@ -44,7 +44,7 @@ Não há alerta de orçamento: o único custo é o preço fixo da VPS.
 
 ## 3. Preparar o servidor
 
-Já feito à mão em 2026-10-25: usuários `eliel` e `deploy`, UFW 22/80/443, drop-in do sshd e unattended-upgrades. O `preparar-vps.sh` é idempotente e só completa o que faltar.
+Já feito à mão em 2026-10-25: usuários `eliel` e `deploy`, sudo sem senha do `eliel` em `/etc/sudoers.d/90-eliel` (§3.2 item 4), UFW 22/80/443, drop-in do sshd e unattended-upgrades. O `preparar-vps.sh` é idempotente e só completa o que faltar.
 
 ### 3.1 Copiar os arquivos
 
@@ -80,6 +80,16 @@ scp -r infra/vps infra/deploy/gerar-env-local.sh infra/deploy/materializar-segre
    ssh root@teste-verzel.duckdns.org true                     # tem de ser recusado
    ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive \
      eliel@teste-verzel.duckdns.org true                       # tem de dar "Permission denied (publickey)"
+   ```
+
+   O `sudo -n true` pressupõe sudo sem senha (NOPASSWD) para o `eliel`, dado pelo `/etc/sudoers.d/90-eliel` criado à mão na preparação do servidor (§3); sem ele, o comando sai com "a password is required" mesmo com o `eliel` no grupo `sudo`. Se o arquivo não existir, crie-o pela sessão A, validando antes de instalar (um sudoers inválido trava o `sudo`):
+
+   ```sh
+   t="$(mktemp)"
+   printf 'eliel ALL=(ALL:ALL) NOPASSWD: ALL\n' > "$t"
+   sudo visudo -cf "$t" && sudo install -o root -g root -m 440 "$t" /etc/sudoers.d/90-eliel
+   rm -f "$t"
+   sudo visudo -c   # tem de terminar com "parsed OK" para todos os arquivos
    ```
 
 5. Se a sessão B falhar, corrija pela sessão A (o drop-in é `/etc/ssh/sshd_config.d/00-leilao.conf`; depois `sudo sshd -t && sudo systemctl try-reload-or-restart ssh.service`).
