@@ -2,7 +2,7 @@
 
 Fonte: specs/014 (§Servidor, §Produção, §Segredos, §CI/CD, §Backup), ADR 0023, ADR 0033 (VPS Hostinger, que substitui a 0013 e a 0020) e ADR 0034 (backup e uptime fora da entrega). Variáveis e formatos: [variaveis-de-ambiente.md](variaveis-de-ambiente.md).
 
-Este documento descreve o compose de produção para a VPS (tarefa 129) e a entrega dos segredos. O hardening do servidor e o workflow de deploy chegam com as próximas tarefas do infra da F5. Não há backup agendado nem monitor de uptime na entrega (ADR 0034): só um `pg_dump` manual, descrito no runbook (`docs/operacao.md`, tarefa 130). Onde este texto e a specs/014 divergirem, vale a spec.
+Este documento descreve o compose de produção para a VPS (tarefa 129) e a entrega dos segredos. O hardening do servidor, a instalação dos segredos na VPS, a verificação, a rotação e o backup manual estão no runbook [operacao.md](operacao.md) (tarefa 130); o workflow de deploy chega com a próxima tarefa do infra da F5. Não há backup agendado nem monitor de uptime na entrega (ADR 0034): só um `pg_dump` manual, descrito no runbook. Onde este texto e a specs/014 divergirem, vale a spec.
 
 ## Compose de produção
 
