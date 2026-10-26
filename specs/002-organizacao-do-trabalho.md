@@ -63,7 +63,7 @@ Pare e pergunte quando:
 - uma migration remover ou alterar colunas existentes;
 - for preciso adicionar uma dependência de produção;
 - a mudança tocar regras de dinheiro, lance ou integridade do histórico;
-- a ação puder gerar custo no GCP;
+- a ação puder gerar custo (VPS, registry ou qualquer serviço externo; ADR 0033);
 - um bloqueio durar mais de 15 minutos.
 
 Fora desses casos, siga a recomendação mais conservadora, registre-a na tarefa e prossiga.

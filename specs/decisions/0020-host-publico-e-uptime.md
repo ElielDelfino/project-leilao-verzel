@@ -1,6 +1,6 @@
 # 0020 — Host público e uptime check
 
-Status: provisória (revisar na tarefa 008, ao criar a VM, ou se houver domínio próprio)
+Status: substituída por 0033 (host em DuckDNS; o UptimeRobot continua)
 Data: 2026-10-24
 
 ## Contexto

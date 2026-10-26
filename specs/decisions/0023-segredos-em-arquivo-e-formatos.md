@@ -1,6 +1,6 @@
 # 0023 — Segredos em arquivo, formatos das chaves e variáveis não secretas
 
-Status: aceita
+Status: parcialmente substituída por 0033 (itens 1 e 7: o Secret Manager e o `fetch-secrets.sh` dão lugar ao `.env.local` do servidor e à materialização no boot; os itens 2 a 6 continuam)
 Data: 2026-10-24
 Substitui: ADR 0015 (mantém o Secret Manager e troca a entrega dos segredos)
 Decisão: do humano, em 2026-10-24 (tarefa 015), aceitando os itens 1 a 7 como propostos e fixando o valor de `SEED_DEMO_PASSWORD`.

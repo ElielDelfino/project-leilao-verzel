@@ -1,6 +1,6 @@
 # 0024 — Caddy com 64 MB, swap só para Postgres e API, sem HTTP/3
 
-Status: aceita
+Status: parcialmente substituída por 0033 (item 1: o Caddy passa a 128 MB com `GOMEMLIMIT` de 96 MiB; os itens 2 a 4 continuam)
 Data: 2026-10-24
 Decisão: do humano, em 2026-10-24 (ciclo de correção 1 da tarefa 015, a partir do compose de produção da tarefa 007)
 Complementa: ADR 0013 (não a substitui)

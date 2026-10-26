@@ -109,6 +109,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), versionamen
 - Sessão opcional em rota pública (task 053): `@SessaoOpcional()` e `@UsuarioOpcional()` em `common/auth/metadados.ts`; o guard global põe `usuario` na requisição só com access token válido e, sem cookie ou com token expirado, adulterado ou de outra chave, segue anônimo (nunca 401 nem refresh); CSRF continua valendo e `@Papel` não se aplica.
 
 ### Decidido
+- Produção numa VPS Hostinger em vez do GCP (ADR 0033, substitui a 0013 e a 0020): DuckDNS + Let's Encrypt pelo Caddy, segredos no `.env.local` do servidor, deploy por SSH restrito com rollback, backup com cópia externa cifrada; specs/014 reescrita; specs/011 registra o teto de 1000 lances (503) e o `statement_timeout` de 5 s da auditoria.
 - Cartas Magic via Scryfall; monolito modular NestJS + SPA React; lance REST + Socket.IO.
 - Hash chain + Ed25519 + selo; carteira em ledger; encerramento por varredura de 1 s.
 - Deploy GCP e2-micro (Always Free); RNFs de demo; segredos no Secret Manager.

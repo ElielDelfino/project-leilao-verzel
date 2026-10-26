@@ -1,6 +1,6 @@
 # 0013 — Deploy na GCP e2-micro (Always Free) com Docker Compose
 
-Status: aceita
+Status: substituída por 0033 (provedor e VM; continuam Docker Compose, imagens no GHCR em `linux/amd64` e sem staging)
 Data: 2026-10-24
 
 ## Contexto

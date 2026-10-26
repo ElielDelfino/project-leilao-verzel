@@ -1,6 +1,6 @@
 # 0014 — RNFs de demo (50 por lote, p95 < 300 ms)
 
-Status: provisória (revisar se o deploy sair da e2-micro)
+Status: provisória (o deploy saiu da e2-micro pela ADR 0033; metas mantidas, revisar com o k6 contra a VPS na F5)
 Data: 2026-10-24
 
 ## Contexto

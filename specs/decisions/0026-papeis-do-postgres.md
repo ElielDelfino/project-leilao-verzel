@@ -1,6 +1,6 @@
 # 0026 — Papéis do Postgres: dono das migrations e papel da API
 
-Status: aceita
+Status: aceita (só a origem do 6º segredo em produção foi substituída pela 0033: `.env.local` do servidor em vez do Secret Manager)
 Data: 2026-10-25
 Decisão: do humano, em 2026-10-25 (tarefa 036, itens D1 a D3 aprovados como recomendados)
 Complementa: ADR 0005 e ADR 0023 (não as substitui)

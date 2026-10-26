@@ -18,7 +18,7 @@ Fonte da verdade do projeto. Carregue cada spec sob demanda.
 | [011-auditoria-e-comprovante.md](011-auditoria-e-comprovante.md) | Auditoria e comprovante | página pública, comprovante, meus arremates | 008, 010 | aprovada |
 | [012-frontend-telas.md](012-frontend-telas.md) | Frontend: telas | rotas, mensagens, dark mode, acessibilidade | 003–011 | aprovada |
 | [013-verificacao-e-testes.md](013-verificacao-e-testes.md) | Verificação e testes | níveis de teste, verify quick/full | 001, 002 | aprovada |
-| [014-deploy-e-operacao.md](014-deploy-e-operacao.md) | Deploy e operação | GCP e2-micro, CI/CD, segredos, backup | 001, 013 | aprovada |
+| [014-deploy-e-operacao.md](014-deploy-e-operacao.md) | Deploy e operação | VPS Hostinger, DuckDNS + TLS, hardening, CI/CD, segredos, backup | 001, 013 | aprovada |
 
 Contratos: [`apps/api/openapi.yaml`](../apps/api/openapi.yaml) (criado na tarefa 009) · [`eventbus/socketio/asyncapi.yaml`](../eventbus/socketio/asyncapi.yaml)
 Sistemas auxiliares: [`database/postgres/`](../database/postgres/README.md) · [`cache/redis/`](../cache/redis/README.md)
