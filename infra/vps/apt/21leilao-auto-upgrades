@@ -1,0 +1,5 @@
+// Casa de Leilões: liga a atualização diária das listas e o unattended-upgrades (ADR 0033 item
+// 3.5). Instalado em /etc/apt/apt.conf.d/ por infra/vps/preparar-vps.sh; é lido depois do
+// 20auto-upgrades do pacote, então estes valores vencem.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";

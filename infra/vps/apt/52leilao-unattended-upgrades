@@ -1,0 +1,14 @@
+// Casa de Leilões: unattended-upgrades só com as atualizações de segurança e sem reinício
+// automático (ADR 0033 item 3.5, specs/014 §Servidor). Instalado em /etc/apt/apt.conf.d/ por
+// infra/vps/preparar-vps.sh. É lido depois do 50unattended-upgrades do pacote: o #clear apaga a
+// lista de origens de lá (que inclui o pocket da release) e a lista abaixo fica no lugar.
+// Confira o valor efetivo com: apt-config dump | grep -i unattended
+#clear Unattended-Upgrade::Allowed-Origins;
+#clear Unattended-Upgrade::Origins-Pattern;
+Unattended-Upgrade::Allowed-Origins {
+  "${distro_id}:${distro_codename}-security";
+  "${distro_id}ESMApps:${distro_codename}-apps-security";
+  "${distro_id}ESM:${distro_codename}-infra-security";
+};
+// O reinício é manual, fora de leilão ao vivo, quando /var/run/reboot-required existir.
+Unattended-Upgrade::Automatic-Reboot "false";

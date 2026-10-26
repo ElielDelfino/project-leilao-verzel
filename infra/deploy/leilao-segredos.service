@@ -1,0 +1,25 @@
+# Casa de Leilões: grava /run/leilao/secrets/ a partir de /opt/leilao/.env.local a cada boot,
+# antes do Docker (specs/014 §Segredos > Produção, ADR 0033 item 4.3). /run é tmpfs e se perde no
+# reinício. Instalação (docs/operacao.md):
+#   sudo install -o root -g root -m 644 leilao-segredos.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now leilao-segredos.service
+# O script imprime só nomes, então o journal da unidade não tem valores (specs/014 §Verificação de
+# vazamento, item 5).
+[Unit]
+Description=Casa de Leiloes: materializa os segredos em /run/leilao/secrets
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/leilao/bin/materializar-segredos.sh
+UMask=0077
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+
+[Install]
+# Toda partida do docker.service puxa esta unidade, e o Before= a põe antes dele.
+WantedBy=docker.service multi-user.target
