@@ -22,7 +22,7 @@ Casa de Leilões online de cartas **Magic: The Gathering** (dados e imagens da [
 
 ## Avisos
 
-- **O k6 roda de fora da VPS.** O teste de carga nunca é executado no servidor de produção: ele roda na máquina do desenvolvedor ou num runner do CI, apontando para o endereço público (specs/013 §Níveis de teste, [specs/014](specs/014-deploy-e-operacao.md) §Produção, [ADR 0033](specs/decisions/0033-producao-em-vps-hostinger.md)).
+- **O k6 roda de fora da VPS.** O teste de carga nunca é executado no servidor de produção: ele roda na minha máquina ou num runner do CI, apontando para o endereço público (specs/013 §Níveis de teste, [specs/014](specs/014-deploy-e-operacao.md) §Produção, [ADR 0033](specs/decisions/0033-producao-em-vps-hostinger.md)).
 - **`pnpm demo:adulterar` nunca roda em produção.** O script altera um lance direto no banco, desligando o trigger que protege a tabela, só para mostrar que a auditoria acusa "adulterado". A VPS não tem Node nem o repositório, o script recusa `NODE_ENV=production` e exige o opt-in explícito `DEMO_ADULTERAR=1` ([specs/008](specs/008-integridade-do-historico.md) §Interfaces, [specs/014](specs/014-deploy-e-operacao.md) §Produção). Use só contra o banco de desenvolvimento.
 - A senha das contas de demonstração é pública de propósito (abaixo). Não existe senha de produção neste documento nem no repositório: os seis segredos reais vivem só na VPS ([docs/deploy.md](docs/deploy.md) §Segredos em produção).
 
@@ -99,7 +99,7 @@ Depois de um `git pull` que traga migrations ou segredos novos, rode de novo `pn
 | `pnpm verify:full` | tudo, com banco isolado por Testcontainers; `pnpm verify:full --e2e` inclui o Playwright |
 | `pnpm lint` · `pnpm format` · `pnpm typecheck` | lint, formatação e checagem de tipos |
 | `pnpm contracts:gen` · `pnpm contracts:check` · `pnpm contracts:lint` | gera, confere e valida os tipos dos contratos OpenAPI e AsyncAPI |
-| `pnpm db:generate` | gera migration a partir do schema (uso do desenvolvedor de banco) |
+| `pnpm db:generate` | gera migration a partir do schema (uso em desenvolvimento) |
 | `pnpm db:sync-password` | reaplica a senha do dono do banco de dev sem apagar o volume |
 | `pnpm demo:lote` | cria um lote ao vivo com 8 lances pela API local, para testar a auditoria (**só dev**) |
 | `pnpm demo:adulterar` | demonstração de adulteração (**só dev**, ver [Avisos](#avisos)) |
@@ -271,27 +271,27 @@ Produção numa VPS Hostinger (1 vCPU, 4 GB, Ubuntu 24.04, sem painel), com `htt
 
 ## Uso de IA
 
-O projeto foi construído com **agentes de IA do Claude Code**, sob decisões e aprovações do humano. O processo está descrito em [specs/002](specs/002-organizacao-do-trabalho.md) e nas ADRs [0019](specs/decisions/0019-organizacao-agentes-e-git.md), [0021](specs/decisions/0021-orquestracao-e-agentes-executores.md), [0028](specs/decisions/0028-modelo-e-esforco-por-papel.md) e [0030](specs/decisions/0030-merge-local-por-lote.md).
+Construí este projeto com o **Claude Code**, da Anthropic. A IA escreveu a maior parte do código e das especificações; eu defini o escopo e as regras, tomei as decisões de arquitetura, revisei o que entrou e aprovei cada merge, push e deploy. O processo completo está em [specs/002](specs/002-organizacao-do-trabalho.md) e nas ADRs [0019](specs/decisions/0019-organizacao-agentes-e-git.md), [0021](specs/decisions/0021-orquestracao-e-agentes-executores.md), [0028](specs/decisions/0028-modelo-e-esforco-por-papel.md) e [0030](specs/decisions/0030-merge-local-por-lote.md).
 
-**Como funcionou**
+**Como trabalhei**
 
-- **Specs primeiro.** As especificações em `specs/` são a fonte da verdade; toda mudança de comportamento começa por elas, e decisões viram ADRs. `scripts/agents/check_specs.py` confere a consistência de specs, ADRs, tarefas e links.
-- **Orquestrador e papéis** (`.claude/agents/`). Um **orquestrador** lê a fila de tarefas, propõe lotes de até 3 tarefas sem sobreposição de arquivos, delega e coleta relatórios. Os executores têm cada um um papel e uma pasta: `spec-guardian` (specs, contratos, docs), `api-dev` (API), `web-dev` (SPA), `db-dev` (schema e migrations), `qa` (testes de integração, e2e e carga) e `infra` (CI/CD, Docker, deploy). Os executores não conversam entre si: tudo passa por tarefas e relatórios de formato fixo (modelo hub-and-spoke, ADR 0021).
-- **Modelo por papel** (ADR 0028): os papéis que lidam com dinheiro, lance, concorrência, autenticação e integridade (`api-dev`, `db-dev`) usam o modelo mais forte; os demais, um modelo mais leve.
-- **Fronteira garantida por hook.** Um hook (`scripts/agents/guard_paths.py`) bloqueia edições fora das pastas do papel; só o spec-guardian altera specs e contratos, e só o db-dev, migrations. O hook não cobre escrita via shell; a última barreira é a revisão do diff.
-- **Um worktree e uma branch por tarefa** (`tipo/nnn-slug`), commits em Conventional Commits citando a tarefa. Os agentes de papel não fazem commit: o orquestrador commita e integra.
-- **Revisão e verificação.** Cada entrega passa por revisores (code-reviewer sempre; security-reviewer em auth, carteira, lances, integridade e CI/infra; database-reviewer em SQL; typescript-reviewer e react-reviewer conforme o código) e por `pnpm verify:quick`. Achados CRITICAL e HIGH voltam ao agente. A cada lote, `pnpm verify:full` roda na `main` local; a cada 3 lotes, um PR roda o CI completo (gitleaks, `audit` e CodeQL só rodam lá).
-- **Testes primeiro**, com o teste que cobre cada mudança, e gate de evidência nos agentes (rastreabilidade à spec, fronteira, ADR).
+- **Specs primeiro.** As especificações em `specs/` são a fonte da verdade: toda mudança de comportamento começa por elas, e cada decisão vira uma ADR. `scripts/agents/check_specs.py` confere a consistência de specs, ADRs, tarefas e links.
+- **Tarefas pequenas, uma área por vez.** Dividi o trabalho em tarefas por área (API, web, banco, infra, testes e docs). Cada uma foi feita numa branch própria, por um agente do Claude Code restrito à pasta daquela área. Um hook (`scripts/agents/guard_paths.py`) bloqueia edições fora dela; ele não cobre escrita via shell, então a última barreira é a revisão do diff.
+- **Revisão em camadas.** Todo código passa por revisores automatizados (qualidade; segurança em autenticação, carteira, lances, integridade e infra; SQL), e eu leio os relatórios e o diff. Achados graves voltam para correção antes do merge.
+- **Verificação.** Cada mudança vem com o teste que a cobre. `pnpm verify:quick` roda no dia a dia, `pnpm verify:full` roda a cada lote na `main` local, e o CI (gitleaks, `audit`, CodeQL e o full) roda a cada PR.
+- Commits no padrão Conventional Commits, citando o número da tarefa.
 
-**O que o humano decidiu e aprovou**
+**O que eu decidi e aprovei**
 
 - Escopo, prazo e a escolha de não ter plano de corte ([ADR 0001](specs/decisions/0001-decisoes-iniciais.md)); a API externa e a stack ([ADR 0002](specs/decisions/0002-api-externa-scryfall.md), [ADR 0011](specs/decisions/0011-stack-backend-frontend.md)); a técnica de integridade; as metas de carga ([ADR 0014](specs/decisions/0014-rnfs-de-demo.md)); a produção numa VPS e o que fica fora da entrega (ADRs 0033 e 0034).
-- Aprovação de cada lote, de cada merge, de cada push e PR, de dependências de produção, de mudanças em contratos, em dinheiro, lance ou integridade, e de qualquer ação com custo (lista de escalonamento em [specs/002](specs/002-organizacao-do-trabalho.md)).
+- Cada merge, push e PR; as dependências de produção; as mudanças em contratos, dinheiro, lance ou integridade; e qualquer ação com custo (lista em [specs/002](specs/002-organizacao-do-trabalho.md)).
 - Toda ação na VPS, no DuckDNS e nos secrets do GitHub: nenhum agente acessa a VPS ([docs/operacao.md](docs/operacao.md)).
 
-**Limites assumidos:** a IA escreveu a maior parte do código e das specs, e a verificação depende dos testes, das revisões automatizadas e da revisão humana dos relatórios e do diff. Nenhum segredo real é passado aos agentes.
+**Limites assumidos:** como a IA escreveu a maior parte do código, a qualidade depende dos testes, das revisões automatizadas e da minha leitura dos relatórios e do diff. Nenhum segredo real é passado aos agentes.
 
 ## Créditos
+
+Autor: Eliel Delfino ([@ElielDelfino](https://github.com/ElielDelfino)).
 
 Dados e imagens das cartas: [Scryfall](https://scryfall.com). Este projeto não usa logos da Scryfall nem sugere endosso dela.
 
