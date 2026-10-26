@@ -51,6 +51,14 @@ const PARES: Array<[string, string, number]> = [
   ['cor-foco', 'cor-fundo', NAO_TEXTO_AA],
   ['cor-foco', 'cor-superficie', NAO_TEXTO_AA],
   ['cor-borda-controle', 'cor-superficie', NAO_TEXTO_AA],
+  ['cor-borda-controle', 'cor-fundo', NAO_TEXTO_AA],
+  // Telas da F4 (auditoria, comprovante, meus arremates, diálogo): botões primários e os
+  // indicadores com borda primária precisam de 3:1 contra o fundo e a superfície (SC 1.4.11).
+  ['cor-primario', 'cor-fundo', NAO_TEXTO_AA],
+  ['cor-primario', 'cor-superficie', NAO_TEXTO_AA],
+  // Selo e veredito usam border-current: a borda herda cor-texto e cor-texto-suave.
+  ['cor-texto', 'cor-fundo', NAO_TEXTO_AA],
+  ['cor-texto-suave', 'cor-superficie', NAO_TEXTO_AA],
 ];
 
 const TEMAS: Array<[string, Cores]> = [
