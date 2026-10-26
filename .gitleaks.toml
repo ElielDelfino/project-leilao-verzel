@@ -1,0 +1,15 @@
+# Configuração do gitleaks (job `gitleaks` do CI, .github/workflows/ci.yml).
+# Mantém todas as regras padrão do binário e só acrescenta uma exceção estreita.
+# Não use .gitleaksignore por fingerprint: os PRs entram por rebase e os SHAs mudam.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """\
+  Falso positivo: scripts/vps-segredos.test.mjs e scripts/deploy-ssh.test.mjs listam os \
+  NOMES das variáveis de segredo (const VARIAVEIS = ['DB_PASSWORD', ..., 'ED25519_PRIVATE_KEY']) \
+  e geram os valores em tempo de execução; não há segredo nesses arquivos. Vale só para a \
+  regra generic-api-key e só para esses dois caminhos; as demais regras continuam valendo."""
+targetRules = ["generic-api-key"]
+paths = ['''^scripts/(vps-segredos|deploy-ssh)\.test\.mjs$''']
