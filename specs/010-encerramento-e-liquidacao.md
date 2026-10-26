@@ -49,11 +49,11 @@ Nenhum evento sai antes do COMMIT, e rollback não publica nada. Os payloads est
 
 Se o processo cair entre o COMMIT e a publicação, os clientes se recuperam no resync (specs/009).
 
-### Cancelamento (ADR 0025, complementada pela 0032)
+### Cancelamento (ADR 0025, complementada pela 0032 e pela 0035)
 `POST /api/painel/lotes/{id}/cancelamento` (dono; rota de specs/006, servida por este módulo; `openapi.yaml` 0.6.0). Antes da transação: CSRF (403), sessão (401), papel (403 `PAPEL_NAO_PERMITIDO`) e `id` que não é UUID (404). Uma transação com `SET LOCAL lock_timeout = '5s'` e `SET LOCAL statement_timeout = '10s'` (os dois valem só dentro da transação), nesta ordem de locks (specs/004):
 1. Trava o lote com `FOR UPDATE` (interface de `lotes`). Lote inexistente ou de outro leiloeiro → 404 `NAO_ENCONTRADO`; `encerrado` ou `cancelado` gravado → 409 `LOTE_ENCERRADO`; **`agora(tx)` ≥ `fim_em` → 409 `LOTE_ENCERRADO`**, pois o status derivado já é `encerrado` (specs/006): o lote vencido que o job ainda não processou é liquidado, não cancelado.
-2. Com líder: `carteira.travarCarteiras(tx, [lider])` e `carteira.estornar(tx, lider, valor, {loteId, lanceId})` (lançamento `estorno` com `lote_id` e `lance_id` do lance do líder, comprometido −v). O `valor` é o `compromisso` do líder lido sob o lock do lote (`lance_atual_centavos` do lote travado); o corpo da requisição não existe e nenhum valor vem do cliente.
-3. `lances.selar(tx, ...)` com status `cancelado` (specs/008; `totalLances` e `hashFinal` do histórico até ali).
+2. `lances.selar(tx, ...)` com status `cancelado` (specs/008; `totalLances` e `hashFinal` do histórico até ali). O selo só lê `bids` e grava `lot_seals`, sem travar carteira, e confere o lote travado contra a cadeia antes de gravar (`LOTE_DIVERGENTE` desfaz tudo antes de qualquer movimento de dinheiro, como no encerramento). Devolve o selo gravado e o `ultimoLanceId`.
+3. Com líder: `carteira.travarCarteiras(tx, [lider])` e `carteira.estornar(tx, lider, valor, {loteId, lanceId})` (lançamento `estorno` com `lote_id` e `lance_id`, comprometido −v). O `lanceId` é o `ultimoLanceId` devolvido por `selar` no passo 2: é o único caminho pela interface pública de `lances`, porque `liquidacao` não lê `bids` (ADR 0035). O `valor` é o `compromisso` do líder lido sob o lock do lote (`lance_atual_centavos` do lote travado); o corpo da requisição não existe e nenhum valor vem do cliente.
 4. Muda o status para `cancelado` e grava `cancelado_em` (interface de `lotes`).
 5. COMMIT → eventos `lote_cancelado` e, se havia líder, `saldo_atualizado` para ele (specs/009). A resposta é 200 com o `Lote` (status `cancelado`), lido por `obterResumos` depois do COMMIT.
 
@@ -88,4 +88,4 @@ Lote agendado ou sem lances: sem líder, sem estorno; o selo `cancelado` tem `to
 - [ ] Os eventos de §Eventos saem só depois do COMMIT, com o destino da tabela; nenhum payload tem nome, e-mail nem id de usuário (teste que varre o JSON).
 
 ## Decisões relacionadas
-- decisions/0008-encerramento-por-varredura.md, 0014-rnfs-de-demo.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md, 0032-complementos-da-f4.md
+- decisions/0008-encerramento-por-varredura.md, 0014-rnfs-de-demo.md, 0025-cancelamento-em-liquidacao-e-arestas-dos-modulos.md, 0032-complementos-da-f4.md, 0035-ordem-do-cancelamento.md
