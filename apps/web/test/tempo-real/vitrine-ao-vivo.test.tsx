@@ -66,6 +66,18 @@ describe('vitrine ao vivo', () => {
     expect(screen.getByText('3 lances')).toBeInTheDocument();
   });
 
+  it('fim_estendido atrasado não recua o fim do card', async () => {
+    const socket = new SocketFalso();
+    await abrirVitrine(socket);
+    act(() => socket.receber('fim_estendido', { loteId: ID, fimEm: '2026-10-26T15:40:00Z' }));
+    await screen.findByText(/^Termina em 26\/10\/2026,? 12:40$/);
+
+    act(() => socket.receber('fim_estendido', { loteId: ID, fimEm: '2026-10-26T15:36:00Z' }));
+
+    expect(screen.getByText(/^Termina em 26\/10\/2026,? 12:40$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Termina em 26\/10\/2026,? 12:36$/)).not.toBeInTheDocument();
+  });
+
   it('evento de outro lote não altera o card', async () => {
     const socket = new SocketFalso();
     await abrirVitrine(socket);

@@ -68,11 +68,59 @@ function maiorFim(atual: string, recebido: string): string {
   return Date.parse(recebido) > Date.parse(atual) ? recebido : atual;
 }
 
+/**
+ * `lance_aceito` com `seq` acima do último + 1: algum evento se perdeu (specs/009). Sem lances,
+ * o último é 0. Sala terminal não ressincroniza por isso.
+ */
+export function haLacunaDeSeq(
+  estado: EstadoDaSala,
+  evento: EventosDoServidor['lance_aceito'],
+): boolean {
+  if (ehTerminal(estado)) return false;
+  return evento.seq > (estado.lances[0]?.seq ?? 0) + 1;
+}
+
+export interface ResyncMesclado {
+  readonly estado: EstadoDaSala;
+  /** O resync trouxe um `fimEm` ainda não anunciado: a sala deve mostrar o selo. */
+  readonly novaExtensao: boolean;
+}
+
+/**
+ * Estado do resync sobre o anterior (specs/012 §Extensão vista só no resync). O servidor manda no
+ * estado, mas o aviso de fim estendido é preservado; um `fimEm` além do já anunciado é anunciado
+ * uma vez. Sem estado anterior (primeira entrada) nunca anuncia.
+ */
+export function mesclarResync(
+  anterior: EstadoDaSala | null,
+  recebido: EstadoDaSala,
+): ResyncMesclado {
+  if (!anterior) return { estado: recebido, novaExtensao: false };
+  if (Date.parse(recebido.lote.fimEm) > Date.parse(anterior.fimAnunciadoEm)) {
+    return {
+      estado: {
+        ...recebido,
+        avisoFimEstendido: `O fim do lote foi estendido para ${formatarDataHora(recebido.lote.fimEm)}.`,
+      },
+      novaExtensao: true,
+    };
+  }
+  return {
+    estado: {
+      ...recebido,
+      avisoFimEstendido: anterior.avisoFimEstendido,
+      fimAnunciadoEm: anterior.fimAnunciadoEm,
+    },
+    novaExtensao: false,
+  };
+}
+
 export function aplicarLance(
   estado: EstadoDaSala,
   evento: EventosDoServidor['lance_aceito'],
 ): EstadoDaSala {
   if (ehTerminal(estado)) return estado;
+  if (haLacunaDeSeq(estado, evento)) return estado;
   const maisRecente = estado.lances[0];
   // Evento atrasado ou repetido (já refletido no estado do resync): ignora.
   if (maisRecente && evento.seq <= maisRecente.seq) return estado;
