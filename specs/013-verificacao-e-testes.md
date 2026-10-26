@@ -10,7 +10,7 @@ Depende de: 001, 002
 | Integração | Vitest + Postgres real + Redis | rotas da API, concorrência de lances, job de encerramento, triggers, reconciliação do ledger |
 | Contrato | Vitest + validador OpenAPI/AsyncAPI | toda resposta de teste de integração é validada contra o `openapi.yaml`; payloads de eventos contra o `asyncapi.yaml` |
 | E2E | Playwright | cadastro/login; depósito; lance → superado → ganhando; liquidação → comprovante; auditoria detectando adulteração; cancelamento com estorno; axe-core |
-| Carga | k6 | 50 VUs dando lances num lote + 200 sockets; thresholds p95 < 300 ms e entrega < 1 s |
+| Carga | k6 | 50 VUs dando lances num lote + 200 sockets; thresholds p95 < 300 ms e entrega < 1 s. Contra a VPS, o k6 roda sempre de fora dela (máquina do humano ou runner do CI), nunca na própria VPS (ADR 0033), e nenhum lote do cenário passa de 1000 lances (teto da auditoria, specs/011 §Teto da cadeia) |
 
 Cobertura mínima de 80% (linhas e branches) nos módulos de domínio da API (`lances`, `carteira`, `lotes`, `liquidacao`, `identidade`).
 
@@ -75,4 +75,4 @@ Resumo final com ✓/✗/pulado e o tempo de cada passo. Implementação em `scr
 - Subagentes: quick por padrão, full só quando quem delegou pedir.
 
 ## Decisões relacionadas
-- decisions/0016-testes-dois-niveis.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md
+- decisions/0016-testes-dois-niveis.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md, 0033-producao-em-vps-hostinger.md

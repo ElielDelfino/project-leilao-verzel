@@ -7,7 +7,7 @@ Depende de: 001, 006, 007
 - RF-01 A sala atualiza lance atual, histórico, posição, contagem regressiva e "ganhando/superado" sem recarregar.
 - RF-02 A vitrine atualiza o lance atual e o status dos cards visíveis.
 - RNF-01 Um lance aceito aparece nos outros clientes em < 1 s (p95).
-- RNF-02 50 conexões por lote e 200 no total numa instância da e2-micro.
+- RNF-02 50 conexões por lote e 200 no total numa instância da API na VPS de produção (specs/014, ADR 0033).
 
 ## Comportamento
 - Socket.IO 4.8, namespace `/leilao`, **só transporte websocket** (sem long-polling, dispensando sticky session). Adapter Redis para escalar horizontalmente no futuro. Dependências de produção aprovadas na ADR 0031 (D3): `socket.io`, `@nestjs/websockets`, `@nestjs/platform-socket.io`, `@socket.io/redis-adapter`.

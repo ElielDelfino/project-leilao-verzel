@@ -1,6 +1,6 @@
 # 0018 — Observabilidade enxuta e backup diário
 
-Status: aceita
+Status: parcialmente substituída por 0033 (sai o alerta de orçamento do GCP; o backup ganha cópia fora da VPS)
 Data: 2026-10-24
 
 ## Decisão

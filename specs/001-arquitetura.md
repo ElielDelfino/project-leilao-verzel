@@ -4,7 +4,7 @@ Status: aprovada
 Depende de: 000
 
 ## Contexto
-Um dev, 5 dias, deploy numa VM gratuita de 1 GB. A regra central (aceitar um lance) precisa ser atômica entre lotes, carteira e histórico.
+Um dev, 5 dias, deploy numa VPS de 1 vCPU e 4 GB (ADR 0033). A regra central (aceitar um lance) precisa ser atômica entre lotes, carteira e histórico.
 
 ## Visão geral
 ```
@@ -62,8 +62,9 @@ Consequências da tabela:
 | Integração | Uso | Se falhar |
 |---|---|---|
 | Scryfall | busca de cartas e snapshot na criação do lote | só a busca do painel fica indisponível (503 `CATALOGO_INDISPONIVEL`); o resto não depende dela (specs/005) |
-| GCP Secret Manager | leitura de segredos no deploy | o deploy aborta e mantém a versão anterior (specs/014) |
 | GHCR | registro de imagens | o deploy aborta e mantém a versão anterior |
+| Let's Encrypt (pelo Caddy) | certificado TLS de `<subdominio>.duckdns.org` | o certificado vigente continua valendo; o Caddy tenta renovar de novo (specs/014) |
+| DuckDNS | registro A do host | o site fica inacessível pelo nome até o DNS voltar; nada no servidor depende dele |
 
 ## Autenticação e autorização (ADR 0006, 0022, 0027, specs/003)
 E-mail + senha; JWT de acesso (15 min) + refresh rotativo (7 dias) em cookies httpOnly; CSRF por double-submit; papéis `leiloeiro` e `licitante`, verificados por guard em cada rota. Sem administrador: o seed cria as contas demo.
@@ -112,7 +113,7 @@ Node 24 LTS (≥ 24.7) · pnpm 12 workspaces · TypeScript 6.0.x (provisório) �
 - ESLint + boundaries, Prettier, tsc, Lefthook, commitlint (ADR 0001).
 - CI/CD no GitHub Actions com deploy automático na main e rollback (specs/014, ADR 0017).
 - Logs JSON, health checks, uptime externo, pg_dump diário (ADR 0018).
-- Segredos no GCP Secret Manager, entregues à API em arquivo e lidos por `<VAR>_FILE` em produção (specs/014 §Segredos, ADR 0023, que substitui a 0015).
+- Segredos em `/opt/leilao/.env.local` no servidor (600), entregues à API em arquivo e lidos por `<VAR>_FILE` em produção (specs/014 §Segredos, ADR 0023 e ADR 0033).
 
 ## Estrutura do repositório
 ```
@@ -122,4 +123,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023), 0022, 0023, 0025, 0026, 0027
+- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023; 0013 substituída pela 0033), 0022, 0023, 0025, 0026, 0027, 0033

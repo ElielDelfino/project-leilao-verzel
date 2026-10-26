@@ -1,13 +1,13 @@
 # Plano de implementação
 
-Prazo final: **2026-10-29 23:59**. Risco de prazo aceito sem plano de corte (ADR 0001); a mitigação é fazer o deploy cedo (F0) e paralelizar por papel.
+Prazo final: **2026-10-29 23:59**. Risco de prazo aceito sem plano de corte (ADR 0001); a mitigação é paralelizar por papel e fazer o deploy assim que a VPS existir. O deploy saiu da F0 com a troca do GCP pela VPS (ADR 0033) e entra na F5 (tarefas do infra a partir da 129).
 
 ## F0 — Fundação e walking skeleton (24–25/10)
-- **Objetivo:** monorepo, tooling, infra local, verificação, CI e um esqueleto (API com health + SPA) já publicado na VM.
+- **Objetivo:** monorepo, tooling, infra local, verificação, CI e um esqueleto (API com health + SPA). A publicação na VM saiu da F0 e foi para a F5 (ADR 0033).
 - **Specs:** 001, 002, 013, 014.
 - **Depende de:** —
 - **Paralelo:** depois da tarefa 001: infra (002, 006, 007, 008, 010) ∥ db-dev (003) ∥ api-dev (004) ∥ web-dev (005) ∥ spec-guardian (009) ∥ qa (011, após 003).
-- **Saída:** `pnpm install && docker compose up -d && pnpm dev` funciona; `pnpm verify:quick` e `verify:full` rodam; CI verde num PR; `https://<host>/api/health/ready` responde 200 na VM e a SPA abre.
+- **Saída:** `pnpm install && docker compose up -d && pnpm dev` funciona; `pnpm verify:quick` e `verify:full` rodam; CI verde num PR. O critério "`https://<host>/api/health/ready` responde 200 e a SPA abre" passou para a F5.
 
 ## F1 — Identidade e carteira (25/10)
 - **Objetivo:** cadastro, login, refresh, CSRF, ledger, depósito; telas de entrar/cadastro/carteira.
@@ -38,8 +38,19 @@ Prazo final: **2026-10-29 23:59**. Risco de prazo aceito sem plano de corte (ADR
 - **Saída:** fluxo completo do PDF demonstrável localmente; `pnpm demo:adulterar` → "adulterado".
 
 ## F5 — Entrega (28–29/10)
-- **Objetivo:** seed final, k6 contra a VM, hardening, README completo (setup, técnica antiadulteração, comportamentos inesperados, uso de IA), release v1.0.0, envio do formulário.
+- **Objetivo:** deploy na VPS (ADR 0033):
+  - compose de produção e Caddyfile;
+  - hardening e runbook;
+  - workflow de deploy com rollback;
+  - backup com cópia externa e uptime.
+
+  Também: seed final, k6 contra a VPS (rodando de fora dela), hardening, README completo (setup, técnica antiadulteração, comportamentos inesperados, uso de IA, aviso de que `demo:adulterar` nunca roda em produção), release v1.0.0 e envio do formulário.
 - **Specs:** 000, 013, 014.
 - **Depende de:** F4.
-- **Paralelo:** qa (k6, regressão) ∥ infra (backup, uptime, alerta de orçamento) ∥ spec-guardian (README, docs, CHANGELOG).
-- **Saída:** checklist de sucesso de specs/000 completo; tag `v1.0.0`; formulário enviado.
+- **Paralelo:** infra (compose de produção → deploy; hardening da VPS ∥ compose; backup e uptime depois do deploy) ∥ qa (k6 depois do deploy, regressão) ∥ spec-guardian (README, docs, CHANGELOG).
+- **Saída:**
+  - `https://<subdominio>.duckdns.org/api/health/ready` responde 200 e a SPA abre;
+  - critérios de specs/014 verdes;
+  - checklist de sucesso de specs/000 completo;
+  - tag `v1.0.0`;
+  - formulário enviado.

@@ -1,15 +1,15 @@
 # Variáveis de ambiente
 
-Fonte: specs/014 §Segredos, specs/008 §Chaves e ADR 0023 (que substitui a 0015). Produção: [deploy.md](deploy.md). Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
+Fonte: specs/014 §Segredos, specs/008 §Chaves, ADR 0023 (que substitui a 0015) e ADR 0033 (VPS, sem Secret Manager). Produção: [deploy.md](deploy.md). Este documento lista nomes, formatos e usos; **nunca coloque valores aqui**.
 
 ## Onde cada grupo vive
 
 | Grupo | Dev | CI | Produção |
 |---|---|---|---|
 | Defaults não sensíveis (portas, imagens, limites) | `.env` (versionado) | `.env` | `.env` |
-| Segredos | `.env.local` (fora do Git), criado por `pnpm keys:generate` | GitHub Secrets | GCP Secret Manager → um arquivo por segredo em `/run/leilao/secrets/` (tmpfs, 600, dono uid 1000), montado com Compose `secrets:`; a API lê `<VAR>_FILE` |
+| Segredos | `.env.local` (fora do Git), criado por `pnpm keys:generate` | `.env.local` descartável, gerado no runner por `pnpm keys:generate` | `/opt/leilao/.env.local` na VPS (root, 600, gerado por `infra/deploy/gerar-env-local.sh`; ADR 0033) → um arquivo por segredo em `/run/leilao/secrets/` (tmpfs, 600, dono uid 1000), montado com Compose `secrets:`; a API lê `<VAR>_FILE` |
 | Não secretas com valor público (`SEED_DEMO_PASSWORD`) | `.env` | `.env` | `.env` |
-| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | a definir (tarefa 006) | `db_password` e `redis_password` no diretório `LEILAO_SECRETS_DIR` do `infra/docker-compose.prod.yml` (padrão `../.secrets`; na VM, `/run/leilao/secrets/`), montados com Compose `secrets:` em `/run/secrets/<nome>` (tarefa 007) |
+| Senhas do Postgres e do Redis para os containers de dev | `.secrets/db_password` e `.secrets/redis_password` (fora do Git), criados por `pnpm keys:generate` a partir do `.env.local` | os mesmos arquivos, gerados no runner por `pnpm keys:generate` (tarefa 006) | `db_password` e `redis_password` no diretório `LEILAO_SECRETS_DIR` do `infra/docker-compose.prod.yml` (padrão `../.secrets`; na VPS, `/run/leilao/secrets/`), montados com Compose `secrets:` em `/run/secrets/<nome>` (tarefa 007) |
 
 A infra local sobe com `pnpm infra:up` (= `docker compose --env-file .env --env-file .env.local up -d`).
 
@@ -39,11 +39,11 @@ A conexão é lida em partes; não existem `DATABASE_URL` nem `REDIS_URL`. Uma U
 | `POSTGRES_DB` | nome do banco | `leilao` (`.env`); os testes usam `leilao_test_<sufixo>`, um banco por worktree (specs/013 §Banco de teste) | `leilao` |
 | `POSTGRES_USER` | nome do dono do banco (migrations, seed, Postgres) | `leilao` (`.env`) | `leilao`; a API em produção **não** o recebe (usa `POSTGRES_API_USER`) |
 | `POSTGRES_API_USER` | nome do papel da API | `leilao_api` (`.env`; o `db:migrate` exige esse nome) | `leilao_api`, no `environment:` da API (ADR 0026) |
-| `DB_PASSWORD` | ver §Segredos; senha do **dono** (`POSTGRES_USER`): `db:migrate`, `db:seed`, `db:sync-password` e os testes; a API **não** a lê | `.env.local` | Secret Manager, `DB_PASSWORD_FILE=/run/secrets/db_password` só no Postgres e nos one-shots de migrations e seed; a API não a recebe |
-| `DB_API_PASSWORD` | ver §Segredos; senha do papel da API | `.env.local` | Secret Manager, lida por `DB_API_PASSWORD_FILE=/run/secrets/db_api_password` |
+| `DB_PASSWORD` | ver §Segredos; senha do **dono** (`POSTGRES_USER`): `db:migrate`, `db:seed`, `db:sync-password` e os testes; a API **não** a lê | `.env.local` | `/opt/leilao/.env.local` do servidor (ADR 0033), `DB_PASSWORD_FILE=/run/secrets/db_password` só no Postgres e nos one-shots de migrations e seed; a API não a recebe |
+| `DB_API_PASSWORD` | ver §Segredos; senha do papel da API | `.env.local` | `/opt/leilao/.env.local` do servidor (ADR 0033), lida por `DB_API_PASSWORD_FILE=/run/secrets/db_api_password` |
 | `REDIS_HOST` | nome de host ou IP | `127.0.0.1` (a acrescentar no `.env`) | `redis` (serviço do compose) |
 | `REDIS_PORT` | inteiro de 1 a 65535 | `16379` (`.env`; também a porta publicada) | `6379` (porta interna) |
-| `REDIS_PASSWORD` | ver §Segredos | `.env.local` | Secret Manager, lida por `REDIS_PASSWORD_FILE=/run/secrets/redis_password` |
+| `REDIS_PASSWORD` | ver §Segredos | `.env.local` | `/opt/leilao/.env.local` do servidor (ADR 0033), lida por `REDIS_PASSWORD_FILE=/run/secrets/redis_password` |
 
 Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produção, ela está na rede do compose e usa o nome do serviço e a porta interna.
 
@@ -51,12 +51,12 @@ Em dev, a API roda no host e usa as portas publicadas em `127.0.0.1`; em produç
 
 | Variável | Formato gerado | Usado por | Produção |
 |---|---|---|---|
-| `DB_PASSWORD` | 32 bytes aleatórios, base64url canônico sem padding (43 caracteres; recodificar os bytes reproduz o texto); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | Secret Manager → `db_password` |
-| `DB_API_PASSWORD` | idem | API (conecta como `leilao_api`, `POSTGRES_API_USER`); `pnpm db:migrate`, que a aplica ao papel com `ALTER ROLE ... PASSWORD '<verificador SCRAM-SHA-256>'` (ADR 0026). Não há cópia em `.secrets/`: o Postgres de dev não a lê | Secret Manager → `db_api_password` |
-| `REDIS_PASSWORD` | idem | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | Secret Manager → `redis_password` |
-| `JWT_SECRET` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | API: assinatura do access token (specs/003) | Secret Manager → `jwt_secret` |
-| `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | Secret Manager → `pseudonym_hmac_key` |
-| `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5, gerada com `@noble/ed25519`), base64url sem padding (43 caracteres) | API: assinatura dos lances e do selo (specs/008 §Chaves) | Secret Manager → `ed25519_private_key` |
+| `DB_PASSWORD` | 32 bytes aleatórios, base64url canônico sem padding (43 caracteres; recodificar os bytes reproduz o texto); usada como texto | API; Postgres pela cópia em `.secrets/db_password` (`POSTGRES_PASSWORD_FILE`) | `/opt/leilao/.env.local` do servidor → `db_password` |
+| `DB_API_PASSWORD` | idem | API (conecta como `leilao_api`, `POSTGRES_API_USER`); `pnpm db:migrate`, que a aplica ao papel com `ALTER ROLE ... PASSWORD '<verificador SCRAM-SHA-256>'` (ADR 0026). Não há cópia em `.secrets/`: o Postgres de dev não a lê | `/opt/leilao/.env.local` do servidor → `db_api_password` |
+| `REDIS_PASSWORD` | idem | API; Redis pela cópia em `.secrets/redis_password` (diretiva `requirepass` num `redis.conf` em tmpfs) | `/opt/leilao/.env.local` do servidor → `redis_password` |
+| `JWT_SECRET` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HS256 são os 32 bytes decodificados | API: assinatura do access token (specs/003) | `/opt/leilao/.env.local` do servidor → `jwt_secret` |
+| `PSEUDONYM_HMAC_KEY` | 32 bytes aleatórios, base64url sem padding (43 caracteres); a chave HMAC são os 32 bytes decodificados | API: pseudônimo HMAC-SHA256 do licitante (specs/008 §Chaves) | `/opt/leilao/.env.local` do servidor → `pseudonym_hmac_key` |
+| `ED25519_PRIVATE_KEY` | seed Ed25519 de 32 bytes (RFC 8032 §5.1.5, gerada com `@noble/ed25519`), base64url sem padding (43 caracteres) | API: assinatura dos lances e do selo (specs/008 §Chaves) | `/opt/leilao/.env.local` do servidor → `ed25519_private_key` |
 
 Variáveis que saíram do `pnpm keys:generate` pela ADR 0023 (task 023):
 
