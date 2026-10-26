@@ -5,10 +5,15 @@ import type { DestinationStream } from 'pino';
 
 import { configurarApp, criarAdaptadorFastify } from './app.js';
 import { AppModule } from './app.module.js';
+import { endurecerHttp } from './common/http/index.js';
 import { type Env, ErroDeConfiguracao } from './config/env.js';
 import { criarLogger, LoggerNestPino } from './logger/logger.js';
 
-/** Cria a API com o adaptador Fastify, o logger Pino (também usado pelo Nest) e o prefixo /api. */
+/**
+ * Cria a API com o adaptador Fastify, o logger Pino (também usado pelo Nest), o prefixo /api e o
+ * endurecimento HTTP (tarefa 020: cabeçalhos só fora de produção, origem, x-request-id, bodyLimit
+ * e timeouts).
+ */
 export async function criarApi(
   env: Env,
   destinoDosLogs?: DestinationStream,
@@ -20,6 +25,7 @@ export async function criarApi(
     { logger: new LoggerNestPino(logger) },
   );
   configurarApp(app);
+  endurecerHttp(app, env);
   return app;
 }
 
