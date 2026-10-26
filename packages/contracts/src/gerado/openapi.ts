@@ -2058,6 +2058,14 @@ export interface operations {
       };
       404: components['responses']['ErroNaoEncontradoNoStore'];
       429: components['responses']['ErroMuitasTentativasNoStore'];
+      /**
+       * @description Dependência fora (banco; INDISPONIVEL), com mensagem fixa e sem `detalhes`. Nunca cacheado.
+       *     O Redis fora **não** causa este erro nas rotas públicas de leitura: o rate limit delas falha
+       *     aberto (specs/011 §Rate limit). Nesta rota, o 503 `INDISPONIVEL` também ocorre, além do
+       *     banco indisponível, quando o lote passa do teto de 1000 lances (a cadeia nunca é truncada)
+       *     ou quando a leitura excede o `statement_timeout` de 5 s (specs/011 §Teto da cadeia e tempo
+       *     das consultas).
+       */
       503: components['responses']['ErroIndisponivelNoStore'];
       default: components['responses']['Erro'];
     };
