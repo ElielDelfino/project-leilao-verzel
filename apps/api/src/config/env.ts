@@ -38,8 +38,88 @@ const SEGREDOS = [
 ] as const;
 type NomeDoSegredo = (typeof SEGREDOS)[number];
 
-/** Origem da SPA: só http:// ou https:// seguido de host (specs/003 §Cookies, ADR 0027). */
-const origemWeb = z.string().regex(/^https?:\/\/[^\s/?#]+$/);
+/**
+ * Origem da SPA: só http:// ou https:// seguido de host (specs/003 §Cookies, ADR 0027), e uma URL
+ * que o `new URL` aceita (a regex sozinha deixa passar `http://[bad`).
+ */
+const origemWeb = z
+  .string()
+  .regex(/^https?:\/\/[^\s/?#]+$/)
+  .refine((valor) => URL.canParse(valor));
+
+const GRUPOS_IPV6 = 8;
+const BITS_POR_GRUPO = 16;
+const MASCARA_DO_GRUPO = 0xff_ff;
+const PRIMEIRO_OCTETO_LOOPBACK = 127;
+const BITS_DO_PRIMEIRO_OCTETO = 24;
+
+/** 127.0.0.0/8 ou 0.0.0.0, para um IPv4 em 32 bits. */
+function ehIpv4Local(endereco: number): boolean {
+  return endereco === 0 || endereco >>> BITS_DO_PRIMEIRO_OCTETO === PRIMEIRO_OCTETO_LOOPBACK;
+}
+
+/**
+ * Os 8 grupos de um IPv6 já normalizado pelo `new URL` (sem colchetes, minúsculo e com o IPv4
+ * final reescrito em hexadecimal, como `::ffff:7f00:1`). Fora desse formato devolve null.
+ */
+function expandirIpv6(endereco: string): readonly number[] | null {
+  const [inicio = '', fim, ...resto] = endereco.split('::');
+  if (resto.length > 0) {
+    return null;
+  }
+  const paraGrupos = (parte: string): number[] =>
+    parte === '' ? [] : parte.split(':').map((grupo) => Number.parseInt(grupo, 16));
+  const esquerda = paraGrupos(inicio);
+  const direita = fim === undefined ? [] : paraGrupos(fim);
+  const zeros = GRUPOS_IPV6 - esquerda.length - direita.length;
+  if (zeros < 0 || (fim === undefined && zeros !== 0)) {
+    return null;
+  }
+  const grupos = [...esquerda, ...Array<number>(zeros).fill(0), ...direita];
+  return grupos.every((grupo) => Number.isInteger(grupo) && grupo >= 0 && grupo <= MASCARA_DO_GRUPO)
+    ? grupos
+    : null;
+}
+
+/**
+ * `::`, `::1` e o IPv4 local mapeado (`::ffff:a.b.c.d`) ou embutido (`::a.b.c.d`). Um IPv6
+ * público que só termina como 127.x (`2001:db8::7f00:1`) não conta.
+ */
+function ehIpv6Local(endereco: string): boolean {
+  const grupos = expandirIpv6(endereco);
+  if (grupos === null) {
+    return false;
+  }
+  const prefixoZerado = grupos.slice(0, 5).every((grupo) => grupo === 0);
+  const sexto = grupos[5];
+  if (!prefixoZerado || (sexto !== 0 && sexto !== MASCARA_DO_GRUPO)) {
+    return false;
+  }
+  const [alto = 0, baixo = 0] = grupos.slice(6);
+  const ipv4 = ((alto << BITS_POR_GRUPO) | baixo) >>> 0;
+  // Com o sexto grupo zerado, 0.0.0.0 é `::` e 0.0.0.1 é `::1`; os dois são locais.
+  return ehIpv4Local(ipv4) || (sexto === 0 && ipv4 === 1);
+}
+
+/**
+ * Host de loopback ou não especificado: `localhost` e `*.localhost` (com ou sem ponto final),
+ * 127.0.0.0/8, 0.0.0.0, `::`, `::1` e esses IPv4 em IPv6. Em produção a origem da SPA é o host
+ * público (specs/014 §Conexão); com um destes, a checagem de origem em CORS, CSRF e Socket.IO não
+ * protegeria nada (tarefa 020). Recebe só origens que passaram em `origemWeb` (URL válida).
+ */
+function ehOrigemLocal(origem: string): boolean {
+  const host = new URL(origem).hostname.toLowerCase().replace(/\.$/, '');
+  if (host.startsWith('[')) {
+    return ehIpv6Local(host.slice(1, -1));
+  }
+  // O `new URL` já reescreve um IPv4 em quatro octetos decimais (`127.1` vira `127.0.0.1`).
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '0.0.0.0' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  );
+}
 
 /** Base da API da Scryfall: `http(s)://host[:porta]`, sem caminho nem barra final (specs/005). */
 const SCRYFALL_BASE_URL_PADRAO = 'https://api.scryfall.com';
@@ -110,6 +190,11 @@ export interface Env {
   readonly segredos: SegredosDaApi;
   /** Cliente da Scryfall (specs/005 §Cliente HTTP). */
   readonly scryfall: ConfigDaScryfallNoEnv;
+  /**
+   * NODE_ENV=production. Opcional para os Env montados à mão nos testes (ausente = fora de
+   * produção); carregarEnv sempre o preenche.
+   */
+  readonly producao?: boolean;
 }
 
 /**
@@ -182,7 +267,7 @@ function falhar(problemas: readonly string[]): never {
 }
 
 /** Monta as conexões; a do Postgres reaproveita a validação de db/conexao.ts. */
-function montarEnv(dados: VariaveisDoEnv): Env {
+function montarEnv(dados: VariaveisDoEnv, producao: boolean): Env {
   let postgres: ConexaoDoBanco;
   try {
     postgres = lerConexaoDoBanco(
@@ -221,6 +306,7 @@ function montarEnv(dados: VariaveisDoEnv): Env {
       baseUrl: dados.SCRYFALL_BASE_URL,
       prefixoRedis: dados.SCRYFALL_REDIS_PREFIX ?? PREFIXO_REDIS_DA_SCRYFALL,
     }),
+    producao,
   };
 }
 
@@ -242,6 +328,7 @@ export function carregarEnv(origem: Readonly<Record<string, string | undefined>>
     }
   }
 
+  const producao = origem.NODE_ENV === 'production';
   const resultado = esquemaDoEnv.safeParse({ ...origem, ...valores });
   if (!resultado.success) {
     const novos = resultado.error.issues
@@ -254,11 +341,15 @@ export function carregarEnv(origem: Readonly<Record<string, string | undefined>>
     problemas.push(...novos);
   }
   // Em produção o prefixo nunca difere do padrão: a variável é rejeitada, qualquer que seja o valor.
-  if (origem.NODE_ENV === 'production' && origem.SCRYFALL_REDIS_PREFIX !== undefined) {
+  if (producao && origem.SCRYFALL_REDIS_PREFIX !== undefined) {
     problemas.push('SCRYFALL_REDIS_PREFIX (proibida em produção)');
+  }
+  // `*` já não passa no formato; em produção o loopback também é recusado (tarefa 020).
+  if (producao && resultado.success && ehOrigemLocal(resultado.data.WEB_ORIGIN)) {
+    problemas.push('WEB_ORIGIN (localhost ou loopback proibido em produção)');
   }
   if (problemas.length > 0 || !resultado.success) {
     falhar(problemas);
   }
-  return montarEnv(resultado.data);
+  return montarEnv(resultado.data, producao);
 }

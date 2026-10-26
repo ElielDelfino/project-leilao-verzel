@@ -293,6 +293,96 @@ describe('carregarEnv: WEB_ORIGIN', () => {
   ])('WEB_ORIGIN=%s → cookiesSeguros=%s', (valor, seguro) => {
     expect(carregarEnv(envValido({ WEB_ORIGIN: valor })).cookiesSeguros).toBe(seguro);
   });
+
+  // Tarefa 020: em produção a origem é checada em CORS, CSRF e Socket.IO; `*` ou loopback ali
+  // aceitaria qualquer origem ou nenhuma real.
+  it.each([
+    'http://localhost:15173',
+    'https://localhost',
+    'http://LOCALHOST:80',
+    'http://127.0.0.1:15173',
+    'https://127.1.2.3',
+    'http://[::1]:15173',
+    'http://0.0.0.0:15173',
+    // Revisão da 020: ponto final, subdomínio de localhost e as outras grafias de loopback em IPv6.
+    'http://localhost.:15173',
+    'http://LOCALHOST.',
+    'http://a.localhost',
+    'https://app.dev.localhost:8443',
+    'http://[::]:15173',
+    'http://[0:0:0:0:0:0:0:1]',
+    'http://[::ffff:127.0.0.1]',
+    'http://[::ffff:127.9.8.7]:15173',
+    'http://[::ffff:0.0.0.0]',
+    'http://[::127.0.0.1]',
+    'http://[0:0:0:0:0:ffff:7f00:1]',
+  ])('recusa WEB_ORIGIN=%s em produção, citando só o nome', (valor) => {
+    const mensagem = mensagemDe(() =>
+      carregarEnv(envValido({ NODE_ENV: 'production', WEB_ORIGIN: valor })),
+    );
+    expect(mensagem).toContain('WEB_ORIGIN');
+    expect(mensagem).toContain('produção');
+    expect(mensagem).not.toContain(valor);
+  });
+
+  it('recusa WEB_ORIGIN=* dentro e fora de produção', () => {
+    for (const NODE_ENV of ['production', 'development']) {
+      expect(mensagemDe(() => carregarEnv(envValido({ NODE_ENV, WEB_ORIGIN: '*' })))).toContain(
+        'WEB_ORIGIN',
+      );
+    }
+  });
+
+  it('aceita o host público em produção e localhost fora dela', () => {
+    const producao = carregarEnv(
+      envValido({ NODE_ENV: 'production', WEB_ORIGIN: 'https://teste-verzel.duckdns.org' }),
+    );
+    expect(producao.WEB_ORIGIN).toBe('https://teste-verzel.duckdns.org');
+    // Um host que só começa com "localhost" não é loopback.
+    expect(
+      carregarEnv(
+        envValido({ NODE_ENV: 'production', WEB_ORIGIN: 'https://localhost.exemplo.com' }),
+      ).WEB_ORIGIN,
+    ).toBe('https://localhost.exemplo.com');
+    expect(carregarEnv(envValido({ NODE_ENV: 'development' })).WEB_ORIGIN).toBe(
+      'http://localhost:15173',
+    );
+  });
+
+  // Sem falso positivo: hosts públicos que só se parecem com loopback.
+  it.each([
+    'https://localhost.exemplo.com',
+    'https://127.0.0.1.sslip.io',
+    'https://leilao.exemplo.com:8443',
+    'http://[2001:db8::7f00:1]',
+    'http://[2001:db8::1]:8443',
+    'http://128.0.0.1',
+  ])('aceita WEB_ORIGIN=%s em produção', (valor) => {
+    expect(carregarEnv(envValido({ NODE_ENV: 'production', WEB_ORIGIN: valor })).WEB_ORIGIN).toBe(
+      valor,
+    );
+  });
+
+  // A regex aceita estas, mas não são URLs; em produção `new URL` lançaria TypeError cru.
+  it.each(['http://[bad', 'http://a:b:c'])(
+    'recusa WEB_ORIGIN=%s que não é URL, dentro e fora de produção, citando só o nome',
+    (valor) => {
+      for (const NODE_ENV of ['production', 'development']) {
+        const mensagem = mensagemDe(() => carregarEnv(envValido({ NODE_ENV, WEB_ORIGIN: valor })));
+        expect(mensagem, NODE_ENV).toContain('WEB_ORIGIN');
+        expect(mensagem).not.toContain(valor);
+      }
+    },
+  );
+
+  it('producao reflete NODE_ENV=production', () => {
+    expect(
+      carregarEnv(envValido({ NODE_ENV: 'production', WEB_ORIGIN: 'https://leilao.exemplo.com' }))
+        .producao,
+    ).toBe(true);
+    expect(carregarEnv(envValido({ NODE_ENV: 'development' })).producao).toBe(false);
+    expect(carregarEnv(envValido({ NODE_ENV: undefined })).producao).toBe(false);
+  });
 });
 
 // specs/005 §Cliente HTTP e docs/variaveis-de-ambiente.md.
@@ -319,9 +409,10 @@ describe('carregarEnv: Scryfall', () => {
 
   it('sem SCRYFALL_REDIS_PREFIX, o prefixo Redis é scryfall: (tarefa 099)', () => {
     expect(carregarEnv(envValido()).scryfall.prefixoRedis).toBe('scryfall:');
-    expect(carregarEnv(envValido({ NODE_ENV: 'production' })).scryfall.prefixoRedis).toBe(
-      'scryfall:',
-    );
+    expect(
+      carregarEnv(envValido({ NODE_ENV: 'production', WEB_ORIGIN: 'https://leilao.exemplo.com' }))
+        .scryfall.prefixoRedis,
+    ).toBe('scryfall:');
   });
 
   it.each(['scryfall:e2e:', 'scryfall:e2e-run-1:', 'scryfall:t123-ab:'])(
