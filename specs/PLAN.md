@@ -42,12 +42,12 @@ Prazo final: **2026-10-29 23:59**. Risco de prazo aceito sem plano de corte (ADR
   - compose de produção e Caddyfile;
   - hardening e runbook;
   - workflow de deploy com rollback;
-  - backup com cópia externa e uptime.
+  - um `pg_dump` manual antes da entrega, com o comando no runbook. Backup agendado, cópia externa, teste de restauração e uptime ficam fora do escopo da entrega (ADR 0034).
 
   Também: seed final, k6 contra a VPS (rodando de fora dela), hardening, README completo (setup, técnica antiadulteração, comportamentos inesperados, uso de IA, aviso de que `demo:adulterar` nunca roda em produção), release v1.0.0 e envio do formulário.
 - **Specs:** 000, 013, 014.
 - **Depende de:** F4.
-- **Paralelo:** infra (compose de produção → deploy; hardening da VPS ∥ compose; backup e uptime depois do deploy) ∥ qa (k6 depois do deploy, regressão) ∥ spec-guardian (README, docs, CHANGELOG).
+- **Paralelo:** infra (compose de produção → deploy; hardening da VPS ∥ compose) ∥ qa (k6 depois do deploy, regressão) ∥ spec-guardian (README, docs, CHANGELOG).
 - **Saída:**
   - `https://<subdominio>.duckdns.org/api/health/ready` responde 200 e a SPA abre;
   - critérios de specs/014 verdes;

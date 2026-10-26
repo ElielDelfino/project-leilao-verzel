@@ -1,6 +1,6 @@
 # 0033 — Produção numa VPS Hostinger com Docker Compose, DuckDNS e segredos em arquivo
 
-Status: aceita (itens 5.6 e 6.2 provisórios até a confirmação do humano; ver §Pendências)
+Status: aceita, parcialmente substituída por 0034 (item 6, o comando `backup` do item 5.3 e o UptimeRobot do item 7 ficam fora do escopo da entrega; a pendência 6.2 deixa de existir); item 5.6 provisório até a confirmação do humano (ver §Pendências)
 Data: 2026-10-25
 Decisão: do humano, em 2026-10-25 (abandona o GCP e compra uma VPS; itens 1 a 8 da mudança de plano de deploy, repassados pelo orquestrador). Os números de memória (item 8) foram delegados ao spec-guardian.
 Substitui: ADR 0013 (provedor e VM) e ADR 0020 (host público). Substitui parcialmente: ADR 0018 (sai o alerta de orçamento; o backup ganha cópia externa), ADR 0023 (itens 1 e 7: Secret Manager e `fetch-secrets.sh` no boot), ADR 0024 (item 1: limite do Caddy) e ADR 0026 (só a origem do 6º segredo em produção)

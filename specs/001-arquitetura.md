@@ -23,7 +23,7 @@ Em produção, o Caddy termina o TLS, serve a SPA estática e faz proxy de `/api
 | Contratos | `packages/contracts/` | tipos TS gerados de `apps/api/openapi.yaml` e `eventbus/socketio/asyncapi.yaml` |
 | Postgres | `database/postgres/` | persistência; migrations SQL |
 | Redis | `cache/redis/` | pub/sub do Socket.IO, rate limit, cache da Scryfall |
-| Infra | `infra/` | Caddy, compose de produção, scripts de deploy e backup |
+| Infra | `infra/` | Caddy, compose de produção, scripts de deploy |
 
 ## Módulos da API (monolito modular — ADR 0003)
 Cada módulo fica em `apps/api/src/modules/<nome>/`, com `<nome>` igual ao da tabela abaixo, e expõe uma interface pública em `apps/api/src/modules/<nome>/index.ts` e nada mais. Nenhum módulo lê as tabelas de outro. Operações atômicas entre módulos recebem a mesma transação (`tx`) pelas interfaces.
@@ -112,7 +112,7 @@ Node 24 LTS (≥ 24.7) · pnpm 12 workspaces · TypeScript 6.0.x (provisório) �
 - Testes em dois níveis, `verify:quick` e `verify:full` (specs/013, ADR 0016).
 - ESLint + boundaries, Prettier, tsc, Lefthook, commitlint (ADR 0001).
 - CI/CD no GitHub Actions com deploy automático na main e rollback (specs/014, ADR 0017).
-- Logs JSON, health checks, uptime externo, pg_dump diário (ADR 0018).
+- Logs JSON e health checks (ADR 0018); um `pg_dump` manual antes da entrega, com backup agendado e uptime externo fora do escopo da entrega (ADR 0034).
 - Segredos em `/opt/leilao/.env.local` no servidor (600), entregues à API em arquivo e lidos por `<VAR>_FILE` em produção (specs/014 §Segredos, ADR 0023 e ADR 0033).
 
 ## Estrutura do repositório

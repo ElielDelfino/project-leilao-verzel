@@ -1,6 +1,6 @@
 # 0018 — Observabilidade enxuta e backup diário
 
-Status: parcialmente substituída por 0033 (sai o alerta de orçamento do GCP; o backup ganha cópia fora da VPS)
+Status: parcialmente substituída por 0033 (sai o alerta de orçamento do GCP) e por 0034 (uptime check, `pg_dump` diário e restore no CI ficam fora do escopo da entrega; fica um `pg_dump` manual antes da entrega)
 Data: 2026-10-24
 
 ## Decisão
