@@ -52,6 +52,10 @@
 		-Server
 	}
 
+	# X-Forwarded-For: sem `trusted_proxies` nas opções globais, o reverse_proxy descarta o
+	# X-Forwarded-* que o cliente mandou e grava o IP real da conexão. A API (só na rede `borda`,
+	# sem portas publicadas) confia nesse cabeçalho apenas vindo de TRUSTED_PROXY_CIDR. Não
+	# acrescente `trusted_proxies` aqui.
 	# REST e Socket.IO vão para a API; o reverse_proxy do Caddy repassa o upgrade de WebSocket.
 	# Corpo de até 1 MB: a API só recebe JSON pequeno (sem upload); acima disso, 413 do Caddy.
 	handle /api/* {
