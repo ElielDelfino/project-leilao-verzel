@@ -44,7 +44,13 @@ const TITULO_CRIADO = `matriz-${randomBytes(6).toString('hex')}`;
  * Preenchido no beforeAll: um lote e seu snapshot, para as rotas com parâmetro de caminho, e um
  * lote à parte para os lances (que ficam gravados para sempre: `bids` é append-only).
  */
-const alvo = { loteId: '', snapshotId: '', loteDeLances: '', codigoDoComprovante: '' };
+const alvo = {
+  loteId: '',
+  snapshotId: '',
+  loteDeLances: '',
+  codigoDoComprovante: '',
+  donoDoLote: '',
+};
 const LANCE_INICIAL_DA_MATRIZ_CENTAVOS = 100;
 const INCREMENTO_DA_MATRIZ_CENTAVOS = 100;
 const SALDO_PARA_LANCAR_CENTAVOS = 1_000_000;
@@ -80,8 +86,18 @@ interface Operacao {
    * Operação já no contrato, mas com a rota ainda inexistente: entra na cobertura e vira `it.todo`,
    * sem chamar a rota. A tarefa citada transforma a pendência em teste real.
    */
-  readonly pendente?: { readonly tarefa: '106' | '109'; readonly motivo: string };
+  readonly pendente?: { readonly tarefa: '109'; readonly motivo: string };
+  /**
+   * URL montada depois do cadastro, com o id da conta do caso (undefined para o anônimo): para
+   * rotas que exigem um recurso do próprio usuário, como o cancelamento do lote do leiloeiro.
+   */
+  readonly urlDoUsuario?: (usuarioId: string | undefined) => Promise<string>;
 }
+
+/** Preenchido no beforeAll: cria um lote ao vivo, sem lances, do leiloeiro dado. */
+const preparo: { loteDe: (leiloeiroId: string) => Promise<string> } = {
+  loteDe: () => Promise.reject(new Error('preparo da matriz ainda não rodou')),
+};
 
 const igualParaTodos = (e: Esperado): Operacao['comCsrf'] => ({
   anonimo: e,
@@ -248,17 +264,20 @@ const OPERACOES: readonly Operacao[] = [
     caminho: '/api/auditoria/chaves',
     comCsrf: igualParaTodos({ status: 200 }),
   },
-  // F4 (openapi 0.6.0): rotas ainda não implementadas, pendentes até as tarefas 106 e 109.
+  // F4 (openapi 0.6.0): cancelamento (106), comprovante e meus arremates (109).
   {
     metodo: 'POST',
     caminho: '/api/painel/lotes/{id}/cancelamento',
-    // Leiloeiro dono do lote: 200; lote de outro leiloeiro seria 404 (specs/006 RF-04).
+    // Leiloeiro dono do lote: 200 (um lote novo por caso: cancelado não volta). Os demais papéis
+    // apontam para um lote de outro dono e param antes (401, 403). Lote de outro leiloeiro → 404
+    // está no teste próprio, abaixo da matriz.
+    urlDoUsuario: async (usuarioId) =>
+      `/api/painel/lotes/${await preparo.loteDe(usuarioId ?? alvo.donoDoLote)}/cancelamento`,
     comCsrf: {
       anonimo: { status: 401, codigo: 'NAO_AUTENTICADO' },
       licitante: { status: 403, codigo: 'PAPEL_NAO_PERMITIDO' },
       leiloeiro: { status: 200 },
     },
-    pendente: { tarefa: '106', motivo: 'rota de cancelamento com estorno ainda não existe' },
   },
   {
     metodo: 'GET',
@@ -332,6 +351,10 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       await registrarChaveDeAssinatura(app);
       // Leiloeiro fora de `usuarios`: o lote com lances não pode ser apagado (append-only).
       const donoDosLances = await inserirUsuario(pool, 'leiloeiro');
+      // Lotes do cancelamento também ficam no banco: o cancelado tem selo (append-only).
+      alvo.donoDoLote = donoDosLances.id;
+      preparo.loteDe = async (leiloeiroId) =>
+        (await inserirLote(pool, leiloeiroId, { titulo: 'Lote de cancelamento da matriz' })).id;
       alvo.loteDeLances = (
         await inserirLote(pool, donoDosLances.id, {
           titulo: 'Lote de lances da matriz',
@@ -374,19 +397,27 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       return `10.43.${Math.floor(proximoIp / 250)}.${(proximoIp++ % 250) + 1}`;
     }
 
-    async function navegadorDe(papel: Papel): Promise<Navegador> {
+    interface ContaDoCaso {
+      readonly navegador: Navegador;
+      /** undefined para o anônimo. */
+      readonly usuarioId: string | undefined;
+    }
+
+    async function navegadorDe(papel: Papel): Promise<ContaDoCaso> {
       const navegador = new Navegador(app, ipNovo());
       if (papel === 'anonimo') {
         await navegador.obterCsrf();
-      } else {
-        const { resposta } = await cadastrar(navegador, { papel });
-        expect(resposta.statusCode).toBe(201);
+        return { navegador, usuarioId: undefined };
       }
-      return navegador;
+      const { resposta } = await cadastrar(navegador, { papel });
+      expect(resposta.statusCode).toBe(201);
+      const usuarioId = (resposta.json() as { dados: { usuario: { id: string } } }).dados.usuario
+        .id;
+      return { navegador, usuarioId };
     }
 
     async function chamar(
-      navegador: Navegador,
+      { navegador, usuarioId }: ContaDoCaso,
       operacao: Operacao,
       email: string,
       comCsrf: boolean,
@@ -399,9 +430,13 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       if (comCsrf && csrf !== undefined) {
         headers['x-csrf-token'] = csrf;
       }
+      const url =
+        operacao.urlDoUsuario === undefined
+          ? (operacao.url?.() ?? operacao.caminho)
+          : await operacao.urlDoUsuario(usuarioId);
       return app.inject({
         method: operacao.metodo,
-        url: operacao.url?.() ?? operacao.caminho,
+        url,
         headers,
         ...(operacao.corpo ? { payload: operacao.corpo(email) } : {}),
       });
@@ -443,11 +478,11 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       }
 
       it.each(PAPEIS)('%s com CSRF válido', async (papel) => {
-        const navegador = await navegadorDe(papel);
+        const conta = await navegadorDe(papel);
         const email = await contaExistente();
-        await prepararSaldo(navegador, operacao, papel);
+        await prepararSaldo(conta.navegador, operacao, papel);
 
-        const resposta = await chamar(navegador, operacao, email, true);
+        const resposta = await chamar(conta, operacao, email, true);
 
         const esperado = operacao.comCsrf[papel];
         expect(resposta.statusCode).toBe(esperado.status);
@@ -459,11 +494,11 @@ describe.skipIf(!INFRA_DISPONIVEL)(
       });
 
       it.each(PAPEIS)('%s sem o header X-CSRF-Token', async (papel) => {
-        const navegador = await navegadorDe(papel);
+        const conta = await navegadorDe(papel);
         const email = await contaExistente();
-        await prepararSaldo(navegador, operacao, papel);
+        await prepararSaldo(conta.navegador, operacao, papel);
 
-        const resposta = await chamar(navegador, operacao, email, false);
+        const resposta = await chamar(conta, operacao, email, false);
 
         if (exigeCsrf(operacao.metodo, operacao.caminho)) {
           expect(resposta.statusCode).toBe(403);
@@ -474,6 +509,26 @@ describe.skipIf(!INFRA_DISPONIVEL)(
           expect(resposta.statusCode).toBe(operacao.comCsrf[papel].status);
         }
       });
+    });
+
+    it('cancelamento do lote de outro leiloeiro → 404 NAO_ENCONTRADO, sem efeito', async () => {
+      const conta = await navegadorDe('leiloeiro');
+      const loteAlheio = await preparo.loteDe(alvo.donoDoLote);
+      const csrf = conta.navegador.cookies.get('csrf_token') ?? '';
+
+      const resposta = await app.inject({
+        method: 'POST',
+        url: `/api/painel/lotes/${loteAlheio}/cancelamento`,
+        headers: { cookie: conta.navegador.cabecalhoCookie(), 'x-csrf-token': csrf },
+      });
+
+      expect(resposta.statusCode).toBe(404);
+      expect((resposta.json() as { erro: { codigo: string } }).erro.codigo).toBe('NAO_ENCONTRADO');
+      const { rows } = await pool.query<{ status: string }>(
+        'select status::text as status from lots where id = $1',
+        [loteAlheio],
+      );
+      expect(rows[0]?.status).toBe('ao_vivo');
     });
   },
 );
