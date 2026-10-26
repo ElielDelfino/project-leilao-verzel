@@ -76,7 +76,7 @@ scp -r infra/vps infra/deploy/gerar-env-local.sh infra/deploy/materializar-segre
 4. **Sessão B** (outro terminal da sua máquina), sem fechar a A:
 
    ```sh
-   ssh eliel@teste-verzel.duckdns.org 'sudo -v && echo admin ok'
+   ssh eliel@teste-verzel.duckdns.org 'sudo -n true && echo admin ok'
    ssh root@teste-verzel.duckdns.org true                     # tem de ser recusado
    ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive \
      eliel@teste-verzel.duckdns.org true                       # tem de dar "Permission denied (publickey)"
