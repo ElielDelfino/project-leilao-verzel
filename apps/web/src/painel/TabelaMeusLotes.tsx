@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import type { Lote } from '../api/lotes';
 import { formatarDataHora } from '../formatacao/data';
 import { formatarCentavos } from '../formatacao/dinheiro';
+import { CancelarLote, type AvisoDoPainel } from './CancelarLote';
 import { ICONES_DE_STATUS, ROTULOS_DE_STATUS } from '../lotes/rotulos';
 
 /** "Resultado" de specs/012 §Painel: só lote encerrado tem resultado. */
@@ -13,7 +14,12 @@ export function textoDoResultado(lote: Pick<Lote, 'status' | 'valorArremateCenta
     : `Arrematado por ${formatarCentavos(lote.valorArremateCentavos)}`;
 }
 
-export function TabelaMeusLotes({ lotes }: { lotes: Lote[] }) {
+interface Props {
+  lotes: Lote[];
+  aoConcluirCancelamento: (aviso: AvisoDoPainel) => void;
+}
+
+export function TabelaMeusLotes({ lotes, aoConcluirCancelamento }: Props) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left">
@@ -26,6 +32,7 @@ export function TabelaMeusLotes({ lotes }: { lotes: Lote[] }) {
             <th scope="col">Fim</th>
             <th scope="col">Lances</th>
             <th scope="col">Resultado</th>
+            <th scope="col">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -41,7 +48,19 @@ export function TabelaMeusLotes({ lotes }: { lotes: Lote[] }) {
               <td className="pr-4">{formatarDataHora(lote.inicioEm)}</td>
               <td className="pr-4">{formatarDataHora(lote.fimEm)}</td>
               <td className="pr-4">{lote.totalLances}</td>
-              <td>{textoDoResultado(lote)}</td>
+              <td className="pr-4">{textoDoResultado(lote)}</td>
+              <td className="py-1">
+                {lote.status === 'agendado' || lote.status === 'ao_vivo' ? (
+                  <CancelarLote lote={lote} aoConcluir={aoConcluirCancelamento} />
+                ) : (
+                  <Link
+                    to={`/auditoria/${lote.id}`}
+                    aria-label={`Auditoria do lote ${lote.titulo}`}
+                  >
+                    Auditoria
+                  </Link>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

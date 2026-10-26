@@ -5,15 +5,17 @@ import { listarMeusLotes } from '../api/painel';
 import { ErroDoServidor } from '../formularios/ErroDoServidor';
 import { TAMANHO_DA_PAGINA } from '../lotes/estadoDaVitrine';
 import { Paginacao } from '../lotes/Paginacao';
+import type { AvisoDoPainel } from './CancelarLote';
 import { TabelaMeusLotes } from './TabelaMeusLotes';
 
 interface Props {
   pagina: number;
   aoIrParaPagina: (pagina: number, substituir?: boolean) => void;
+  aoConcluirCancelamento: (aviso: AvisoDoPainel) => void;
 }
 
 /** Lista paginada "Meus lotes" (specs/012 §Painel do leiloeiro). */
-export function ListaMeusLotes({ pagina, aoIrParaPagina }: Props) {
+export function ListaMeusLotes({ pagina, aoIrParaPagina, aoConcluirCancelamento }: Props) {
   const consulta = useQuery({
     queryKey: ['painel', 'lotes', pagina],
     queryFn: () => listarMeusLotes(pagina),
@@ -46,7 +48,10 @@ export function ListaMeusLotes({ pagina, aoIrParaPagina }: Props) {
   if (total === 0) return <p>Você ainda não criou lotes.</p>;
   return (
     <>
-      <TabelaMeusLotes lotes={consulta.data.lotes} />
+      <TabelaMeusLotes
+        lotes={consulta.data.lotes}
+        aoConcluirCancelamento={aoConcluirCancelamento}
+      />
       <Paginacao pagina={pagina} totalPaginas={totalPaginas} aoIr={(p) => aoIrParaPagina(p)} />
     </>
   );
