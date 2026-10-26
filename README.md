@@ -36,13 +36,15 @@ O `pnpm db:seed` (local) e o one-shot `seed` do compose de produção criam trê
 | Licitante | `ana@demo.local` | `leilao-demo-2026` |
 | Licitante | `bruno@demo.local` | `leilao-demo-2026` |
 
-**O seed cria só as três contas** ([`identidade/seed.ts`](apps/api/src/modules/identidade/seed.ts)); não há seed de depósito, de lote nem de lance. Em produção já existe um lote aberto, criado à mão pelo painel do leiloeiro com as contas acima; os licitantes depositam e dão lances pela interface. Localmente não há lote pronto: o roteiro abaixo cria o lote pelo painel ([specs/000](specs/000-visao-geral.md) RF-13).
+**O seed cria só as três contas** ([`identidade/seed.ts`](apps/api/src/modules/identidade/seed.ts)); não há seed de depósito, de lote nem de lance. Em produção já existe um lote aberto, criado à mão pelo painel do leiloeiro com as contas acima; os licitantes depositam e dão lances pela interface. Localmente não há lote pronto: o roteiro abaixo cria o lote pelo painel ([specs/000](specs/000-visao-geral.md) RF-13), ou o atalho `pnpm demo:lote` (só local) cria um lote já com lances.
 
 Há cadastro público em `/cadastro` (nome, e-mail, senha de 10 a 128 caracteres e papel, que não muda depois). Não há recuperação de senha nem exclusão de conta ([specs/000](specs/000-visao-geral.md) §Fora de escopo).
 
 ### Roteiro curto (RFs de [specs/000](specs/000-visao-geral.md))
 
 Use dois navegadores (ou um normal e um anônimo) para ver o tempo real.
+
+**Atalho para testar a auditoria (só local).** Com `pnpm dev` rodando e o seed aplicado, `pnpm demo:lote` entra com as três contas pela API, deposita saldo para Ana e Bruno, cria um lote de 5 minutos e dá 8 lances alternados. No fim imprime o link da sala, o link da auditoria e o comando pronto do `demo:adulterar` para esse lote. Pode ser rodado de novo (cada execução cria um lote novo). Precisa de internet, porque a carta vem da Scryfall. O lote nasce **ao vivo**: o selo e o comprovante só aparecem 5 minutos depois, quando ele encerra. O script recusa qualquer URL que não seja `localhost` e `NODE_ENV=production`; em produção o lote é criado à mão pelo painel.
 
 1. **Vitrine (RF-01, RF-08).** Sem login, em `/`: abas Ao vivo, Agendados e Encerrados; busca por título ou carta, raridade, faixa de preço e ordenação. Lotes cancelados nunca aparecem.
 2. **Criar um lote (RF-02).** Entre como `leiloeiro@demo.local`, vá a "Painel" → "Novo lote", busque uma carta na Scryfall, escolha-a e crie o lote com "Começar agora" e fim a pelo menos 5 minutos (use 6 a 10 minutos para ver o anti-sniping).
@@ -85,6 +87,8 @@ pnpm dev              # API e web em modo desenvolvimento
 | Postgres | `127.0.0.1:15432` |
 | Redis | `127.0.0.1:16379` |
 
+Se o `pnpm db:migrate` ou o `pnpm db:seed` falhar com `SQLSTATE 28P01` (senha recusada), já existe um banco de outro clone deste projeto neste computador: o compose usa sempre o projeto `leilao` e o volume `leilao_pgdata`, e a senha só é gravada quando o volume nasce. Veja [docs/dev-setup.md](docs/dev-setup.md) (§Senha dessincronizada). Num computador que nunca rodou o projeto isso não acontece.
+
 Depois de um `git pull` que traga migrations ou segredos novos, rode de novo `pnpm keys:generate` (só acrescenta o que falta) e `pnpm db:migrate`. Problemas comuns (senha dessincronizada, portas ocupadas): [docs/dev-setup.md](docs/dev-setup.md). Variáveis e segredos: [docs/variaveis-de-ambiente.md](docs/variaveis-de-ambiente.md).
 
 ### Comandos do dia a dia
@@ -97,6 +101,7 @@ Depois de um `git pull` que traga migrations ou segredos novos, rode de novo `pn
 | `pnpm contracts:gen` · `pnpm contracts:check` · `pnpm contracts:lint` | gera, confere e valida os tipos dos contratos OpenAPI e AsyncAPI |
 | `pnpm db:generate` | gera migration a partir do schema (uso do desenvolvedor de banco) |
 | `pnpm db:sync-password` | reaplica a senha do dono do banco de dev sem apagar o volume |
+| `pnpm demo:lote` | cria um lote ao vivo com 8 lances pela API local, para testar a auditoria (**só dev**) |
 | `pnpm demo:adulterar` | demonstração de adulteração (**só dev**, ver [Avisos](#avisos)) |
 
 Para o e2e, instale o Chromium do Playwright uma vez: `pnpm exec playwright install chromium`.
