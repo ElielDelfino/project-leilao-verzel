@@ -90,7 +90,7 @@ export function PassoBusca({ q, pagina, aviso, aoBuscar, aoIrParaPagina, aoEscol
         ) : null}
         {consulta.data && !consulta.isFetching && total > 0 ? (
           <>
-            <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               {consulta.data.cartas.map((carta) => (
                 <li
                   key={carta.scryfallId}
