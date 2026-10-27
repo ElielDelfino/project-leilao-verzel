@@ -49,7 +49,9 @@ describe('sala ao vivo: estado inicial', () => {
 
     const itens = itensDoHistorico();
     expect(itens).toHaveLength(3);
-    expect(itens[0]?.textContent).toMatch(/^Gato-1 · R\$\s1\.234,56 · \d{2}:\d{2}:\d{2}$/);
+    expect(itens[0]?.textContent).toMatch(
+      /^Gato-1 · R\$\s1\.234,56 · \d{2}\/\d{2}\/\d{4},? \d{2}:\d{2}:\d{2}$/,
+    );
   });
 
   it('com dias restantes mostra "{d} d HH:MM:SS"', async () => {
@@ -98,6 +100,22 @@ describe('sala ao vivo: eventos', () => {
     expect(itens[0]?.textContent).toMatch(/^Raposa-7 · R\$\s1\.300,00 ·/);
     const polite = document.querySelector('[aria-live="polite"]');
     expect(polite).toHaveTextContent(/^Novo lance de R\$\s1\.300,00 por Raposa-7\.$/);
+  });
+
+  it('cada item do histórico mostra data e hora em America/Sao_Paulo', async () => {
+    const lances = [
+      {
+        seq: 1,
+        pseudonimo: 'Urso-1',
+        valorCentavos: 10_500,
+        criadoEm: '2026-10-25T11:00:07Z',
+      },
+    ];
+    await abrir(criarEstado({ totalLances: 1 }, { ultimosLances: lances }));
+
+    expect(itensDoHistorico()[0]?.textContent).toMatch(
+      /^Urso-1 · R\$\s105,00 · 25\/10\/2026,? 08:00:07$/,
+    );
   });
 
   it('o histórico guarda só 50 lances: o 51º sai', async () => {

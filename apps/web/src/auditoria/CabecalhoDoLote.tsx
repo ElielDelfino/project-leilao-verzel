@@ -7,8 +7,8 @@ import { ICONES_DE_STATUS, ROTULOS_DE_STATUS, textoDeLances } from '../lotes/rot
 function Item({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-texto-suave">{rotulo}</dt>
-      <dd className="font-medium">{children}</dd>
+      <dt className="text-xs text-texto-suave">{rotulo}</dt>
+      <dd className="font-semibold">{children}</dd>
     </div>
   );
 }
@@ -16,11 +16,11 @@ function Item({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 /** Cabeçalho do lote (specs/012 §Auditoria): sem dado de usuário nem imagem de carta. */
 export function CabecalhoDoLote({ lote }: { lote: Auditoria['lote'] }) {
   return (
-    <section aria-labelledby="titulo-lote-auditado" className="mt-4">
+    <section aria-labelledby="titulo-lote-auditado" className="cartao mt-4 p-5">
       <h2 id="titulo-lote-auditado" className="sr-only">
         Dados do lote
       </h2>
-      <dl className="grid gap-2 sm:grid-cols-2">
+      <dl className="grid gap-4 sm:grid-cols-2">
         <Item rotulo="Lote">{lote.titulo}</Item>
         <Item rotulo="Carta">{lote.cartaNome}</Item>
         <Item rotulo="Status">
@@ -31,7 +31,7 @@ export function CabecalhoDoLote({ lote }: { lote: Auditoria['lote'] }) {
         <Item rotulo="Fim">{formatarDataHora(lote.fimEm)}</Item>
         <Item rotulo="Lances registrados">{textoDeLances(lote.totalLances)}</Item>
       </dl>
-      <p className="mt-2">
+      <p className="mt-4 border-t border-borda pt-4">
         <Link to={`/lotes/${encodeURIComponent(lote.id)}`}>Ver lote</Link>
       </p>
     </section>

@@ -36,6 +36,17 @@ function contraste(a: string, b: string): number {
   return (maior + 0.05) / (menor + 0.05);
 }
 
+// Cor `frente` com opacidade `alfa` sobre `base`, como o Tailwind compõe `bg-<cor>/10`.
+function misturar(frente: string, base: string, alfa: number): string {
+  const canal = (hex: string, i: number) => Number.parseInt(hex.slice(i, i + 2), 16);
+  const mistura = [1, 3, 5].map((i) =>
+    Math.round(canal(frente, i) * alfa + canal(base, i) * (1 - alfa))
+      .toString(16)
+      .padStart(2, '0'),
+  );
+  return `#${mistura.join('')}`;
+}
+
 const TEXTO_AA = 4.5;
 const NAO_TEXTO_AA = 3; // SC 1.4.11: indicador de foco e componentes de interface
 
@@ -59,7 +70,25 @@ const PARES: Array<[string, string, number]> = [
   // Selo e veredito usam border-current: a borda herda cor-texto e cor-texto-suave.
   ['cor-texto', 'cor-fundo', NAO_TEXTO_AA],
   ['cor-texto-suave', 'cor-superficie', NAO_TEXTO_AA],
+  // Protótipo: o "poço" (área da carta e controles) e as cores de estado e de valor.
+  ['cor-texto', 'cor-poco', TEXTO_AA],
+  ['cor-texto-suave', 'cor-poco', TEXTO_AA],
+  ['cor-borda-controle', 'cor-poco', NAO_TEXTO_AA],
+  ...['cor-destaque', 'cor-sucesso', 'cor-perigo', 'cor-aviso'].flatMap(
+    (cor): Array<[string, string, number]> => [
+      [cor, 'cor-fundo', TEXTO_AA],
+      [cor, 'cor-superficie', TEXTO_AA],
+      [cor, 'cor-poco', TEXTO_AA],
+    ],
+  ),
 ];
+
+const TINTAS: Array<[string, string]> = [
+  'cor-destaque',
+  'cor-sucesso',
+  'cor-perigo',
+  'cor-aviso',
+].flatMap((cor) => ['cor-fundo', 'cor-superficie'].map((base): [string, string] => [cor, base]));
 
 const TEMAS: Array<[string, Cores]> = [
   ['claro (:root)', lerBloco(':root')],
@@ -75,5 +104,13 @@ describe.each(TEMAS)('contraste dos tokens no tema %s', (_nome, cores) => {
   it.each(PARES)('%s sobre %s atinge %s:1', (frente, fundo, minimo) => {
     const razao = contraste(cores[frente] ?? '', cores[fundo] ?? '');
     expect(razao).toBeGreaterThanOrEqual(minimo);
+  });
+
+  // Caixas de estado (`border-<cor> bg-<cor>/10 text-<cor>`) fora de um cartão ficam sobre o
+  // fundo da página; dentro, sobre a superfície. A tinta clareia/escurece o fundo do texto.
+  it.each(TINTAS)('%s com tinta de 10 por cento sobre %s atinge 4.5:1', (cor, base) => {
+    const frente = cores[cor] ?? '';
+    const fundo = misturar(frente, cores[base] ?? '', 0.1);
+    expect(contraste(frente, fundo)).toBeGreaterThanOrEqual(TEXTO_AA);
   });
 });

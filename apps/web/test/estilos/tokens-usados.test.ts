@@ -49,7 +49,7 @@ describe('cores usadas nas telas', () => {
   it('toda classe de cor com nome de token aponta para um token definido nos dois temas', () => {
     const usadas = new Set<string>();
     const tokenUsado = new RegExp(
-      `\\b(?:${PREFIXOS})-(borda-controle|borda|texto-sobre-primario|texto-suave|texto|superficie|fundo|primario|link|foco)\\b`,
+      `\\b(?:${PREFIXOS})-(borda-controle|borda|texto-sobre-primario|texto-suave|texto|superficie|fundo|poco|primario|link|foco|destaque|sucesso|perigo|aviso)\\b`,
       'g',
     );
     for (const { texto } of FONTES) {

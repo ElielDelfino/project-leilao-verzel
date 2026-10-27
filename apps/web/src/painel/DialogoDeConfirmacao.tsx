@@ -83,7 +83,7 @@ export function DialogoDeConfirmacao({
         aria-labelledby={idDoTitulo}
         tabIndex={-1}
         onKeyDown={aoTeclar}
-        className="w-full max-w-md rounded-md border border-borda-controle bg-superficie p-6 text-texto"
+        className="cartao w-full max-w-md p-6 text-texto shadow-2xl"
       >
         <h2 id={idDoTitulo} className="text-xl font-bold">
           {titulo}

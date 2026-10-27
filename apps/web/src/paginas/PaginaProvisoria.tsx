@@ -9,8 +9,10 @@ export function PaginaProvisoria({ titulo }: Props) {
   return (
     <>
       <title>{tituloDaPagina(titulo)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{titulo}</h1>
-      <p className="mt-4 text-texto-suave">Em construção.</p>
+      <div className="cartao mx-auto mt-8 max-w-lg p-6 text-center sm:p-10">
+        <h1 className="titulo-pagina">{titulo}</h1>
+        <p className="mt-4 text-texto-suave">Em construção.</p>
+      </div>
     </>
   );
 }

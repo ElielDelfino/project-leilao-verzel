@@ -33,7 +33,7 @@ export function LayoutBase() {
     <div className="flex min-h-dvh flex-col">
       <a
         href={`#${ID_CONTEUDO}`}
-        className="sr-only rounded-md bg-primario px-4 py-2 font-medium text-texto-sobre-primario focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
+        className="sr-only rounded-xl bg-primario px-4 py-2 font-semibold text-texto-sobre-primario focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50"
       >
         Pular para o conteúdo
       </a>
@@ -42,7 +42,7 @@ export function LayoutBase() {
         id={ID_CONTEUDO}
         ref={conteudo}
         tabIndex={-1}
-        className="mx-auto w-full max-w-6xl flex-1 px-4 py-8"
+        className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10"
       >
         <Outlet />
       </main>

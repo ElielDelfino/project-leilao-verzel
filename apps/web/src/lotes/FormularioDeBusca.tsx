@@ -80,7 +80,7 @@ export function FormularioDeBusca({ filtros, aoFiltrar, aoLimpar }: FormularioDe
       role="search"
       noValidate
       onSubmit={enviar}
-      className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      className="cartao grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4"
     >
       <Campo
         nome="q"
@@ -91,7 +91,7 @@ export function FormularioDeBusca({ filtros, aoFiltrar, aoLimpar }: FormularioDe
         aoMudar={setQ}
       />
       <div>
-        <label htmlFor="raridade" className="font-medium">
+        <label htmlFor="raridade" className="rotulo">
           Raridade
         </label>
         <select
@@ -99,7 +99,7 @@ export function FormularioDeBusca({ filtros, aoFiltrar, aoLimpar }: FormularioDe
           name="raridade"
           value={raridade}
           onChange={(e) => setRaridade(e.target.value as Raridade | '')}
-          className="mt-1 block min-h-11 w-full rounded-md border border-borda-controle bg-superficie px-3 text-texto"
+          className="controle mt-1.5 block"
         >
           <option value="">Todas</option>
           {RARIDADES.map((r) => (
@@ -125,18 +125,11 @@ export function FormularioDeBusca({ filtros, aoFiltrar, aoLimpar }: FormularioDe
         aoMudar={setPrecoMax}
         erro={erros.precoMax}
       />
-      <div className="flex gap-4 sm:col-span-2 lg:col-span-4">
-        <button
-          type="submit"
-          className="min-h-11 rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
+      <div className="flex flex-wrap gap-3 sm:col-span-2 lg:col-span-4">
+        <button type="submit" className="botao-primario">
           Filtrar
         </button>
-        <button
-          type="button"
-          onClick={aoLimpar}
-          className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
-        >
+        <button type="button" onClick={aoLimpar} className="botao-secundario">
           Limpar filtros
         </button>
       </div>

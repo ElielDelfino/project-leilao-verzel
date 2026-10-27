@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -83,6 +83,25 @@ describe('/entrar', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Muitas tentativas. Tente de novo em 42 s.',
     );
+  });
+
+  it('lista as contas de demonstração abaixo de "Criar conta", com a senha pública', async () => {
+    renderizarApp('/entrar');
+
+    const lista = await screen.findByRole('region', { name: 'Contas de demonstração' });
+    // O cabeçalho também tem "Criar conta"; vale o do cartão de entrar, irmão da região.
+    const cartao = lista.parentElement as HTMLElement;
+    const criarConta = within(cartao).getByRole('link', { name: 'Criar conta' });
+    expect(
+      criarConta.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    for (const email of ['leiloeiro@demo.local', 'helena@demo.local', 'otavio@demo.local']) {
+      expect(within(lista).getByText(email)).toBeInTheDocument();
+    }
+    expect(within(lista).getByText('Leiloeiro')).toBeInTheDocument();
+    expect(within(lista).getAllByText('Licitante')).toHaveLength(2);
+    expect(within(lista).getByText('leilao-demo-2026')).toBeInTheDocument();
   });
 
   it.each(['light', 'dark'] as const)('axe sem violações sérias no tema %s', async (tema) => {

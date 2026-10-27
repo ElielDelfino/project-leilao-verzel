@@ -53,47 +53,51 @@ export function PaginaCadastro() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
-      <form noValidate onSubmit={enviar} className="mt-6 flex max-w-md flex-col gap-4">
-        {cadastro.error ? <ErroDoServidor erro={cadastro.error} /> : null}
-        <Campo nome="nome" rotulo="Nome" autoComplete="name" erro={erros.nome} />
-        <Campo nome="email" rotulo="E-mail" tipo="email" autoComplete="email" erro={erros.email} />
-        <Campo
-          nome="senha"
-          rotulo="Senha"
-          tipo="password"
-          autoComplete="new-password"
-          erro={erros.senha}
-        />
-        <fieldset aria-describedby={erros.papel ? 'papel-erro' : undefined}>
-          <legend className="font-medium">Papel</legend>
-          <div className="mt-1 flex gap-6">
-            <label className="flex min-h-11 items-center gap-2">
-              <input type="radio" name="papel" value="licitante" />
-              Licitante
-            </label>
-            <label className="flex min-h-11 items-center gap-2">
-              <input type="radio" name="papel" value="leiloeiro" />
-              Leiloeiro
-            </label>
-          </div>
-          {erros.papel ? (
-            <p id="papel-erro" className="mt-1 text-sm font-medium">
-              {erros.papel}
-            </p>
-          ) : null}
-        </fieldset>
-        <button
-          type="submit"
-          disabled={cadastro.isPending}
-          className="min-h-11 rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
-          {cadastro.isPending ? 'Criando conta…' : 'Criar conta'}
-        </button>
-      </form>
-      <p className="mt-6">
-        Já tem conta? <Link to="/entrar">Entrar</Link>
-      </p>
+      <div className="cartao mx-auto mt-4 max-w-md p-6 sm:p-8">
+        <h1 className="titulo-pagina">{TITULO}</h1>
+        <form noValidate onSubmit={enviar} className="mt-6 flex flex-col gap-4">
+          {cadastro.error ? <ErroDoServidor erro={cadastro.error} /> : null}
+          <Campo nome="nome" rotulo="Nome" autoComplete="name" erro={erros.nome} />
+          <Campo
+            nome="email"
+            rotulo="E-mail"
+            tipo="email"
+            autoComplete="email"
+            erro={erros.email}
+          />
+          <Campo
+            nome="senha"
+            rotulo="Senha"
+            tipo="password"
+            autoComplete="new-password"
+            erro={erros.senha}
+          />
+          <fieldset aria-describedby={erros.papel ? 'papel-erro' : undefined}>
+            <legend className="rotulo">Papel</legend>
+            <div className="mt-1 flex gap-3">
+              <label className="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-borda-controle bg-poco px-3">
+                <input type="radio" name="papel" value="licitante" className="accent-primario" />
+                Licitante
+              </label>
+              <label className="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-borda-controle bg-poco px-3">
+                <input type="radio" name="papel" value="leiloeiro" className="accent-primario" />
+                Leiloeiro
+              </label>
+            </div>
+            {erros.papel ? (
+              <p id="papel-erro" className="mt-1 text-sm font-medium">
+                {erros.papel}
+              </p>
+            ) : null}
+          </fieldset>
+          <button type="submit" disabled={cadastro.isPending} className="botao-primario w-full">
+            {cadastro.isPending ? 'Criando conta…' : 'Criar conta'}
+          </button>
+        </form>
+        <p className="mt-6 text-center text-texto-suave">
+          Já tem conta? <Link to="/entrar">Entrar</Link>
+        </p>
+      </div>
     </>
   );
 }

@@ -1,13 +1,16 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/outfit';
 @import './tokens.css';
 
 /* dark: do Tailwind segue o atributo data-theme, não a media query (a escolha manual vence). */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* Utilitários a partir dos tokens: bg-fundo, text-texto, border-borda etc. */
+/* Utilitários a partir dos tokens: bg-fundo, text-texto, border-borda etc. (tokens.css). */
 @theme inline {
+  --font-sans: 'Outfit Variable', system-ui, sans-serif;
   --color-fundo: var(--cor-fundo);
   --color-superficie: var(--cor-superficie);
+  --color-poco: var(--cor-poco);
   --color-texto: var(--cor-texto);
   --color-texto-suave: var(--cor-texto-suave);
   --color-borda: var(--cor-borda);
@@ -16,12 +19,17 @@
   --color-texto-sobre-primario: var(--cor-texto-sobre-primario);
   --color-link: var(--cor-link);
   --color-foco: var(--cor-foco);
+  --color-destaque: var(--cor-destaque);
+  --color-sucesso: var(--cor-sucesso);
+  --color-perigo: var(--cor-perigo);
+  --color-aviso: var(--cor-aviso);
 }
 
 @layer base {
   body {
     background-color: var(--cor-fundo);
     color: var(--cor-texto);
+    -webkit-font-smoothing: antialiased;
   }
 
   a {
@@ -51,5 +59,72 @@
       scroll-behavior: auto !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+/*
+ * Peças visuais compartilhadas pelas telas: cartões arredondados com borda fina,
+ * botões em pílula e controles sobre o "poço". Mantêm alvo de 44px (min-h-11, WCAG 2.5.8).
+ */
+@layer components {
+  .titulo-pagina {
+    @apply text-2xl font-extrabold tracking-tight text-texto sm:text-3xl;
+  }
+
+  .cartao {
+    @apply rounded-2xl border border-borda bg-superficie;
+  }
+
+  .botao-primario,
+  .botao-secundario,
+  .botao-perigo {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 text-sm font-semibold no-underline transition-colors disabled:cursor-not-allowed disabled:opacity-60 aria-disabled:cursor-not-allowed aria-disabled:opacity-60;
+  }
+
+  .botao-primario {
+    @apply bg-primario text-texto-sobre-primario shadow-[0_6px_20px_-6px_var(--cor-primario)] hover:brightness-110;
+  }
+
+  .botao-secundario {
+    @apply border border-borda-controle bg-poco text-texto hover:border-texto;
+  }
+
+  .botao-perigo {
+    @apply border border-perigo bg-perigo/10 text-perigo hover:bg-perigo/15;
+  }
+
+  .controle {
+    @apply min-h-11 w-full rounded-xl border border-borda-controle bg-poco px-3 text-texto placeholder:text-texto-suave;
+  }
+
+  .rotulo {
+    @apply text-sm font-semibold text-texto;
+  }
+
+  .selo {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold tracking-wider uppercase;
+  }
+
+  /* Grupo de pílulas (abas e navegação), com a pílula ativa em destaque. */
+  .pilulas {
+    @apply relative inline-flex flex-wrap items-center gap-0.5 rounded-full border border-borda bg-poco p-1 sm:gap-1.5 sm:p-1.5;
+  }
+
+  /* Fundo deslizante (IndicadorDeslizante.tsx); enquanto não mede, vale o fundo da própria pílula. */
+  .indicador-pilula {
+    @apply pointer-events-none absolute top-0 left-0 hidden rounded-full bg-primario shadow-[0_6px_20px_-6px_var(--cor-primario)] data-animar:transition-[transform,width,height] data-animar:duration-350 data-animar:ease-[cubic-bezier(.2,.8,.2,1)] data-visivel:block;
+  }
+
+  .pilulas:has(> .indicador-pilula[data-visivel]) > .pilula {
+    @apply bg-transparent shadow-none;
+  }
+
+  /* Ativa com o brilho embaixo, como a pílula de navegação (16px, 10px × 18px). */
+  .pilula {
+    @apply relative inline-flex min-h-10 items-center rounded-full px-3 text-sm font-semibold text-texto-suave no-underline transition-[color,background-color,box-shadow] hover:text-texto sm:min-h-11 sm:px-4.5 sm:text-base aria-selected:bg-primario aria-selected:text-texto-sobre-primario aria-selected:shadow-[0_6px_20px_-6px_var(--cor-primario)] aria-[current=page]:bg-primario aria-[current=page]:text-texto-sobre-primario aria-[current=page]:shadow-[0_6px_20px_-6px_var(--cor-primario)];
+  }
+
+  .aviso {
+    @apply rounded-xl border border-borda-controle bg-poco p-3 font-medium;
   }
 }

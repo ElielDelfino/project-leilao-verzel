@@ -50,7 +50,7 @@ export function PaginaNovoLote() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <h1 className="titulo-pagina">{TITULO}</h1>
       <div ref={raiz}>
         {carta === null ? (
           <PassoBusca

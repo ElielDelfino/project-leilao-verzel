@@ -52,12 +52,12 @@ export function PassoBusca({ q, pagina, aviso, aoBuscar, aoIrParaPagina, aoEscol
   const totalPaginas = Math.min(Math.ceil(total / TAMANHO_DO_CATALOGO), TAMANHO_MAXIMO_DE_PAGINAS);
 
   return (
-    <>
-      <h2 tabIndex={-1} data-foco-do-passo className="mt-6 text-xl font-semibold">
+    <div className="cartao mt-6 p-6">
+      <h2 tabIndex={-1} data-foco-do-passo className="text-lg font-bold">
         Buscar carta
       </h2>
       {aviso ? (
-        <p role="alert" className="mt-4 rounded-md border border-borda-controle p-3 font-medium">
+        <p role="alert" className="aviso mt-4">
           {aviso}
         </p>
       ) : null}
@@ -71,35 +71,36 @@ export function PassoBusca({ q, pagina, aviso, aoBuscar, aoIrParaPagina, aoEscol
           aoMudar={setTexto}
           erro={erro}
         />
-        <button
-          type="submit"
-          className="min-h-11 self-start rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
+        <button type="submit" className="botao-primario self-start">
           Buscar cartas
         </button>
       </form>
       <div className="mt-6">
         {buscaAtiva && consulta.isFetching ? <p role="status">Buscando cartas…</p> : null}
         {consulta.error && !consulta.isFetching ? (
-          <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+          <p role="alert" className="aviso">
             {textoDoErroDoCatalogo(consulta.error)}
           </p>
         ) : null}
-        <p aria-live="polite">{consulta.data && !consulta.isFetching ? textoDoTotal(total) : ''}</p>
+        <p aria-live="polite" className="text-sm font-semibold text-texto-suave">
+          {consulta.data && !consulta.isFetching ? textoDoTotal(total) : ''}
+        </p>
         {consulta.data && !consulta.isFetching && total === 0 ? (
           <p>Nenhuma carta encontrada para esta busca.</p>
         ) : null}
         {consulta.data && !consulta.isFetching && total > 0 ? (
           <>
-            <ul className="mt-2 grid gap-4 sm:grid-cols-2">
+            <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               {consulta.data.cartas.map((carta) => (
                 <li
                   key={carta.scryfallId}
-                  className="flex gap-4 rounded-md border border-borda-controle p-3"
+                  className="flex flex-col overflow-hidden rounded-2xl border border-borda bg-superficie transition-colors hover:border-primario"
                 >
-                  <Miniatura carta={carta} />
-                  <div className="flex flex-col gap-1">
-                    <span className="font-medium">{carta.nome}</span>
+                  <div className="flex justify-center bg-linear-to-b from-primario/10 to-poco px-4 py-5">
+                    <Miniatura carta={carta} tamanho="grande" />
+                  </div>
+                  <div className="flex flex-1 flex-col gap-1 border-t border-borda p-4 text-sm text-texto-suave">
+                    <span className="font-bold text-texto">{carta.nome}</span>
                     <span>
                       {carta.colecao} · {ROTULOS_DE_RARIDADE[carta.raridade]}
                     </span>
@@ -109,7 +110,7 @@ export function PassoBusca({ q, pagina, aviso, aoBuscar, aoIrParaPagina, aoEscol
                       type="button"
                       aria-label={`Escolher ${carta.nome}`}
                       onClick={() => aoEscolher(carta)}
-                      className="mt-2 min-h-11 self-start rounded-md border border-borda-controle px-4 font-medium"
+                      className="botao-secundario mt-auto self-start"
                     >
                       Escolher esta carta
                     </button>
@@ -121,6 +122,6 @@ export function PassoBusca({ q, pagina, aviso, aoBuscar, aoIrParaPagina, aoEscol
           </>
         ) : null}
       </div>
-    </>
+    </div>
   );
 }

@@ -61,6 +61,9 @@ Rota inexistente: o Caddy devolve o `index.html` com HTTP 200 (fallback da SPA) 
   - `estorno`: "Estorno de lote cancelado"
   - `debito_arremate`: "Pagamento de arremate"
   - `credito_arremate`: "Recebimento de arremate"
+- Sinal e cor do valor no extrato: a API manda `valorCentavos` sempre positivo; o front mostra o sinal pelo `tipo`, visto pelo saldo disponível: `deposito`, `credito_arremate`, `liberacao` e `estorno` com "+" (verde); `debito_arremate` com "−" (vermelho); `compromisso` com "−" (âmbar, valor reservado). O sinal é parte do texto, nunca só a cor.
+- Saldo da carteira: "Total" na cor do texto, "Comprometido" em âmbar e "Disponível" em verde; cada valor continua com o seu rótulo.
+- Identidade visual: cores só por tokens (`fundo`, `superficie`, `poco`, `texto`, `texto-suave`, `borda`, `primario`, `destaque`, `sucesso`, `perigo`, `aviso`), com contraste AA nos dois temas; fonte Outfit servida pelo próprio app (`font-src 'self'`). As abas e a navegação em pílula têm um fundo da pílula ativa que desliza até a nova ativa; é só visual (`aria-hidden`), sem mudar papéis nem estados ARIA, e não anima com `prefers-reduced-motion`.
 - Sala: botão de lance rápido com o valor mínimo pré-preenchido; indicador "Você está ganhando" / "Você foi superado" com cor **e** ícone **e** texto (não só cor); contagem regressiva corrigida pelo relógio do servidor; destaque visual quando o fim é estendido. Detalhes em §Sala ao vivo.
 - Dinheiro sempre por `Intl.NumberFormat('pt-BR', {style: 'currency', currency: 'BRL'})`; datas em `America/Sao_Paulo`.
 - Dark mode: tokens CSS em `:root` e `[data-theme="dark"]`; segue `prefers-color-scheme` por padrão; alternância salva no `localStorage`.
@@ -85,6 +88,7 @@ Acesso por rota (papéis da tabela de §Rotas):
 - Usuário logado em `/entrar` ou `/cadastro` → vai para o destino padrão do papel, sem mostrar o formulário.
 - Destino padrão: `/` para licitante e `/painel` para leiloeiro.
 - Destino depois de entrar ou de cadastrar-se: o `retorno`, se for caminho interno (começa com `/`, não começa com `//` e não contém `\`) e permitido ao papel (não restrito a outro papel); caso contrário, o destino padrão.
+- Contas de demonstração: abaixo de "Ainda não tem conta? Criar conta", `/entrar` lista as três contas do seed (specs/003 RF-03) para quem avalia o projeto: Leiloeiro `leiloeiro@demo.local`, Licitante `helena@demo.local` e Licitante `otavio@demo.local`, com a senha `leilao-demo-2026`. A senha é pública de propósito (ADR 0023) e o texto fica selecionável para copiar; a lista não preenche o formulário.
 
 Cabeçalho:
 - Anônimo: "Entrar" e "Criar conta".
@@ -160,7 +164,7 @@ Substitui o detalhe. Tela pública; o lance exige licitante. Dados estáticos (c
 
 ### Relógio, histórico e destaque do fim estendido
 - Contagem regressiva `role="timer"` "Termina em {HH:MM:SS}" (com dias: "{d} d {HH:MM:SS}"), corrigida por `agoraServidor`: diferença entre `agoraServidor` e o relógio local no instante em que o estado chegou, somada ao relógio local a cada segundo. Ao chegar a zero mostra "Encerrando…" até o evento de encerramento ou o resync; nunca mostra tempo negativo. Sem `aria-live` no cronômetro (não anuncia a cada segundo); o texto estático "Fim: {data e hora}" fica ao lado.
-- Histórico "Últimos lances": `<ol>` com até 50 lances, do mais recente ao mais antigo; cada item "{pseudonimo} · {valor} · {hora}", com "(você)" no do próprio usuário; vazio: o texto de "Sem lances". Um lance novo entra no topo e o 51º sai. O histórico completo está na auditoria (F4).
+- Histórico "Últimos lances": `<ol>` com até 50 lances, do mais recente ao mais antigo; cada item "{pseudonimo} · {valor} · {data e hora}" (dd/mm/aaaa, hh:mm:ss em `America/Sao_Paulo`), com "(você)" no do próprio usuário; vazio: o texto de "Sem lances". Um lance novo entra no topo e o 51º sai. O histórico completo está na auditoria (F4).
 - **Fim estendido:** ao receber `fim_estendido`, a contagem ganha um selo com ícone **e** texto "Fim estendido" por 10 s e um `role="status"` anuncia "O fim do lote foi estendido para {data e hora}."; o destaque é borda e texto, não só cor, e não anima com `prefers-reduced-motion`.
 - **Extensão vista só no resync** (o fim mudou durante uma queda ou entre resyncs): se o estado de um resync chega com `fimEm` maior que o do estado local, a sala age como se tivesse recebido `fim_estendido`: selo "Fim estendido" por 10 s e um único anúncio "O fim do lote foi estendido para {data e hora}.". Com `fimEm` igual, o resync preserva o aviso anterior em vez de apagá-lo. A primeira entrada na sala nunca anuncia.
 
@@ -281,9 +285,12 @@ Presente em todas as rotas (dentro do layout), com dois parágrafos de texto fix
 - [ ] Teste de componente (sessão expirada): refresh em 401 durante o uso mostra "Sua sessão expirou. Entre novamente." e navega para `/entrar?retorno=%2Fcarteira` quando o usuário estava em `/carteira`.
 - [ ] Teste de componente (acesso): anônimo em `/carteira` e em `/painel` → `/entrar?retorno=...` sem mensagem; leiloeiro em `/carteira` e licitante em `/painel/lotes/novo` → `<h1>` "Acesso não permitido", a mensagem de `PAPEL_NAO_PERMITIDO` e o link "Voltar à vitrine" com `href="/"`, dentro do layout; licitante logado em `/entrar` e em `/cadastro` → `/`, e leiloeiro → `/painel`.
 - [ ] Teste de componente (retorno): depois do login, `retorno=/carteira` leva a `/carteira` para licitante; `retorno=//exemplo.com`, `retorno=/\exemplo.com`, `retorno=/carteira\x`, `retorno=https://exemplo.com` e `retorno=/painel` (licitante) levam a `/`; `retorno=/painel` leva a `/painel` para leiloeiro, e `retorno=/carteira` (leiloeiro) leva a `/painel`.
+- [ ] Teste de componente (contas de demonstração): `/entrar` mostra, depois do link "Criar conta", a região "Contas de demonstração" com os três e-mails do seed, os papéis e a senha `leilao-demo-2026`.
 - [ ] Teste de componente (cabeçalho): os itens de cada papel são exatamente os de §Sessão e acesso (anônimo: "Entrar" e "Criar conta"; licitante: "Carteira", "Meus arremates", nome e "Sair"; leiloeiro: "Painel", nome e "Sair").
 - [ ] Teste de componente (mensagens): cada código e cada mensagem por campo das listas de §Comportamento aparece com o texto exato; `INDISPONIVEL` e uma falha de rede (fetch rejeitado) mostram o mesmo texto; depósito de R$ 50,00 mostra "Depósito de R$ 50,00 registrado."; valores R$ 0,99 e R$ 100.000,01 mostram "Informe um valor entre R$ 1,00 e R$ 100.000,00." e não enviam a requisição.
 - [ ] Teste de componente (extrato): cada um dos 6 tipos mostra o rótulo de §Comportamento.
+- [ ] Teste de unidade e de componente (sinal do extrato): cada um dos 6 tipos mostra o sinal de §Comportamento antes do valor (ex.: "+ R$ 50,00" no depósito, "− R$ 50,00" no compromisso).
+- [ ] Testes de estilo: os tokens de §Identidade visual existem nos dois temas e passam no contraste AA; nenhuma tela usa cor fora dos tokens.
 - [ ] Teste de componente (estado de erro): uma rota que lança `new Error("segredo interno")` mostra, dentro do layout, `<h1>` "Algo deu errado", o parágrafo e o link "Voltar à vitrine" com `href="/"` num `role="alert"`, sem o texto "segredo interno"; quando o layout lança, a tela tem `<main id="conteudo">` e o rodapé, sem o cabeçalho.
 - [ ] Teste de componente: navegar para outro `pathname` coloca o foco no `<main id="conteudo">`; a primeira carga e uma navegação que só muda a query string não mudam o foco.
 - [ ] Teste de componente (vitrine, estado na URL): `/?status=encerrado&q=dragao&raridade=rare&precoMin=500&precoMax=9900&ordem=maior_lance&pagina=2` marca a aba "Encerrados", preenche os controles (preços "5,00" e "99,00") e consulta `GET /api/lotes` com exatamente esses parâmetros; mudar a aba, o filtro ou a ordenação volta `pagina` para 1 e tira da URL os valores padrão; `?status=xyz&pagina=0&ordem=abc` equivale à URL sem parâmetros; `pagina` acima da última troca a URL para a última sem nova entrada de histórico.

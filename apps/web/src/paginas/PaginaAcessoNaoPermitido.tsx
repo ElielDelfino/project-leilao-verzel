@@ -10,11 +10,15 @@ export function PaginaAcessoNaoPermitido() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
-      <p className="mt-4">{mensagemDoErro('PAPEL_NAO_PERMITIDO')}</p>
-      <p className="mt-4">
-        <Link to="/">Voltar à vitrine</Link>
-      </p>
+      <div className="cartao mx-auto mt-8 max-w-lg p-6 text-center sm:p-10">
+        <h1 className="titulo-pagina">{TITULO}</h1>
+        <p className="mt-4 text-texto-suave">{mensagemDoErro('PAPEL_NAO_PERMITIDO')}</p>
+        <p className="mt-6">
+          <Link to="/" className="botao-secundario">
+            Voltar à vitrine
+          </Link>
+        </p>
+      </div>
     </>
   );
 }

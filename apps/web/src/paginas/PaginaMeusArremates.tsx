@@ -6,6 +6,7 @@ import { tituloDaPagina } from '../layout/site';
 import { ABAS, escreverEstado, lerEstado, type Aba } from '../meus-arremates/estado-da-url';
 import { ItemDeArremate, ItemDeLance } from '../meus-arremates/Itens';
 import { ListaPaginada } from '../meus-arremates/ListaPaginada';
+import { IndicadorDeslizante } from '../layout/IndicadorDeslizante';
 
 const TITULO = 'Meus arremates';
 const ID_PAINEL = 'painel-meus-arremates';
@@ -34,13 +35,10 @@ export function PaginaMeusArremates() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <h1 className="titulo-pagina">{TITULO}</h1>
 
-      <div
-        role="tablist"
-        aria-label="Seções de Meus arremates"
-        className="mt-6 flex flex-wrap gap-2"
-      >
+      <div role="tablist" aria-label="Seções de Meus arremates" className="pilulas mt-6">
+        <IndicadorDeslizante />
         {ABAS.map((a) => {
           const selecionada = a === aba;
           return (
@@ -54,11 +52,7 @@ export function PaginaMeusArremates() {
               tabIndex={selecionada ? 0 : -1}
               onClick={() => irParaAba(a)}
               onKeyDown={teclaNaAba}
-              className={`min-h-11 rounded-md border px-4 font-medium ${
-                selecionada
-                  ? 'border-primario bg-primario text-texto-sobre-primario'
-                  : 'border-borda-controle'
-              }`}
+              className="pilula min-h-11 cursor-pointer"
             >
               {ROTULOS[a]}
             </button>
@@ -79,7 +73,7 @@ export function PaginaMeusArremates() {
             chaveDoItem={(item) => item.lote.id}
             renderizar={(item) => <ItemDeLance item={item} />}
             irParaPagina={irParaPagina}
-            vazio={<p>Você ainda não deu nenhum lance.</p>}
+            vazio={<p className="aviso">Você ainda não deu nenhum lance.</p>}
           />
         ) : (
           <ListaPaginada
@@ -92,7 +86,7 @@ export function PaginaMeusArremates() {
             chaveDoItem={(item) => item.codigo}
             renderizar={(item) => <ItemDeArremate item={item} />}
             irParaPagina={irParaPagina}
-            vazio={<p>Você ainda não arrematou nenhum lote.</p>}
+            vazio={<p className="aviso">Você ainda não arrematou nenhum lote.</p>}
           />
         )}
       </div>

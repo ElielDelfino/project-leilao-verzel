@@ -23,6 +23,7 @@ import { FormularioDeBusca } from '../lotes/FormularioDeBusca';
 import { Paginacao } from '../lotes/Paginacao';
 import { CHAVE_DA_VITRINE } from '../tempo-real/cacheDaVitrine';
 import { useVitrineAoVivo } from '../tempo-real/useVitrineAoVivo';
+import { IndicadorDeslizante } from '../layout/IndicadorDeslizante';
 
 const TITULO = 'Vitrine';
 const ID_PAINEL = 'painel-da-vitrine';
@@ -39,7 +40,7 @@ const ROTULOS_DE_ORDEM = {
   maior_lance: 'Maior lance',
 } as const;
 
-const CLASSE_BOTAO_SECUNDARIO = 'min-h-11 rounded-md border border-borda-controle px-4 font-medium';
+const CLASSE_BOTAO_SECUNDARIO = 'botao-secundario';
 
 const idDaAba = (status: StatusDaVitrine) => `aba-${status}`;
 
@@ -105,33 +106,46 @@ export function PaginaVitrine() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
-
-      <div role="tablist" aria-label="Status dos lotes" className="mt-6 flex flex-wrap gap-2">
-        {STATUS_DA_VITRINE.map((status) => {
-          const selecionada = status === filtros.status;
-          return (
-            <button
-              key={status}
-              id={idDaAba(status)}
-              type="button"
-              role="tab"
-              aria-selected={selecionada}
-              aria-controls={ID_PAINEL}
-              tabIndex={selecionada ? 0 : -1}
-              onClick={() => mudar({ status })}
-              onKeyDown={teclaNaAba}
-              className={`min-h-11 rounded-md border px-4 font-medium ${
-                selecionada
-                  ? 'border-primario bg-primario text-texto-sobre-primario'
-                  : 'border-borda-controle'
-              }`}
-            >
-              {ABAS[status].rotulo}
-            </button>
-          );
-        })}
-      </div>
+      <section className="relative overflow-hidden rounded-3xl border border-borda bg-linear-to-br from-primario/15 via-superficie to-poco px-5 py-7 sm:px-10 sm:py-10">
+        {/* Brilho decorativo no canto, no hero da vitrine. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-24 -right-24 size-72 rounded-full bg-primario/20 blur-3xl"
+        />
+        <div className="relative">
+          <p className="selo border border-borda bg-poco text-texto-suave">Casa de Leilões</p>
+          <h1 className="mt-3 text-3xl font-extrabold tracking-tight sm:text-4xl">{TITULO}</h1>
+          <p className="mt-2 max-w-xl text-sm text-texto-suave sm:text-base">
+            Cartas Magic em leilão com lances ao vivo e histórico que qualquer pessoa pode auditar.
+          </p>
+          <div
+            role="tablist"
+            aria-label="Status dos lotes"
+            className="pilulas mt-6 grid w-full grid-cols-3 sm:inline-flex sm:w-auto"
+          >
+            <IndicadorDeslizante />
+            {STATUS_DA_VITRINE.map((status) => {
+              const selecionada = status === filtros.status;
+              return (
+                <button
+                  key={status}
+                  id={idDaAba(status)}
+                  type="button"
+                  role="tab"
+                  aria-selected={selecionada}
+                  aria-controls={ID_PAINEL}
+                  tabIndex={selecionada ? 0 : -1}
+                  onClick={() => mudar({ status })}
+                  onKeyDown={teclaNaAba}
+                  className="pilula min-h-11 justify-center"
+                >
+                  {ABAS[status].rotulo}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
 
       <div className="mt-6">
         <FormularioDeBusca
@@ -142,8 +156,8 @@ export function PaginaVitrine() {
         />
       </div>
 
-      <div className="mt-6">
-        <label htmlFor="ordem" className="font-medium">
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <label htmlFor="ordem" className="rotulo">
           Ordenar por
         </label>{' '}
         <select
@@ -153,7 +167,7 @@ export function PaginaVitrine() {
             const ordem = ORDENS.find((o) => o === e.target.value);
             if (ordem) mudar({ ordem });
           }}
-          className="min-h-11 rounded-md border border-borda-controle bg-superficie px-3 text-texto"
+          className="controle w-auto"
         >
           {ORDENS.map((ordem) => (
             <option key={ordem} value={ordem}>
@@ -216,7 +230,7 @@ function ConteudoDaLista({
   // A falha de um refetch (resync) com a lista em tela não a derruba: avisa e mantém os cards.
   const aviso = consulta.error ? (
     <div className="mb-4 flex flex-col items-start gap-4">
-      <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+      <p role="alert" className="aviso">
         Não foi possível atualizar a lista. {textoDoErro(consulta.error)}
       </p>
       <BotaoTentarDeNovo aoClicar={() => void consulta.refetch()} />
@@ -277,10 +291,10 @@ function ListaDeLotes({
   }
   return (
     <>
-      <p aria-live="polite" className="mb-4 text-texto-suave">
+      <p aria-live="polite" className="mb-4 text-sm font-semibold text-texto-suave">
         {textoDoTotal(meta.total)}
       </p>
-      <ul aria-busy={isPlaceholderData} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <ul aria-busy={isPlaceholderData} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {lotes.map((lote) => (
           <CartaoDoLote key={lote.id} lote={lote} />
         ))}

@@ -6,15 +6,15 @@ import { formatarCentavos } from '../formatacao/dinheiro';
 import { imagemDoSnapshot, rotaDeAuditoria, rotaDeComprovante, rotaDoLote } from './links';
 import { RotuloDePosicao } from './RotuloDePosicao';
 
-const CLASSE_IMAGEM = 'h-24 w-[69px] shrink-0 rounded-md object-cover';
-const CLASSE_LINK = 'inline-flex min-h-11 items-center font-medium underline';
+const CLASSE_IMAGEM = 'h-24 w-[69px] shrink-0 rounded-md object-contain';
+const CLASSE_LINK = 'inline-flex min-h-11 items-center font-semibold underline';
 
 function Imagem({ imagemUrl, nomeDaCarta }: { imagemUrl: string; nomeDaCarta: string }) {
   const src = imagemDoSnapshot(imagemUrl);
   if (!src) {
     return (
       <div
-        className={`${CLASSE_IMAGEM} flex items-center justify-center bg-superficie text-center text-xs text-texto-suave`}
+        className={`${CLASSE_IMAGEM} flex items-center justify-center bg-poco text-center text-xs text-texto-suave`}
       >
         Sem imagem
       </div>
@@ -39,7 +39,7 @@ export function ItemDeLance({ item }: { item: LanceDoUsuario }) {
     <div className="flex gap-4">
       <Imagem imagemUrl={lote.imagemUrl} nomeDaCarta={lote.cartaNome} />
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <h2 className="text-lg font-semibold">
+        <h2 className="text-lg font-bold">
           {rotaDaSala ? (
             <Link to={rotaDaSala} className="underline">
               {lote.titulo}
@@ -49,7 +49,9 @@ export function ItemDeLance({ item }: { item: LanceDoUsuario }) {
           )}
         </h2>
         <RotuloDePosicao posicao={posicao} />
-        <p>Seu maior lance: {formatarCentavos(meuMaiorLanceCentavos)}</p>
+        <p className="rounded-xl bg-destaque/10 px-3 py-1.5 font-bold text-destaque tabular-nums">
+          Seu maior lance: {formatarCentavos(meuMaiorLanceCentavos)}
+        </p>
       </div>
     </div>
   );
@@ -62,9 +64,11 @@ export function ItemDeArremate({ item }: { item: Arremate }) {
     <div className="flex gap-4">
       <Imagem imagemUrl={carta.imagemUrl} nomeDaCarta={carta.nome} />
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <h2 className="text-lg font-semibold">{carta.nome}</h2>
-        <p>Valor do arremate: {formatarCentavos(valorCentavos)}</p>
-        <p className="text-texto-suave">Emitido em {formatarDataHora(emitidoEm)}</p>
+        <h2 className="text-lg font-bold">{carta.nome}</h2>
+        <p className="rounded-xl bg-destaque/10 px-3 py-1.5 font-bold text-destaque tabular-nums">
+          Valor do arremate: {formatarCentavos(valorCentavos)}
+        </p>
+        <p className="text-sm text-texto-suave">Emitido em {formatarDataHora(emitidoEm)}</p>
         <div className="flex flex-wrap gap-x-6">
           <Link to={rotaDeComprovante(codigo)} className={CLASSE_LINK}>
             Ver comprovante

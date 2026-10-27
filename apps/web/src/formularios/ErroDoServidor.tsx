@@ -14,7 +14,10 @@ export function textoDoErro(erro: unknown): string {
 
 export function ErroDoServidor({ erro }: Props) {
   return (
-    <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+    <p
+      role="alert"
+      className="rounded-xl border border-perigo bg-perigo/10 p-3 font-semibold text-perigo"
+    >
       {textoDoErro(erro)}
     </p>
   );

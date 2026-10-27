@@ -15,7 +15,7 @@ type Props = {
 };
 
 const CLASSE_ENTRADA =
-  'mt-1 block min-h-11 w-full rounded-md border border-borda-controle bg-superficie px-3 text-texto';
+  'controle mt-1.5 block aria-invalid:border-perigo aria-invalid:ring-1 aria-invalid:ring-perigo';
 
 /** Campo de formulário: `<label>`, e `aria-describedby`/`aria-invalid` quando há erro ou ajuda. */
 export function Campo({
@@ -41,7 +41,7 @@ export function Campo({
 
   return (
     <div>
-      <label htmlFor={nome} className="font-medium">
+      <label htmlFor={nome} className="rotulo">
         {rotulo}
       </label>
       <input
@@ -63,7 +63,7 @@ export function Campo({
         </p>
       ) : null}
       {erro ? (
-        <p id={idErro} className="mt-1 text-sm font-medium">
+        <p id={idErro} className="mt-1 text-sm font-semibold text-perigo">
           {erro}
         </p>
       ) : null}

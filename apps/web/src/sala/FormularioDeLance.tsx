@@ -11,7 +11,6 @@ import { useSessao } from '../sessao/useSessao';
 import type { LoteDoEstado } from './tiposDoServidor';
 
 const TEXTO_VALOR_INVALIDO = 'Informe um valor em reais, como 150,00.';
-const CLASSE_BOTAO = 'min-h-11 rounded-md px-4 font-medium disabled:opacity-60';
 
 /** Mínimo do próximo lance, em centavos inteiros (specs/007): inicial, ou atual + incremento. */
 export function lanceMinimo(lote: LoteDoEstado): number {
@@ -138,9 +137,14 @@ function Formulario({ lote, aoSincronizar, reconectando = false }: Props) {
   const descricao = ['lance-ajuda', mensagemDeErro ? 'lance-erro' : null].filter(Boolean).join(' ');
 
   return (
-    <form noValidate onSubmit={aoEnviar} className="flex flex-col gap-3" aria-label="Dar lance">
+    <form
+      noValidate
+      onSubmit={aoEnviar}
+      className="flex flex-col gap-3 border-t border-borda pt-4"
+      aria-label="Dar lance"
+    >
       <div>
-        <label htmlFor="lance-valor" className="font-medium">
+        <label htmlFor="lance-valor" className="rotulo">
           Valor do lance (R$)
         </label>
         <input
@@ -161,13 +165,17 @@ function Formulario({ lote, aoSincronizar, reconectando = false }: Props) {
             setEditado(e.target.value);
             lance.reset();
           }}
-          className="mt-1 block min-h-11 w-full rounded-md border border-borda-controle bg-superficie px-3 text-texto"
+          className="controle mt-1.5 block min-h-12 text-lg font-bold tabular-nums aria-invalid:border-perigo aria-invalid:ring-1 aria-invalid:ring-perigo"
         />
-        <p id="lance-ajuda" className="mt-1 text-sm text-texto-suave">
+        <p id="lance-ajuda" className="mt-1.5 text-sm text-texto-suave">
           Lance mínimo: {formatarCentavos(minimo)}
         </p>
         {mensagemDeErro ? (
-          <p id="lance-erro" role="alert" className="mt-1 text-sm font-medium">
+          <p
+            id="lance-erro"
+            role="alert"
+            className="mt-2 rounded-xl border border-perigo bg-perigo/10 p-3 text-sm font-semibold text-perigo"
+          >
             {mensagemDeErro}
             {comSaldoInsuficiente ? (
               <>
@@ -178,11 +186,11 @@ function Formulario({ lote, aoSincronizar, reconectando = false }: Props) {
           </p>
         ) : null}
       </div>
-      <div className="flex flex-wrap gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <button
           type="submit"
           disabled={enviando || reconectando}
-          className={`${CLASSE_BOTAO} bg-primario text-texto-sobre-primario`}
+          className="botao-primario min-h-12"
         >
           {enviando ? 'Enviando…' : incerto ? 'Tentar de novo' : 'Dar lance'}
         </button>
@@ -190,13 +198,13 @@ function Formulario({ lote, aoSincronizar, reconectando = false }: Props) {
           type="button"
           disabled={enviando || reconectando}
           onClick={aoDarLanceMinimo}
-          className={`${CLASSE_BOTAO} border border-borda-controle`}
+          className="botao-secundario min-h-12"
         >
           Dar lance mínimo ({formatarCentavos(minimo)})
         </button>
       </div>
       {/* Sempre montado: leitores de tela só anunciam mudança em região que já existia. */}
-      <p role="status" className="font-medium">
+      <p role="status" className="font-semibold text-sucesso">
         {registrado}
       </p>
     </form>
@@ -223,11 +231,16 @@ export function AreaDeLance({ lote, aoSincronizar, reconectando }: Props) {
   if (!usuario) {
     const retorno = encodeURIComponent(`${pathname}${search}`);
     return (
-      <p>
-        Entre como licitante para dar lances. <Link to={`/entrar?retorno=${retorno}`}>Entrar</Link>
+      <p className="aviso flex flex-wrap items-center justify-between gap-3">
+        Entre como licitante para dar lances.{' '}
+        <Link to={`/entrar?retorno=${retorno}`} className="botao-primario">
+          Entrar
+        </Link>
       </p>
     );
   }
-  if (usuario.papel === 'leiloeiro') return <p>Leiloeiros não podem dar lances.</p>;
+  if (usuario.papel === 'leiloeiro') {
+    return <p className="aviso text-texto-suave">Leiloeiros não podem dar lances.</p>;
+  }
   return <Formulario lote={lote} aoSincronizar={aoSincronizar} reconectando={reconectando} />;
 }
