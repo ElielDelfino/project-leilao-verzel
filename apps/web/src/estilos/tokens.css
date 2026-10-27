@@ -25,7 +25,7 @@
   /* Valores em dinheiro e contagem regressiva. */
   --cor-destaque: #8a5200;
   /* Estados: ao vivo e ganhando; superado e cancelado; agendado e fim estendido. */
-  --cor-sucesso: #047857;
+  --cor-sucesso: #036a4c;
   --cor-perigo: #be123c;
   --cor-aviso: #92400e;
 }
