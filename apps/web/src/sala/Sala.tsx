@@ -165,7 +165,7 @@ function PainelAoVivo({
 
         <div className="cartao flex flex-col gap-4 p-5 sm:p-6">
           {detalhe.descricao ? <p className="text-texto-suave">{detalhe.descricao}</p> : null}
-          <p className="rounded-xl bg-destaque/10 px-4 py-3 text-lg font-extrabold text-destaque">
+          <p className="rounded-xl bg-destaque/10 px-4 py-3 text-lg font-extrabold text-destaque tabular-nums">
             {lote.lanceAtualCentavos === null
               ? 'Nenhum lance ainda.'
               : `Lance atual: ${formatarCentavos(lote.lanceAtualCentavos)}`}

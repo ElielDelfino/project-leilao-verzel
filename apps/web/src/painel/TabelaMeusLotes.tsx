@@ -76,7 +76,9 @@ export function TabelaMeusLotes({ lotes, aoConcluirCancelamento }: Props) {
                   {formatarDataHora(lote.fimEm)}
                 </td>
                 <td className="px-4 py-3 tabular-nums">{lote.totalLances}</td>
-                <td className="px-4 py-3 font-semibold text-destaque">{textoDoResultado(lote)}</td>
+                <td className="px-4 py-3 font-semibold text-destaque tabular-nums">
+                  {textoDoResultado(lote)}
+                </td>
                 <td className="px-4 py-2">
                   {lote.status === 'agendado' || lote.status === 'ao_vivo' ? (
                     <CancelarLote lote={lote} aoConcluir={aoConcluirCancelamento} />

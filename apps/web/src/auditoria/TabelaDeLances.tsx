@@ -59,7 +59,7 @@ export function TabelaDeLances({ lances }: { lances: Auditoria['lances'] }) {
                   >
                     <td>{lance.seq}</td>
                     <td>{lance.pseudonimo}</td>
-                    <td className="font-semibold text-destaque">
+                    <td className="font-semibold text-destaque tabular-nums">
                       {formatarCentavos(lance.valorCentavos)}
                     </td>
                     <td>{formatarDataHora(lance.criadoEm)}</td>

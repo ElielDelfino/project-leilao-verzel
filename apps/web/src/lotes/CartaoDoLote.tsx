@@ -64,7 +64,7 @@ export function CartaoDoLote({ lote }: { lote: Lote }) {
         </div>
         <p className="mt-3 text-xs text-texto-suave">{textoDeHorario(lote)}</p>
         <p className="mt-auto pt-4">
-          <span className="flex items-center gap-2 rounded-xl bg-destaque/10 px-4 py-3 text-sm font-bold text-destaque">
+          <span className="flex items-center gap-2 rounded-xl bg-destaque/10 px-4 py-3 text-sm font-bold text-destaque tabular-nums">
             {textoDePreco(lote)}
           </span>
         </p>
