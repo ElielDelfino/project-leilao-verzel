@@ -9,28 +9,10 @@ import { AlternarTema } from '../tema/AlternarTema';
 import { NOME_DO_SITE } from './site';
 import { IndicadorDeslizante } from './IndicadorDeslizante';
 
-/** Marca: martelo decorativo + nome (o nome acessível do link é só o nome do site). */
+/** Marca: só o nome do site, que também é o nome acessível do link. */
 function Marca() {
   return (
-    <Link
-      to="/"
-      className="flex items-center gap-2.5 text-lg font-extrabold tracking-tight text-texto no-underline"
-    >
-      <span
-        aria-hidden="true"
-        className="grid size-10 place-items-center rounded-xl bg-primario text-texto-sobre-primario shadow-[0_6px_20px_-6px_var(--cor-primario)]"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          className="size-5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="m14 13-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10" />
-          <path d="m16 16 6-6M8 8l6-6M9 7l8 8M21 11l-8-8" />
-        </svg>
-      </span>
+    <Link to="/" className="text-lg font-extrabold tracking-tight text-texto no-underline">
       {NOME_DO_SITE}
     </Link>
   );
