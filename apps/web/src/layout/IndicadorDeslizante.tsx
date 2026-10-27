@@ -22,7 +22,7 @@ function medir(grupo: HTMLElement): Caixa | null {
 }
 
 /**
- * Fundo da pílula ativa que desliza até a nova ativa, como a navegação da OMG. Vai como primeiro
+ * Fundo da pílula ativa que desliza até a nova ativa, sem mudar a lógica das abas. Vai como primeiro
  * filho de `.pilulas` e só observa o DOM (aria-selected/aria-current): nenhuma lógica muda.
  */
 export function IndicadorDeslizante() {

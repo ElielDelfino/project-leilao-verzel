@@ -4,7 +4,7 @@
  * Contraste AA verificado em test/estilos/contraste.test.ts: ao mudar uma cor, rode o teste.
  * Só hex de 6 dígitos nas variáveis --cor-*, para o teste conseguir ler.
  *
- * Protótipo: paleta com a pegada da OMG TCG (azul-marinho profundo, azul na ação principal,
+ * Paleta (azul-marinho profundo, azul na ação principal,
  * dourado nos valores). Primário, link e foco são o mesmo azul em cada tema: #1d4ed8 no claro
  * e #93c5fd no escuro. O escuro é o tema de referência; o claro segue a mesma linha.
  */

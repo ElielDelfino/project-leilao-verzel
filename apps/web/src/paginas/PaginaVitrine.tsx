@@ -107,7 +107,7 @@ export function PaginaVitrine() {
     <>
       <title>{tituloDaPagina(TITULO)}</title>
       <section className="relative overflow-hidden rounded-3xl border border-borda bg-linear-to-br from-primario/15 via-superficie to-poco px-5 py-7 sm:px-10 sm:py-10">
-        {/* Brilho decorativo no canto, como o hero do leilão da OMG. */}
+        {/* Brilho decorativo no canto, no hero da vitrine. */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute -top-24 -right-24 size-72 rounded-full bg-primario/20 blur-3xl"

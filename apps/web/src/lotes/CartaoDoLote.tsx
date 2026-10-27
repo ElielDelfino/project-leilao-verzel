@@ -27,7 +27,7 @@ function Linha({ rotulo, children }: { rotulo: string; children: string }) {
   );
 }
 
-/** Item da lista da vitrine (specs/012 §Vitrine), no formato de card da OMG. */
+/** Item da lista da vitrine (specs/012 §Vitrine), no formato de card. */
 export function CartaoDoLote({ lote }: { lote: Lote }) {
   const estilo = ESTILO_DO_STATUS[lote.status];
   return (
