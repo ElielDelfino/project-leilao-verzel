@@ -88,6 +88,7 @@ Acesso por rota (papéis da tabela de §Rotas):
 - Usuário logado em `/entrar` ou `/cadastro` → vai para o destino padrão do papel, sem mostrar o formulário.
 - Destino padrão: `/` para licitante e `/painel` para leiloeiro.
 - Destino depois de entrar ou de cadastrar-se: o `retorno`, se for caminho interno (começa com `/`, não começa com `//` e não contém `\`) e permitido ao papel (não restrito a outro papel); caso contrário, o destino padrão.
+- Contas de demonstração: abaixo de "Ainda não tem conta? Criar conta", `/entrar` lista as três contas do seed (specs/003 RF-03) para quem avalia o projeto: Leiloeiro `leiloeiro@demo.local`, Licitante `helena@demo.local` e Licitante `otavio@demo.local`, com a senha `leilao-demo-2026`. A senha é pública de propósito (ADR 0023) e o texto fica selecionável para copiar; a lista não preenche o formulário.
 
 Cabeçalho:
 - Anônimo: "Entrar" e "Criar conta".
@@ -284,6 +285,7 @@ Presente em todas as rotas (dentro do layout), com dois parágrafos de texto fix
 - [ ] Teste de componente (sessão expirada): refresh em 401 durante o uso mostra "Sua sessão expirou. Entre novamente." e navega para `/entrar?retorno=%2Fcarteira` quando o usuário estava em `/carteira`.
 - [ ] Teste de componente (acesso): anônimo em `/carteira` e em `/painel` → `/entrar?retorno=...` sem mensagem; leiloeiro em `/carteira` e licitante em `/painel/lotes/novo` → `<h1>` "Acesso não permitido", a mensagem de `PAPEL_NAO_PERMITIDO` e o link "Voltar à vitrine" com `href="/"`, dentro do layout; licitante logado em `/entrar` e em `/cadastro` → `/`, e leiloeiro → `/painel`.
 - [ ] Teste de componente (retorno): depois do login, `retorno=/carteira` leva a `/carteira` para licitante; `retorno=//exemplo.com`, `retorno=/\exemplo.com`, `retorno=/carteira\x`, `retorno=https://exemplo.com` e `retorno=/painel` (licitante) levam a `/`; `retorno=/painel` leva a `/painel` para leiloeiro, e `retorno=/carteira` (leiloeiro) leva a `/painel`.
+- [ ] Teste de componente (contas de demonstração): `/entrar` mostra, depois do link "Criar conta", a região "Contas de demonstração" com os três e-mails do seed, os papéis e a senha `leilao-demo-2026`.
 - [ ] Teste de componente (cabeçalho): os itens de cada papel são exatamente os de §Sessão e acesso (anônimo: "Entrar" e "Criar conta"; licitante: "Carteira", "Meus arremates", nome e "Sair"; leiloeiro: "Painel", nome e "Sair").
 - [ ] Teste de componente (mensagens): cada código e cada mensagem por campo das listas de §Comportamento aparece com o texto exato; `INDISPONIVEL` e uma falha de rede (fetch rejeitado) mostram o mesmo texto; depósito de R$ 50,00 mostra "Depósito de R$ 50,00 registrado."; valores R$ 0,99 e R$ 100.000,01 mostram "Informe um valor entre R$ 1,00 e R$ 100.000,00." e não enviam a requisição.
 - [ ] Teste de componente (extrato): cada um dos 6 tipos mostra o rótulo de §Comportamento.

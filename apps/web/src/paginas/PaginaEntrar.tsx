@@ -4,6 +4,7 @@ import { Link, useLocation } from 'react-router';
 
 import { entrar } from '../api/auth';
 import { Campo } from '../formularios/Campo';
+import { ContasDeDemonstracao } from '../formularios/ContasDeDemonstracao';
 import { ErroDoServidor } from '../formularios/ErroDoServidor';
 import { focarPrimeiroInvalido, validarLogin, type Erros } from '../formularios/validacao';
 import { tituloDaPagina } from '../layout/site';
@@ -77,6 +78,7 @@ export function PaginaEntrar() {
         <p className="mt-6 text-center text-texto-suave">
           Ainda não tem conta? <Link to="/cadastro">Criar conta</Link>
         </p>
+        <ContasDeDemonstracao />
       </div>
     </>
   );
