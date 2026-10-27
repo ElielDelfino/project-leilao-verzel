@@ -276,34 +276,34 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
     expect(divergentes).toEqual([]);
   }
 
-  /** Lote ao vivo com dois lances: Ana superada pelo Beto, que lidera com `lanceFinal`. */
+  /** Lote ao vivo com dois lances: Helena superada pelo Otávio, que lidera com `lanceFinal`. */
   async function loteDisputado(c: Cenario): Promise<{
     loteId: string;
-    anaId: string;
-    betoId: string;
+    helenaId: string;
+    otavioId: string;
     lanceFinal: number;
   }> {
-    const [ana, beto] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
-    if (ana === undefined || beto === undefined) throw new Error('licitantes não criados');
+    const [helena, otavio] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
+    if (helena === undefined || otavio === undefined) throw new Error('licitantes não criados');
     const loteId = await c.apoio.lote();
     const lanceFinal = LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS;
     for (const [conta, valor] of [
-      [ana, LANCE_INICIAL_CENTAVOS],
-      [beto, lanceFinal],
+      [helena, LANCE_INICIAL_CENTAVOS],
+      [otavio, lanceFinal],
     ] as const) {
       const resposta = await c.apoio.lancar(conta, loteId, valor);
       expect(resposta.statusCode, JSON.stringify(erro(resposta))).toBe(201);
     }
-    return { loteId, anaId: ana.id, betoId: beto.id, lanceFinal };
+    return { loteId, helenaId: helena.id, otavioId: otavio.id, lanceFinal };
   }
 
   it(
     'com líder: estorna o compromisso, sela `cancelado`, muda o status e publica depois do COMMIT',
     async () => {
       const c = await cenario();
-      const { loteId, anaId, betoId, lanceFinal } = await loteDisputado(c);
-      const usuarios = [anaId, betoId, c.leiloeiroId];
-      expect(await saldo(betoId)).toEqual({ total: SALDO_CENTAVOS, comprometido: lanceFinal });
+      const { loteId, helenaId, otavioId, lanceFinal } = await loteDisputado(c);
+      const usuarios = [helenaId, otavioId, c.leiloeiroId];
+      expect(await saldo(otavioId)).toEqual({ total: SALDO_CENTAVOS, comprometido: lanceFinal });
       const desde = eventos.length;
 
       // O corpo é ignorado: o valor estornado é o compromisso lido sob o lock do lote.
@@ -322,8 +322,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
       for (const id of usuarios) expect(resposta.body).not.toContain(id);
 
       // O líder recupera o comprometido; ninguém perde total; o leiloeiro não recebe nada.
-      expect(await saldo(betoId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
-      expect(await saldo(anaId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
+      expect(await saldo(otavioId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
+      expect(await saldo(helenaId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
       expect(await saldo(c.leiloeiroId)).toEqual({ total: 0, comprometido: 0 });
       await semDivergencias(usuarios);
 
@@ -342,7 +342,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
         [loteId],
       );
       expect(estornos).toEqual([
-        { user_id: betoId, valor: String(lanceFinal), lance_id: ultimo[0]?.id },
+        { user_id: otavioId, valor: String(lanceFinal), lance_id: ultimo[0]?.id },
       ]);
 
       const gravado = await selo(loteId);
@@ -366,7 +366,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
         { tipo: 'lote_cancelado', payload: { loteId } },
         {
           tipo: 'saldo_atualizado',
-          usuarioId: betoId,
+          usuarioId: otavioId,
           payload: {
             totalCentavos: SALDO_CENTAVOS,
             comprometidoCentavos: 0,
@@ -534,10 +534,10 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
       'no estorno: o selo, já gravado na transação, é desfeito',
       async () => {
         const c = await cenario();
-        const { loteId, anaId, betoId } = await loteDisputado(c);
+        const { loteId, helenaId, otavioId } = await loteDisputado(c);
         falhas.estorno = true;
 
-        await exigirSemEfeito(loteId, [anaId, betoId, c.leiloeiroId], c.cabecalhos);
+        await exigirSemEfeito(loteId, [helenaId, otavioId, c.leiloeiroId], c.cabecalhos);
         expect(await selo(loteId)).toBeUndefined();
         falhas.estorno = false;
         expect((await cancelar(c.cabecalhos, loteId)).statusCode).toBe(200);
@@ -562,8 +562,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
       'em cancelarLote, depois do selo e do estorno (%s): selo, carteira e ledger voltam',
       async (_nome, falha, esperado) => {
         const c = await cenario();
-        const { loteId, anaId, betoId, lanceFinal } = await loteDisputado(c);
-        const usuarios = [anaId, betoId, c.leiloeiroId];
+        const { loteId, helenaId, otavioId, lanceFinal } = await loteDisputado(c);
+        const usuarios = [helenaId, otavioId, c.leiloeiroId];
         const ledgerAntes = await pool.query('select 1 from ledger_entries where lote_id = $1', [
           loteId,
         ]);
@@ -574,7 +574,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
         // A falha veio depois das escritas: o selo e o estorno existiam na transação desfeita.
         expect(falhas.observado).toEqual({ selos: 1, estornos: 1, comprometido_do_lider: '0' });
         expect(await selo(loteId)).toBeUndefined();
-        expect(await saldo(betoId)).toEqual({ total: SALDO_CENTAVOS, comprometido: lanceFinal });
+        expect(await saldo(otavioId)).toEqual({ total: SALDO_CENTAVOS, comprometido: lanceFinal });
         const ledgerDepois = await pool.query('select 1 from ledger_entries where lote_id = $1', [
           loteId,
         ]);
@@ -583,7 +583,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
 
         falhas.depoisDoEstorno = null;
         expect((await cancelar(c.cabecalhos, loteId)).statusCode).toBe(200);
-        expect(await saldo(betoId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
+        expect(await saldo(otavioId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
       },
       TIMEOUT_LONGO_MS,
     );
@@ -592,10 +592,10 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
       'no selo (primeira escrita, antes de qualquer gravação)',
       async () => {
         const c = await cenario();
-        const { loteId, anaId, betoId } = await loteDisputado(c);
+        const { loteId, helenaId, otavioId } = await loteDisputado(c);
         vi.spyOn(cadeia, 'selar').mockRejectedValue(new Error('falha forçada no selo'));
 
-        await exigirSemEfeito(loteId, [anaId, betoId, c.leiloeiroId], c.cabecalhos);
+        await exigirSemEfeito(loteId, [helenaId, otavioId, c.leiloeiroId], c.cabecalhos);
         vi.restoreAllMocks();
         expect((await cancelar(c.cabecalhos, loteId)).statusCode).toBe(200);
       },
@@ -607,8 +607,8 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
     'contenção: lote travado por outra transação além de 5 s → 503 INDISPONIVEL sem detalhes',
     async () => {
       const c = await cenario();
-      const { loteId, anaId, betoId } = await loteDisputado(c);
-      const usuarios = [anaId, betoId, c.leiloeiroId];
+      const { loteId, helenaId, otavioId } = await loteDisputado(c);
+      const usuarios = [helenaId, otavioId, c.leiloeiroId];
       const antes = await fotografar(loteId, usuarios);
       const desde = eventos.length;
       const outra = await pool.connect();
@@ -632,7 +632,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('cancelamento de lote (Postgres e Redis reais
       expect(eventosDe(loteId, usuarios, desde)).toEqual([]);
       // Depois da contenção, o cancelamento passa e estorna o compromisso do líder.
       expect((await cancelar(c.cabecalhos, loteId)).statusCode).toBe(200);
-      expect(await saldo(betoId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
+      expect(await saldo(otavioId)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
     },
     TIMEOUT_LONGO_MS,
   );

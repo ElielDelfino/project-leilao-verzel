@@ -6,8 +6,8 @@ import { caminhoDoContrato, objetosSemAdditionalProperties, validarContrato } fr
 
 const USUARIO = {
   id: '3f0c1d9e-2b7a-4c55-9d1e-0a1b2c3d4e5f',
-  nome: 'Ana Souza',
-  email: 'ana@exemplo.com',
+  nome: 'Helena Souza',
+  email: 'helena@exemplo.com',
   papel: 'licitante',
 };
 

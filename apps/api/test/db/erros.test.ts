@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { converterErroDoBanco, ErroDoBanco, paraErroDoBanco } from '../../src/db/erros.js';
 import { serializarErro } from '../../src/logger/logger.js';
 
-const EMAIL = 'ana@demo.local';
+const EMAIL = 'helena@demo.local';
 const CONSULTA = 'insert into "users" ("email") values ($1)';
 
 function violacaoDeUnicidade(): DatabaseError {

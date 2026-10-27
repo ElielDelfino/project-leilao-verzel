@@ -33,7 +33,7 @@ const { createClient } = daApi('redis') as {
   createClient(opcoes: { socket: { host: string; port: number }; password: string }): ClienteRedis;
 };
 
-export const BRUNO_DO_SEED = 'bruno@demo.local';
+export const OTAVIO_DO_SEED = 'otavio@demo.local';
 
 /** Um navegador isolado (cookies próprios) com a página que o teste usa. */
 export interface Navegador {
@@ -163,7 +163,7 @@ export async function prepararLeiloeiro(browser: Browser, info: TestInfo): Promi
   return abrirEPreparar(browser, info, (navegador) => entrarComoLeiloeiro(navegador.pagina));
 }
 
-/** Conta do seed (ana, bruno) logada e com saldo depositado pela interface. */
+/** Conta do seed (helena, otavio) logada e com saldo depositado pela interface. */
 export async function prepararLicitanteDoSeed(
   browser: Browser,
   info: TestInfo,

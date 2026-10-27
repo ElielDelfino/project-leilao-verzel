@@ -6,7 +6,7 @@ import { aguardarEstadoEstavel, violacoesBloqueantes } from './apoio/axe.js';
 import {
   abrirSala,
   abrirSalaComoLicitante,
-  BRUNO_DO_SEED,
+  OTAVIO_DO_SEED,
   darLancePelaInterface,
   esperarLanceMinimo,
   esperarLanceRegistrado,
@@ -113,38 +113,38 @@ test.describe('com dados (F2)', () => {
   });
 });
 
-// Sala ao vivo com lances (task 091, nota da 005): lote com dois lances (ana superada, bruno
+// Sala ao vivo com lances (task 091, nota da 005): lote com dois lances (helena superada, otavio
 // ganhando), nos dois temas. Cada visão reabre a sala, que recompõe a posição pelo `entrar_lote`.
 test.describe('sala ao vivo (F3)', () => {
   const INDICE_DA_CARTA = 20;
   const abertos: BrowserContext[] = [];
   let leiloeiro: Navegador;
-  let ana: Navegador;
-  let bruno: Navegador;
+  let helena: Navegador;
+  let otavio: Navegador;
   let loteId = '';
 
   test.beforeAll(async ({ browser }, info) => {
     test.setTimeout(120_000);
-    await limparRateLimitDasContas([LEILOEIRO_DO_SEED, LICITANTE_DO_SEED, BRUNO_DO_SEED]);
+    await limparRateLimitDasContas([LEILOEIRO_DO_SEED, LICITANTE_DO_SEED, OTAVIO_DO_SEED]);
     await restaurarScryfall();
     leiloeiro = await prepararLeiloeiro(browser, info);
     abertos.push(leiloeiro.contexto);
-    ana = await prepararLicitanteDoSeed(browser, info, LICITANTE_DO_SEED, '1000,00');
-    abertos.push(ana.contexto);
-    bruno = await prepararLicitanteDoSeed(browser, info, BRUNO_DO_SEED, '1000,00');
-    abertos.push(bruno.contexto);
+    helena = await prepararLicitanteDoSeed(browser, info, LICITANTE_DO_SEED, '1000,00');
+    abertos.push(helena.contexto);
+    otavio = await prepararLicitanteDoSeed(browser, info, OTAVIO_DO_SEED, '1000,00');
+    abertos.push(otavio.contexto);
 
     loteId = await criarLotePelaInterface(leiloeiro.pagina, {
       carta: cartaDoTeste(info, INDICE_DA_CARTA),
       titulo: tituloUnico('Lote de acessibilidade da sala'),
     });
-    await abrirSalaComoLicitante(ana.pagina, loteId);
-    await abrirSalaComoLicitante(bruno.pagina, loteId);
-    await darLancePelaInterface(ana.pagina, '10,00');
-    await esperarLanceRegistrado(ana.pagina, '10,00');
-    await esperarLanceMinimo(bruno.pagina, '11,00');
-    await darLancePelaInterface(bruno.pagina, '11,00');
-    await esperarLanceRegistrado(bruno.pagina, '11,00');
+    await abrirSalaComoLicitante(helena.pagina, loteId);
+    await abrirSalaComoLicitante(otavio.pagina, loteId);
+    await darLancePelaInterface(helena.pagina, '10,00');
+    await esperarLanceRegistrado(helena.pagina, '10,00');
+    await esperarLanceMinimo(otavio.pagina, '11,00');
+    await darLancePelaInterface(otavio.pagina, '11,00');
+    await esperarLanceRegistrado(otavio.pagina, '11,00');
   });
 
   test.afterAll(async () => {
@@ -169,29 +169,29 @@ test.describe('sala ao vivo (F3)', () => {
   });
 
   test('sala com "você está ganhando" sem violações sérias de acessibilidade', async () => {
-    await abrirSalaComoLicitante(bruno.pagina, loteId);
-    await expect(indicadorDePosicao(bruno.pagina, 'Você está ganhando este lote.')).toBeVisible();
+    await abrirSalaComoLicitante(otavio.pagina, loteId);
+    await expect(indicadorDePosicao(otavio.pagina, 'Você está ganhando este lote.')).toBeVisible();
 
-    await verificar(bruno.pagina);
+    await verificar(otavio.pagina);
   });
 
   test('sala com "você foi superado" sem violações sérias de acessibilidade', async () => {
-    await abrirSalaComoLicitante(ana.pagina, loteId);
+    await abrirSalaComoLicitante(helena.pagina, loteId);
     await expect(
-      indicadorDePosicao(ana.pagina, 'Você foi superado. O lance atual é R$ 11,00.'),
+      indicadorDePosicao(helena.pagina, 'Você foi superado. O lance atual é R$ 11,00.'),
     ).toBeVisible();
 
-    await verificar(ana.pagina);
+    await verificar(helena.pagina);
   });
 
   test('sala com a recusa do lance exibida sem violações sérias de acessibilidade', async () => {
-    await abrirSalaComoLicitante(ana.pagina, loteId);
-    await darLancePelaInterface(ana.pagina, '5,00');
+    await abrirSalaComoLicitante(helena.pagina, loteId);
+    await darLancePelaInterface(helena.pagina, '5,00');
     await expect(
-      recusaDoLance(ana.pagina, 'Seu lance precisa ser de pelo menos R$ 12,00.'),
+      recusaDoLance(helena.pagina, 'Seu lance precisa ser de pelo menos R$ 12,00.'),
     ).toBeVisible();
 
-    await verificar(ana.pagina);
+    await verificar(helena.pagina);
   });
 });
 

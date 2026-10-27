@@ -68,8 +68,8 @@ export function handlerDeCsrf(contador?: { chamadas: number }): HttpHandler {
 
 export const usuarioLicitante = {
   id: '0192f3a0-0000-7000-8000-000000000001',
-  nome: 'Ana Licitante',
-  email: 'ana@exemplo.com',
+  nome: 'Helena Licitante',
+  email: 'helena@exemplo.com',
   papel: 'licitante',
 } satisfies SchemasApi['Usuario'];
 

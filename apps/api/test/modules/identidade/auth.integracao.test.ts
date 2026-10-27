@@ -162,7 +162,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('auth com Postgres e Redis reais', () => {
       await navegador.obterCsrf();
 
       const resposta = await navegador.post('/api/auth/cadastro', {
-        nome: 'Ana',
+        nome: 'Helena',
         email: emailNovo(),
         senha: SENHA,
         papel: 'licitante',
@@ -193,7 +193,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('auth com Postgres e Redis reais', () => {
       await navegador.obterCsrf();
 
       const resposta = await navegador.post('/api/auth/cadastro', {
-        nome: 'Ana',
+        nome: 'Helena',
         email: emailNovo(),
         senha: SENHA,
         papel: 'licitante',

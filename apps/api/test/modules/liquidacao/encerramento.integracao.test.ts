@@ -239,21 +239,24 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
     'com vencedor: debita, credita, emite o recibo coerente com o selo e encerra o lote',
     async () => {
       const c = await cenario();
-      const [ana, beto] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
-      if (ana === undefined || beto === undefined) throw new Error('licitantes não criados');
+      const [helena, otavio] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
+      if (helena === undefined || otavio === undefined) throw new Error('licitantes não criados');
       const lanceFinal = LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS;
       const loteId = await loteVencido(c, [
-        { conta: ana, valor: LANCE_INICIAL_CENTAVOS },
-        { conta: beto, valor: lanceFinal },
+        { conta: helena, valor: LANCE_INICIAL_CENTAVOS },
+        { conta: otavio, valor: lanceFinal },
       ]);
-      const usuarios = [ana.id, beto.id, c.leiloeiroId];
+      const usuarios = [helena.id, otavio.id, c.leiloeiroId];
       const desde = eventos.length;
 
       const resultado = await servico.encerrar(loteId);
 
       expect(resultado).not.toBeNull();
-      expect(await saldo(beto.id)).toEqual({ total: SALDO_CENTAVOS - lanceFinal, comprometido: 0 });
-      expect(await saldo(ana.id)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
+      expect(await saldo(otavio.id)).toEqual({
+        total: SALDO_CENTAVOS - lanceFinal,
+        comprometido: 0,
+      });
+      expect(await saldo(helena.id)).toEqual({ total: SALDO_CENTAVOS, comprometido: 0 });
       expect(await saldo(c.leiloeiroId)).toEqual({ total: lanceFinal, comprometido: 0 });
       await semDivergencias(usuarios);
 
@@ -285,7 +288,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
       ]);
       expect(recibos).toHaveLength(1);
       const recibo = recibos[0];
-      expect(recibo?.vencedor_id).toBe(beto.id);
+      expect(recibo?.vencedor_id).toBe(otavio.id);
       expect(recibo?.vencedor_pseudonimo).toBe(gravado?.vencedor_pseudonimo);
       expect(recibo?.valor_centavos).toBe(String(lanceFinal));
       expect(recibo?.hash_final.equals(gravado?.hash_final ?? Buffer.alloc(0))).toBe(true);
@@ -303,7 +306,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
       );
       expect(ledger).toEqual([
         { tipo: 'credito_arremate', user_id: c.leiloeiroId, valor: String(lanceFinal) },
-        { tipo: 'debito_arremate', user_id: beto.id, valor: String(lanceFinal) },
+        { tipo: 'debito_arremate', user_id: otavio.id, valor: String(lanceFinal) },
       ]);
 
       const { rows: lote } = await pool.query<{
@@ -316,7 +319,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
                 encerrado_em from lots where id = $1`,
         [loteId],
       );
-      expect(lote[0]).toMatchObject({ status: 'encerrado', vencedor_id: beto.id });
+      expect(lote[0]).toMatchObject({ status: 'encerrado', vencedor_id: otavio.id });
       expect(lote[0]?.valor).toBe(String(lanceFinal));
       expect(lote[0]?.encerrado_em).toBeInstanceOf(Date);
 
@@ -332,12 +335,12 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
       });
       expect(saidos).toContainEqual({
         tipo: 'lote_arrematado',
-        usuarioId: beto.id,
+        usuarioId: otavio.id,
         payload: { loteId, codigoComprovante: recibo?.codigo_publico },
       });
       expect(saidos).toContainEqual({
         tipo: 'saldo_atualizado',
-        usuarioId: beto.id,
+        usuarioId: otavio.id,
         payload: {
           totalCentavos: SALDO_CENTAVOS - lanceFinal,
           comprometidoCentavos: 0,
@@ -353,7 +356,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
           disponivelCentavos: lanceFinal,
         },
       });
-      expect(saidos.filter((e) => e.usuarioId === ana.id)).toEqual([]);
+      expect(saidos.filter((e) => e.usuarioId === helena.id)).toEqual([]);
       const publico = JSON.stringify(saidos.filter((e) => e.usuarioId === undefined));
       for (const id of usuarios) expect(publico).not.toContain(id);
       expect(resultado).toEqual({
@@ -414,9 +417,9 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
     'colisão do código público: tenta outro código num savepoint; 3 colisões → erro',
     async () => {
       const c = await cenario();
-      const [ana] = await c.apoio.licitantesComSaldo(1, SALDO_CENTAVOS);
-      if (ana === undefined) throw new Error('licitante não criado');
-      const vendido = await loteVencido(c, [{ conta: ana, valor: LANCE_INICIAL_CENTAVOS }]);
+      const [helena] = await c.apoio.licitantesComSaldo(1, SALDO_CENTAVOS);
+      if (helena === undefined) throw new Error('licitante não criado');
+      const vendido = await loteVencido(c, [{ conta: helena, valor: LANCE_INICIAL_CENTAVOS }]);
       const codigoExistente = (await servico.encerrar(vendido))?.vencedor?.codigoComprovante;
       if (codigoExistente === undefined) throw new Error('recibo não emitido');
       const outroLote = await c.apoio.lote();
@@ -425,7 +428,7 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
       );
       const dados = {
         loteId: outroLote,
-        vencedorId: ana.id,
+        vencedorId: helena.id,
         vencedorPseudonimo: 'Licitante #abcdef',
         valorCentavos: LANCE_INICIAL_CENTAVOS,
         hashFinalHex: randomBytes(32).toString('hex'),
@@ -490,13 +493,13 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
   describe('falha forçada: nada muda e nenhum evento sai', () => {
     async function loteDisputado(): Promise<{ loteId: string; usuarios: string[]; c: Cenario }> {
       const c = await cenario();
-      const [ana, beto] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
-      if (ana === undefined || beto === undefined) throw new Error('licitantes não criados');
+      const [helena, otavio] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
+      if (helena === undefined || otavio === undefined) throw new Error('licitantes não criados');
       const loteId = await loteVencido(c, [
-        { conta: ana, valor: LANCE_INICIAL_CENTAVOS },
-        { conta: beto, valor: LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS },
+        { conta: helena, valor: LANCE_INICIAL_CENTAVOS },
+        { conta: otavio, valor: LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS },
       ]);
-      return { loteId, usuarios: [ana.id, beto.id, c.leiloeiroId], c };
+      return { loteId, usuarios: [helena.id, otavio.id, c.leiloeiroId], c };
     }
 
     async function exigirSemEfeito(
@@ -608,15 +611,15 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
     'lance concorrente: entra antes e o selo o cobre, ou é recusado LOTE_ENCERRADO',
     async () => {
       const c = await cenario();
-      const [ana, beto] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
-      if (ana === undefined || beto === undefined) throw new Error('licitantes não criados');
+      const [helena, otavio] = await c.apoio.licitantesComSaldo(2, SALDO_CENTAVOS);
+      if (helena === undefined || otavio === undefined) throw new Error('licitantes não criados');
       const loteId = await c.apoio.lote();
-      expect((await c.apoio.lancar(ana, loteId, LANCE_INICIAL_CENTAVOS)).statusCode).toBe(201);
-      // O lance da Ana estendeu o fim (anti-sniping); volta a vencer daqui a pouco.
+      expect((await c.apoio.lancar(helena, loteId, LANCE_INICIAL_CENTAVOS)).statusCode).toBe(201);
+      // O lance da Helena estendeu o fim (anti-sniping); volta a vencer daqui a pouco.
       await terminarEm(pool, loteId, FIM_DA_DISPUTA_MS);
 
-      // O job tenta encerrar sem parar enquanto o Beto lança perto do fim: corrida real pelo
-      // FOR UPDATE do lote. Se o lance do Beto entra, o anti-sniping estende o fim de novo, e o
+      // O job tenta encerrar sem parar enquanto o Otávio lança perto do fim: corrida real pelo
+      // FOR UPDATE do lote. Se o lance do Otávio entra, o anti-sniping estende o fim de novo, e o
       // teste o vence por SQL para o job poder seguir.
       const encerramento = (async () => {
         for (;;) {
@@ -627,20 +630,20 @@ describe.skipIf(!INFRA_DISPONIVEL)('ServicoDeEncerramento (Postgres e Redis reai
       })();
       await esperar(FIM_DA_DISPUTA_MS - ANTECEDENCIA_DO_LANCE_MS);
       const doBeto = await c.apoio.lancar(
-        beto,
+        otavio,
         loteId,
         LANCE_INICIAL_CENTAVOS + INCREMENTO_CENTAVOS,
       );
       if (doBeto.statusCode === 201) await terminarEm(pool, loteId, -1_000);
       const resultado = await encerramento;
       // Um lance depois do encerramento é recusado pelo status gravado.
-      const tardio = await c.apoio.lancar(ana, loteId, 10 * LANCE_INICIAL_CENTAVOS);
+      const tardio = await c.apoio.lancar(helena, loteId, 10 * LANCE_INICIAL_CENTAVOS);
 
       expect([201, 422]).toContain(doBeto.statusCode);
       if (doBeto.statusCode === 422) expect(erro(doBeto).codigo).toBe('LOTE_ENCERRADO');
       expect(tardio.statusCode).toBe(422);
       expect(erro(tardio).codigo).toBe('LOTE_ENCERRADO');
-      const contas = [ana, beto];
+      const contas = [helena, otavio];
       const lances = await c.apoio.lancesDoLote(loteId);
       expect(lances).toHaveLength(doBeto.statusCode === 201 ? 2 : 1);
       const gravado = await selo(loteId);

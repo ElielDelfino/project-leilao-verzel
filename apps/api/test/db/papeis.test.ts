@@ -118,7 +118,7 @@ async function criarUsuario(
 ): Promise<string> {
   const { rows } = await cliente.query<{ id: string }>(
     `insert into users (nome, email, senha_hash, papel)
-     values ('Ana', $1, 'hash', 'licitante') returning id`,
+     values ('Helena', $1, 'hash', 'licitante') returning id`,
     [email],
   );
   return String(rows[0]?.id);
@@ -320,16 +320,16 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0001: restrições', () => {
 
   it('ledger_entries: chave de idempotência repetida no mesmo usuário dá 23505; em outro, entra', async () => {
     await emTransacao(async (cliente) => {
-      const ana = await criarUsuario(cliente);
+      const helena = await criarUsuario(cliente);
       const bia = await criarUsuario(cliente);
       const chave = randomUUID();
-      await deposito(cliente, ana, chave);
-      await deposito(cliente, ana);
-      await deposito(cliente, ana);
+      await deposito(cliente, helena, chave);
+      await deposito(cliente, helena);
+      await deposito(cliente, helena);
 
       const repetida = `insert into ledger_entries (user_id, tipo, valor_centavos, idempotency_key)
                         values ($1, 'deposito', 1000, $2)`;
-      expect(await codigoDaFalha(cliente, repetida, [ana, chave])).toBe(SQLSTATE.unicidade);
+      expect(await codigoDaFalha(cliente, repetida, [helena, chave])).toBe(SQLSTATE.unicidade);
       await deposito(cliente, bia, chave);
     });
   });
@@ -382,10 +382,10 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0001: restrições', () => {
       await cliente.query(inserir, ['A'.repeat(80), email()]);
       const longo = `${'a'.repeat(243)}@teste.local`;
       expect(longo).toHaveLength(255);
-      expect(await codigoDaFalha(cliente, inserir, ['Ana', longo])).toBe(SQLSTATE.check);
-      await cliente.query(inserir, ['Ana', longo.slice(1)]);
-      await cliente.query(inserir, ['Ana', 'Caixa@Teste.Local']);
-      expect(await codigoDaFalha(cliente, inserir, ['Ana', 'caixa@teste.local'])).toBe(
+      expect(await codigoDaFalha(cliente, inserir, ['Helena', longo])).toBe(SQLSTATE.check);
+      await cliente.query(inserir, ['Helena', longo.slice(1)]);
+      await cliente.query(inserir, ['Helena', 'Caixa@Teste.Local']);
+      expect(await codigoDaFalha(cliente, inserir, ['Helena', 'caixa@teste.local'])).toBe(
         SQLSTATE.unicidade,
       );
     });

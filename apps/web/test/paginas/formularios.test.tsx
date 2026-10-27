@@ -121,8 +121,8 @@ describe('/cadastro', () => {
     const usuario = userEvent.setup();
     renderizarApp('/cadastro');
 
-    await usuario.type(await screen.findByLabelText('Nome'), 'Ana');
-    await usuario.type(screen.getByLabelText('E-mail'), 'ana@exemplo.com');
+    await usuario.type(await screen.findByLabelText('Nome'), 'Helena');
+    await usuario.type(screen.getByLabelText('E-mail'), 'helena@exemplo.com');
     await usuario.type(screen.getByLabelText('Senha'), '123456789');
     await usuario.click(screen.getByLabelText('Licitante'));
     await usuario.click(screen.getByRole('button', { name: 'Criar conta' }));
@@ -146,16 +146,16 @@ describe('/cadastro', () => {
     const usuario = userEvent.setup();
     const { router } = renderizarApp('/cadastro');
 
-    await usuario.type(await screen.findByLabelText('Nome'), 'Ana Licitante');
-    await usuario.type(screen.getByLabelText('E-mail'), 'ana@exemplo.com');
+    await usuario.type(await screen.findByLabelText('Nome'), 'Helena Licitante');
+    await usuario.type(screen.getByLabelText('E-mail'), 'helena@exemplo.com');
     await usuario.type(screen.getByLabelText('Senha'), SENHA_VALIDA);
     await usuario.click(screen.getByLabelText('Licitante'));
     await usuario.click(screen.getByRole('button', { name: 'Criar conta' }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe('/'));
     expect(corpo).toEqual({
-      nome: 'Ana Licitante',
-      email: 'ana@exemplo.com',
+      nome: 'Helena Licitante',
+      email: 'helena@exemplo.com',
       senha: SENHA_VALIDA,
       papel: 'licitante',
     });
@@ -169,8 +169,8 @@ describe('/cadastro', () => {
     const usuario = userEvent.setup();
     renderizarApp('/cadastro');
 
-    await usuario.type(await screen.findByLabelText('Nome'), 'Ana');
-    await usuario.type(screen.getByLabelText('E-mail'), 'ana@exemplo.com');
+    await usuario.type(await screen.findByLabelText('Nome'), 'Helena');
+    await usuario.type(screen.getByLabelText('E-mail'), 'helena@exemplo.com');
     await usuario.type(screen.getByLabelText('Senha'), SENHA_VALIDA);
     await usuario.click(screen.getByLabelText('Leiloeiro'));
     await usuario.click(screen.getByRole('button', { name: 'Criar conta' }));
