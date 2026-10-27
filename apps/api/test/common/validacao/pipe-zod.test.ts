@@ -27,13 +27,13 @@ describe('PipeZod', () => {
   });
 
   it('campo desconhecido → 422 DADOS_INVALIDOS', () => {
-    const erro = erroDe(() => new PipeZod(esquema).transform({ nome: 'Ana', idade: 3, x: 1 }));
+    const erro = erroDe(() => new PipeZod(esquema).transform({ nome: 'Helena', idade: 3, x: 1 }));
 
     expect(erro.status).toBe(422);
     expect(erro.codigo).toBe('DADOS_INVALIDOS');
   });
 
-  it.each([undefined, null, 'texto', [], { nome: 'A', idade: 3 }, { nome: 'Ana' }])(
+  it.each([undefined, null, 'texto', [], { nome: 'A', idade: 3 }, { nome: 'Helena' }])(
     'corpo inválido %j → 422 DADOS_INVALIDOS',
     (valor) => {
       expect(erroDe(() => new PipeZod(esquema).transform(valor)).codigo).toBe('DADOS_INVALIDOS');

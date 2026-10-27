@@ -13,7 +13,7 @@ import {
   Navegador,
 } from './ambiente.js';
 
-const CONTAS = ['leiloeiro@demo.local', 'ana@demo.local', 'bruno@demo.local'];
+const CONTAS = ['leiloeiro@demo.local', 'helena@demo.local', 'otavio@demo.local'];
 const SENHA_DEMO = 'leilao-demo-2026';
 
 async function contasDemo(): Promise<{ email: string; papel: string; senha_hash: string }[]> {
@@ -49,9 +49,9 @@ describe.skipIf(!BANCO.disponivel)('seed de identidade com Postgres real', () =>
 
     expect(segunda).toEqual(primeira);
     expect(segunda.map((c) => [c.email, c.papel])).toEqual([
-      ['ana@demo.local', 'licitante'],
-      ['bruno@demo.local', 'licitante'],
+      ['helena@demo.local', 'licitante'],
       ['leiloeiro@demo.local', 'leiloeiro'],
+      ['otavio@demo.local', 'licitante'],
     ]);
     for (const conta of segunda) {
       expect(await verificarSenha(SENHA_DEMO, conta.senha_hash)).toBe(true);
@@ -86,12 +86,12 @@ describe.skipIf(!INFRA_DISPONIVEL)('login com a conta demo', () => {
     await ctx.fechar();
   });
 
-  it('ana@demo.local entra com leilao-demo-2026', async () => {
+  it('helena@demo.local entra com leilao-demo-2026', async () => {
     const navegador = new Navegador(ctx.app);
     await navegador.obterCsrf();
 
     const resposta = await navegador.post('/api/auth/login', {
-      email: 'ana@demo.local',
+      email: 'helena@demo.local',
       senha: SENHA_DEMO,
     });
 

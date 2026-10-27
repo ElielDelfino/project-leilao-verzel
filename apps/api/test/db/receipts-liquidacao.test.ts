@@ -247,7 +247,7 @@ describe.skipIf(!AMBIENTE.disponivel)('migration 0005: receipts e unicidade por 
   it.each([
     ['receipts_codigo_publico_formato', { codigo: 'curto' }],
     ['receipts_codigo_publico_formato', { codigo: 'abcdefgh-1234567' }],
-    ['receipts_vencedor_pseudonimo_formato', { pseudonimo: 'Ana Secreta' }],
+    ['receipts_vencedor_pseudonimo_formato', { pseudonimo: 'Helena Secreta' }],
     ['receipts_valor_faixa', { valor: 99 }],
     ['receipts_valor_faixa', { valor: Number.MAX_SAFE_INTEGER + 1 }],
     ['receipts_hash_final_tamanho', { hashFinal: randomBytes(31) }],

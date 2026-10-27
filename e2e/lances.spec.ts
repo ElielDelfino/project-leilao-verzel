@@ -8,7 +8,7 @@ import {
   abrirSala,
   abrirSalaComoLicitante,
   aproximarFimDoLotePorSql,
-  BRUNO_DO_SEED,
+  OTAVIO_DO_SEED,
   controlarSocketDaPagina,
   darLancePelaInterface,
   esperarLanceMinimo,
@@ -57,18 +57,23 @@ test.describe('sala ao vivo com dois navegadores', () => {
 
   const abertos: BrowserContext[] = [];
   let leiloeiro: Navegador;
-  let ana: Navegador;
-  let bruno: Navegador;
+  let helena: Navegador;
+  let otavio: Navegador;
 
   test.beforeAll(async ({ browser }, info) => {
-    await limparRateLimitDasContas([LEILOEIRO_DO_SEED, LICITANTE_DO_SEED, BRUNO_DO_SEED]);
+    await limparRateLimitDasContas([LEILOEIRO_DO_SEED, LICITANTE_DO_SEED, OTAVIO_DO_SEED]);
     await restaurarScryfall();
     leiloeiro = await prepararLeiloeiro(browser, info);
     abertos.push(leiloeiro.contexto);
-    ana = await prepararLicitanteDoSeed(browser, info, LICITANTE_DO_SEED, DEPOSITO_DOS_LICITANTES);
-    abertos.push(ana.contexto);
-    bruno = await prepararLicitanteDoSeed(browser, info, BRUNO_DO_SEED, DEPOSITO_DOS_LICITANTES);
-    abertos.push(bruno.contexto);
+    helena = await prepararLicitanteDoSeed(
+      browser,
+      info,
+      LICITANTE_DO_SEED,
+      DEPOSITO_DOS_LICITANTES,
+    );
+    abertos.push(helena.contexto);
+    otavio = await prepararLicitanteDoSeed(browser, info, OTAVIO_DO_SEED, DEPOSITO_DOS_LICITANTES);
+    abertos.push(otavio.contexto);
   });
 
   test.afterAll(async () => {
@@ -88,24 +93,24 @@ test.describe('sala ao vivo com dois navegadores', () => {
 
   test('A lidera, B supera: A vê "você foi superado" em menos de 1 s (relógio do navegador) e B vê "você está ganhando"', async () => {
     const loteId = await criarLote(CARTA.superado, 'Lote do superado');
-    await abrirSalaComoLicitante(ana.pagina, loteId);
-    await abrirSalaComoLicitante(bruno.pagina, loteId);
+    await abrirSalaComoLicitante(helena.pagina, loteId);
+    await abrirSalaComoLicitante(otavio.pagina, loteId);
 
-    await darLancePelaInterface(ana.pagina, '10,00');
-    await esperarLanceRegistrado(ana.pagina, '10,00');
-    await expect(indicadorDePosicao(ana.pagina, 'Você está ganhando este lote.')).toBeVisible();
+    await darLancePelaInterface(helena.pagina, '10,00');
+    await esperarLanceRegistrado(helena.pagina, '10,00');
+    await expect(indicadorDePosicao(helena.pagina, 'Você está ganhando este lote.')).toBeVisible();
 
     // B só lança o mínimo depois de receber o lance de A.
-    await esperarLanceMinimo(bruno.pagina, '11,00');
-    await observarSuperado(ana.pagina);
-    await observarCliques(bruno.pagina);
-    await darLancePelaInterface(bruno.pagina, '11,00');
+    await esperarLanceMinimo(otavio.pagina, '11,00');
+    await observarSuperado(helena.pagina);
+    await observarCliques(otavio.pagina);
+    await darLancePelaInterface(otavio.pagina, '11,00');
 
     await expect
-      .poll(() => lerMarca(ana.pagina, 'superadoEm'), { message: 'A não foi superada' })
+      .poll(() => lerMarca(helena.pagina, 'superadoEm'), { message: 'A não foi superada' })
       .toBeDefined();
-    const superadoEm = await lerMarca(ana.pagina, 'superadoEm');
-    const cliqueEm = await lerMarca(bruno.pagina, 'cliqueEm');
+    const superadoEm = await lerMarca(helena.pagina, 'superadoEm');
+    const cliqueEm = await lerMarca(otavio.pagina, 'cliqueEm');
     expect(superadoEm).toBeDefined();
     expect(cliqueEm).toBeDefined();
     // As duas marcas usam `performance.timeOrigin + performance.now()` (mesmo navegador): o
@@ -115,31 +120,31 @@ test.describe('sala ao vivo com dois navegadores', () => {
     expect(delta).toBeLessThan(LIMITE_DO_SUPERADO_MS);
 
     await expect(
-      indicadorDePosicao(ana.pagina, 'Você foi superado. O lance atual é R$ 11,00.'),
+      indicadorDePosicao(helena.pagina, 'Você foi superado. O lance atual é R$ 11,00.'),
     ).toBeVisible();
-    await expect(indicadorDePosicao(bruno.pagina, 'Você está ganhando este lote.')).toBeVisible();
-    await esperarLanceRegistrado(bruno.pagina, '11,00');
+    await expect(indicadorDePosicao(otavio.pagina, 'Você está ganhando este lote.')).toBeVisible();
+    await esperarLanceRegistrado(otavio.pagina, '11,00');
   });
 
   /** Lote a ~100 s do fim, com A e B na sala (fim por SQL ANTES de abrir a sala). */
   async function abrirDisputaPertoDoFim(indice: number, rotulo: string) {
     const loteId = await criarLote(indice, rotulo);
     await aproximarFimDoLotePorSql(loteId, SEGUNDOS_ATE_O_FIM_NO_ANTI_SNIPING);
-    await abrirSalaComoLicitante(ana.pagina, loteId);
-    await abrirSalaComoLicitante(bruno.pagina, loteId);
+    await abrirSalaComoLicitante(helena.pagina, loteId);
+    await abrirSalaComoLicitante(otavio.pagina, loteId);
     return {
-      restanteDeAna: await segundosRestantes(ana.pagina),
-      restanteDeBruno: await segundosRestantes(bruno.pagina),
+      restanteDeHelena: await segundosRestantes(helena.pagina),
+      restanteDeOtavio: await segundosRestantes(otavio.pagina),
     };
   }
 
   test('fim estendido mostra o selo "Fim estendido" e anuncia o novo fim (specs/012)', async () => {
     await abrirDisputaPertoDoFim(CARTA.seloDoFimEstendido, 'Lote do selo do fim estendido');
 
-    await darLancePelaInterface(ana.pagina, '10,00');
-    await esperarLanceRegistrado(ana.pagina, '10,00');
+    await darLancePelaInterface(helena.pagina, '10,00');
+    await esperarLanceRegistrado(helena.pagina, '10,00');
 
-    for (const { pagina } of [ana, bruno]) {
+    for (const { pagina } of [helena, otavio]) {
       // O selo é "⏱ Fim estendido" (o ícone é um span aria-hidden dentro do mesmo <p>).
       await expect(pagina.getByText(/Fim estendido/)).toBeVisible();
       await expect(
@@ -152,40 +157,40 @@ test.describe('sala ao vivo com dois navegadores', () => {
   // refletir o fim novo) e o resync do `entrar_lote` ao abrir a sala; o selo e o aviso ficam no
   // teste anterior.
   test('lance a menos de 2 min do fim estende o fim e muda a contagem nos dois navegadores', async () => {
-    const { restanteDeAna, restanteDeBruno } = await abrirDisputaPertoDoFim(
+    const { restanteDeHelena, restanteDeOtavio } = await abrirDisputaPertoDoFim(
       CARTA.fimEstendido,
       'Lote do fim estendido',
     );
-    expect(restanteDeAna).toBeGreaterThan(0);
-    expect(restanteDeAna).toBeLessThanOrEqual(SEGUNDOS_ATE_O_FIM_NO_ANTI_SNIPING);
-    expect(restanteDeBruno).toBeGreaterThan(0);
+    expect(restanteDeHelena).toBeGreaterThan(0);
+    expect(restanteDeHelena).toBeLessThanOrEqual(SEGUNDOS_ATE_O_FIM_NO_ANTI_SNIPING);
+    expect(restanteDeOtavio).toBeGreaterThan(0);
 
-    await darLancePelaInterface(ana.pagina, '10,00');
-    await esperarLanceRegistrado(ana.pagina, '10,00');
+    await darLancePelaInterface(helena.pagina, '10,00');
+    await esperarLanceRegistrado(helena.pagina, '10,00');
 
     // O fim novo é agora + 2 min: a contagem passa a ser maior do que era antes do lance, nos dois.
     await expect
-      .poll(() => segundosRestantes(ana.pagina), { message: 'contagem de A não cresceu' })
-      .toBeGreaterThan(restanteDeAna);
+      .poll(() => segundosRestantes(helena.pagina), { message: 'contagem de A não cresceu' })
+      .toBeGreaterThan(restanteDeHelena);
     await expect
-      .poll(() => segundosRestantes(bruno.pagina), { message: 'contagem de B não cresceu' })
-      .toBeGreaterThan(restanteDeBruno);
-    for (const { pagina } of [ana, bruno]) {
+      .poll(() => segundosRestantes(otavio.pagina), { message: 'contagem de B não cresceu' })
+      .toBeGreaterThan(restanteDeOtavio);
+    for (const { pagina } of [helena, otavio]) {
       await expect(pagina.getByText(/^Fim original:/)).toBeVisible();
     }
   });
 
   test('lance abaixo do mínimo mostra a recusa e leva o campo ao mínimo', async () => {
     const loteId = await criarLote(CARTA.abaixoDoMinimo, 'Lote abaixo do mínimo');
-    await abrirSalaComoLicitante(ana.pagina, loteId);
+    await abrirSalaComoLicitante(helena.pagina, loteId);
 
-    await darLancePelaInterface(ana.pagina, '5,00');
+    await darLancePelaInterface(helena.pagina, '5,00');
 
     await expect(
-      recusaDoLance(ana.pagina, 'Seu lance precisa ser de pelo menos R$ 10,00.'),
+      recusaDoLance(helena.pagina, 'Seu lance precisa ser de pelo menos R$ 10,00.'),
     ).toBeVisible();
-    await expect(ana.pagina.getByLabel('Valor do lance (R$)')).toHaveValue('10,00');
-    await expect(ana.pagina.getByText(texto('Nenhum lance ainda.')).first()).toBeVisible();
+    await expect(helena.pagina.getByLabel('Valor do lance (R$)')).toHaveValue('10,00');
+    await expect(helena.pagina.getByText(texto('Nenhum lance ainda.')).first()).toBeVisible();
   });
 
   test('saldo insuficiente mostra a recusa com o saldo disponível e o atalho para a carteira', async ({
@@ -212,16 +217,16 @@ test.describe('sala ao vivo com dois navegadores', () => {
 
   test('o líder que cobre o próprio lance é recusado ("você já está ganhando")', async () => {
     const loteId = await criarLote(CARTA.liderCobrindoOProprioLance, 'Lote do líder');
-    await abrirSalaComoLicitante(ana.pagina, loteId);
+    await abrirSalaComoLicitante(helena.pagina, loteId);
 
-    await darLancePelaInterface(ana.pagina, '10,00');
-    await esperarLanceRegistrado(ana.pagina, '10,00');
-    await esperarLanceMinimo(ana.pagina, '11,00');
-    await darLancePelaInterface(ana.pagina, '11,00');
+    await darLancePelaInterface(helena.pagina, '10,00');
+    await esperarLanceRegistrado(helena.pagina, '10,00');
+    await esperarLanceMinimo(helena.pagina, '11,00');
+    await darLancePelaInterface(helena.pagina, '11,00');
 
-    await expect(recusaDoLance(ana.pagina, 'Você já está ganhando este lote.')).toBeVisible();
-    await expect(indicadorDePosicao(ana.pagina, 'Você está ganhando este lote.')).toBeVisible();
-    await expect(ana.pagina.getByText(texto('Lance atual: R$ 10,00'))).toBeVisible();
+    await expect(recusaDoLance(helena.pagina, 'Você já está ganhando este lote.')).toBeVisible();
+    await expect(indicadorDePosicao(helena.pagina, 'Você está ganhando este lote.')).toBeVisible();
+    await expect(helena.pagina.getByText(texto('Lance atual: R$ 10,00'))).toBeVisible();
   });
 
   test('o leiloeiro não vê o formulário de lance', async () => {
@@ -237,36 +242,36 @@ test.describe('sala ao vivo com dois navegadores', () => {
   test('sem conexão, A perde o lance de B e, ao voltar, o estado converge', async () => {
     const loteId = await criarLote(CARTA.quedaDeRede, 'Lote da queda de rede');
     // Página própria de A (mesma sessão) com o socket sob controle; fechada no fim.
-    const paginaDeAna = await ana.contexto.newPage();
-    const socket = await controlarSocketDaPagina(paginaDeAna);
+    const paginaDeHelena = await helena.contexto.newPage();
+    const socket = await controlarSocketDaPagina(paginaDeHelena);
     try {
-      await abrirSalaComoLicitante(paginaDeAna, loteId);
-      await abrirSalaComoLicitante(bruno.pagina, loteId);
-      await darLancePelaInterface(paginaDeAna, '10,00');
-      await esperarLanceRegistrado(paginaDeAna, '10,00');
-      await esperarLanceMinimo(bruno.pagina, '11,00');
+      await abrirSalaComoLicitante(paginaDeHelena, loteId);
+      await abrirSalaComoLicitante(otavio.pagina, loteId);
+      await darLancePelaInterface(paginaDeHelena, '10,00');
+      await esperarLanceRegistrado(paginaDeHelena, '10,00');
+      await esperarLanceMinimo(otavio.pagina, '11,00');
 
       socket.derrubar();
-      await expect(paginaDeAna.getByText(texto('Reconectando…'))).toBeVisible();
-      await expect(paginaDeAna.getByLabel('Valor do lance (R$)')).toBeDisabled();
+      await expect(paginaDeHelena.getByText(texto('Reconectando…'))).toBeVisible();
+      await expect(paginaDeHelena.getByLabel('Valor do lance (R$)')).toBeDisabled();
 
-      await darLancePelaInterface(bruno.pagina, '11,00');
-      await esperarLanceRegistrado(bruno.pagina, '11,00');
+      await darLancePelaInterface(otavio.pagina, '11,00');
+      await esperarLanceRegistrado(otavio.pagina, '11,00');
       // Enquanto caída, A não sabe do lance de B.
-      await expect(paginaDeAna.getByText(texto('Lance atual: R$ 10,00'))).toBeVisible();
+      await expect(paginaDeHelena.getByText(texto('Lance atual: R$ 10,00'))).toBeVisible();
 
       socket.restaurar();
       // Reconexão com o backoff do socket, depois o resync do `entrar_lote`.
       await expect(
-        indicadorDePosicao(paginaDeAna, 'Você foi superado. O lance atual é R$ 11,00.'),
+        indicadorDePosicao(paginaDeHelena, 'Você foi superado. O lance atual é R$ 11,00.'),
       ).toBeVisible({ timeout: ESPERA_DA_RECONEXAO_MS });
-      await expect(paginaDeAna.getByText(texto('Lance atual: R$ 11,00'))).toBeVisible();
-      await expect(paginaDeAna.getByText(texto('Reconectando…'))).toHaveCount(0);
-      await expect(paginaDeAna.getByLabel('Valor do lance (R$)')).toBeEnabled();
-      await expect(paginaDeAna.getByText(texto('Lance mínimo: R$ 12,00'))).toBeVisible();
+      await expect(paginaDeHelena.getByText(texto('Lance atual: R$ 11,00'))).toBeVisible();
+      await expect(paginaDeHelena.getByText(texto('Reconectando…'))).toHaveCount(0);
+      await expect(paginaDeHelena.getByLabel('Valor do lance (R$)')).toBeEnabled();
+      await expect(paginaDeHelena.getByText(texto('Lance mínimo: R$ 12,00'))).toBeVisible();
     } finally {
       socket.restaurar();
-      await paginaDeAna.close();
+      await paginaDeHelena.close();
     }
   });
 });

@@ -12,8 +12,8 @@ const FORMATO_DA_SENHA_DEMO = /^[A-Za-z0-9_-]{10,128}$/;
 
 const CONTAS_DEMO = [
   { nome: 'Leiloeiro Demo', email: 'leiloeiro@demo.local', papel: 'leiloeiro' },
-  { nome: 'Ana', email: 'ana@demo.local', papel: 'licitante' },
-  { nome: 'Bruno', email: 'bruno@demo.local', papel: 'licitante' },
+  { nome: 'Helena', email: 'helena@demo.local', papel: 'licitante' },
+  { nome: 'Otávio', email: 'otavio@demo.local', papel: 'licitante' },
 ] as const;
 
 async function criarContasDemo(

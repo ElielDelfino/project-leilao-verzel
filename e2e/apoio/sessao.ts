@@ -5,7 +5,7 @@ import { expect, type Page } from '@playwright/test';
 
 export const SENHA_DE_TESTE = 'senha-de-teste-123';
 export const LEILOEIRO_DO_SEED = 'leiloeiro@demo.local';
-export const LICITANTE_DO_SEED = 'ana@demo.local';
+export const LICITANTE_DO_SEED = 'helena@demo.local';
 
 export function emailNovo(): string {
   return `e2e-${randomUUID()}@teste.local`;

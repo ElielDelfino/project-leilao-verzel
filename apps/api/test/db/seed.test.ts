@@ -27,7 +27,7 @@ import { ambienteDeTeste } from './ambiente-de-teste.js';
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, os testes de banco
 // são pulados (ambiente-de-teste.ts).
 const AMBIENTE = ambienteDeTeste(process.env);
-const VALOR_SENSIVEL = 'ana@demo.local';
+const VALOR_SENSIVEL = 'helena@demo.local';
 
 async function esquemaExiste(nome: string): Promise<boolean> {
   const cliente = new pg.Client(AMBIENTE.conexao());

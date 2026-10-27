@@ -123,12 +123,12 @@ export async function executar({ env, saida = console.log, fetchImpl = fetch, in
   const espera = intervaloMs ?? INTERVALO_PADRAO_MS;
 
   const leiloeiro = await entrar(base, origem, fetchImpl, 'leiloeiro@demo.local', senha);
-  const ana = await entrar(base, origem, fetchImpl, 'ana@demo.local', senha);
-  const bruno = await entrar(base, origem, fetchImpl, 'bruno@demo.local', senha);
+  const helena = await entrar(base, origem, fetchImpl, 'helena@demo.local', senha);
+  const otavio = await entrar(base, origem, fetchImpl, 'otavio@demo.local', senha);
 
   for (const [sessao, nome] of [
-    [ana, 'ana'],
-    [bruno, 'bruno'],
+    [helena, 'helena'],
+    [otavio, 'otavio'],
   ]) {
     exigir(
       await sessao.chamar('POST', '/api/carteira/depositos', {
@@ -164,7 +164,7 @@ export async function executar({ env, saida = console.log, fetchImpl = fetch, in
     'criação do lote',
   );
 
-  const licitantes = [ana, bruno];
+  const licitantes = [helena, otavio];
   for (let n = 0; n < QTD_LANCES; n += 1) {
     if (n > 0) await dormir(espera);
     exigir(

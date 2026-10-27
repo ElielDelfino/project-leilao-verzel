@@ -78,7 +78,7 @@ async function idDe(cliente: pg.Client, comando: string, parametros: unknown[]):
 async function criarUsuario(cliente: pg.Client, papel = 'licitante'): Promise<string> {
   return idDe(
     cliente,
-    `insert into users (nome, email, senha_hash, papel) values ('Ana', $1, 'h', $2) returning id`,
+    `insert into users (nome, email, senha_hash, papel) values ('Helena', $1, 'h', $2) returning id`,
     [`${randomUUID()}@teste.local`, papel],
   );
 }

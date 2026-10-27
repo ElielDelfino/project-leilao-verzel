@@ -13,7 +13,7 @@ import { ambienteDeTeste } from './ambiente-de-teste.js';
 // Com LEILAO_TEST_DB definido, falta de variável derruba a coleta; sem ele, estes testes são
 // pulados (ambiente-de-teste.ts).
 const AMBIENTE = ambienteDeTeste(process.env);
-const VALOR_SENSIVEL = 'ana@demo.local';
+const VALOR_SENSIVEL = 'helena@demo.local';
 
 /** SQLSTATE admin_shutdown: conexão encerrada por pg_terminate_backend. */
 const SQLSTATE_CONEXAO_ENCERRADA = '57P01';

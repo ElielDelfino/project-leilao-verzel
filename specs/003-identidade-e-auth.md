@@ -9,7 +9,7 @@ Dois papéis com permissões disjuntas. Sem recuperação de senha (fora de esco
 ## Requisitos
 - RF-01 Cadastro público com nome (2–80 caracteres), e-mail (único, case-insensitive, até 254 caracteres), senha (10–128 caracteres) e papel (`leiloeiro` | `licitante`). O papel é imutável.
 - RF-02 Login (e-mail até 254 caracteres, senha de 1 a 128 caracteres), logout, refresh, `me` e emissão do token CSRF.
-- RF-03 O seed cria `leiloeiro@demo.local`, `ana@demo.local` e `bruno@demo.local` (licitantes) com a senha de `SEED_DEMO_PASSWORD`, publicada no README. Ela não é segredo: valor fixo no `.env` versionado, o mesmo em dev, CI e produção, com 10 a 128 caracteres `A–Z a–z 0–9 - _`. Valor: `leilao-demo-2026` (ADR 0023; origem em specs/014 §Segredos).
+- RF-03 O seed cria `leiloeiro@demo.local`, `helena@demo.local` e `otavio@demo.local` (licitantes) com a senha de `SEED_DEMO_PASSWORD`, publicada no README. Ela não é segredo: valor fixo no `.env` versionado, o mesmo em dev, CI e produção, com 10 a 128 caracteres `A–Z a–z 0–9 - _`. Valor: `leilao-demo-2026` (ADR 0023; origem em specs/014 §Segredos).
 - RNF-01 Senha com hash argon2id pelo `crypto.argon2` assíncrono do Node (≥ 24.7.0), sem dependência nativa (ADR 0027), com os parâmetros OWASP 2025: `memory` 19456 KiB (19 MiB), `passes` 2, `parallelism` 1.
 - RNF-02 Rate limit do login: 5 tentativas/min por IP + e-mail → 429 `MUITAS_TENTATIVAS` com header `Retry-After` (segundos); janela, chave e contagem em §Rate limit.
 - RNF-03 Mensagem de login inválido idêntica para e-mail inexistente e senha errada (`CREDENCIAIS_INVALIDAS`). Para e-mail inexistente, o login verifica a senha contra um hash argon2id dummy (mesmos parâmetros do RNF-01), para que o tempo de resposta seja o mesmo nos dois casos.
