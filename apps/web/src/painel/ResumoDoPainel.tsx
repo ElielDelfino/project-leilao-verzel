@@ -24,7 +24,7 @@ export function ResumoDoPainel() {
           <button
             type="button"
             onClick={() => void consulta.refetch()}
-            className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
+            className="botao-secundario"
           >
             Tentar de novo
           </button>
@@ -34,20 +34,30 @@ export function ResumoDoPainel() {
           Carregando resumo…
         </p>
       ) : (
-        <dl className="mt-2 grid gap-2 sm:grid-cols-3">
-          <div>
-            <dt className="text-texto-suave">Total recebido</dt>
-            <dd className="text-lg font-bold">
+        <dl className="mt-3 grid gap-4 sm:grid-cols-3">
+          <div className="cartao p-5">
+            <dt className="text-xs font-semibold tracking-wider text-texto-suave uppercase">
+              Total recebido
+            </dt>
+            <dd className="mt-2 text-3xl font-extrabold text-destaque tabular-nums">
               {formatarCentavos(consulta.data.totalRecebidoCentavos)}
             </dd>
           </div>
-          <div>
-            <dt className="text-texto-suave">Lotes arrematados</dt>
-            <dd className="text-lg font-bold">{consulta.data.lotesArrematados}</dd>
+          <div className="cartao p-5">
+            <dt className="text-xs font-semibold tracking-wider text-texto-suave uppercase">
+              Lotes arrematados
+            </dt>
+            <dd className="mt-2 text-3xl font-extrabold tabular-nums">
+              {consulta.data.lotesArrematados}
+            </dd>
           </div>
-          <div>
-            <dt className="text-texto-suave">Lotes sem lance</dt>
-            <dd className="text-lg font-bold">{consulta.data.lotesSemLance}</dd>
+          <div className="cartao p-5">
+            <dt className="text-xs font-semibold tracking-wider text-texto-suave uppercase">
+              Lotes sem lance
+            </dt>
+            <dd className="mt-2 text-3xl font-extrabold tabular-nums">
+              {consulta.data.lotesSemLance}
+            </dd>
           </div>
         </dl>
       )}

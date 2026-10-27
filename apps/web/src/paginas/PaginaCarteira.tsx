@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type SubmitEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
-import { depositar, obterExtrato, obterSaldo } from '../api/carteira';
+import { depositar, obterExtrato, obterSaldo, type Lancamento } from '../api/carteira';
+import { efeitoNoSaldo, valorComSinal, type Efeito } from '../carteira/efeitoNoSaldo';
 import { ErroDaApi } from '../api/erro';
 import { Campo } from '../formularios/Campo';
 import { ErroDoServidor } from '../formularios/ErroDoServidor';
@@ -31,17 +32,23 @@ function Saldo() {
   const { totalCentavos, comprometidoCentavos, disponivelCentavos } = consulta.data;
   return (
     <dl className="grid gap-4 sm:grid-cols-3">
-      <div>
-        <dt className="text-texto-suave">Total</dt>
-        <dd className="text-2xl font-bold">{formatarCentavos(totalCentavos)}</dd>
+      <div className="cartao p-5">
+        <dt className="text-sm font-semibold text-texto-suave">Total</dt>
+        <dd className="mt-2 text-3xl font-bold text-texto tabular-nums">
+          {formatarCentavos(totalCentavos)}
+        </dd>
       </div>
-      <div>
-        <dt className="text-texto-suave">Comprometido</dt>
-        <dd className="text-2xl font-bold">{formatarCentavos(comprometidoCentavos)}</dd>
+      <div className="cartao p-5">
+        <dt className="text-sm font-semibold text-texto-suave">Comprometido</dt>
+        <dd className="mt-2 text-3xl font-bold text-aviso tabular-nums">
+          {formatarCentavos(comprometidoCentavos)}
+        </dd>
       </div>
-      <div>
-        <dt className="text-texto-suave">Disponível</dt>
-        <dd className="text-2xl font-bold">{formatarCentavos(disponivelCentavos)}</dd>
+      <div className="cartao border-destaque/40 p-5">
+        <dt className="text-sm font-semibold text-texto-suave">Disponível</dt>
+        <dd className="mt-2 text-3xl font-bold text-sucesso tabular-nums">
+          {formatarCentavos(disponivelCentavos)}
+        </dd>
       </div>
     </dl>
   );
@@ -97,7 +104,7 @@ function Deposito() {
   const incerto = deposito.error instanceof ErroDaApi && deposito.error.resultadoIncerto;
 
   return (
-    <form noValidate onSubmit={enviar} className="flex max-w-md flex-col gap-4">
+    <form noValidate onSubmit={enviar} className="cartao flex max-w-md flex-col gap-4 p-5 sm:p-6">
       <div ref={campo}>
         <Campo
           nome="valor"
@@ -115,17 +122,32 @@ function Deposito() {
       </div>
       {deposito.error ? <ErroDoServidor erro={deposito.error} /> : null}
       {/* Sempre montado: leitores de tela só anunciam mudança em região que já existia. */}
-      <p role="status" className="font-medium">
+      <p role="status" className="font-medium text-sucesso">
         {registrado}
       </p>
-      <button
-        type="submit"
-        disabled={deposito.isPending}
-        className="min-h-11 rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-      >
+      <button type="submit" disabled={deposito.isPending} className="botao-primario">
         {deposito.isPending ? 'Depositando…' : incerto ? 'Tentar de novo' : 'Depositar'}
       </button>
     </form>
+  );
+}
+
+/** Cor + sinal do efeito no saldo: a cor nunca é o único sinal. */
+const COR_DO_EFEITO: Record<Efeito, string> = {
+  entrada: 'text-sucesso',
+  devolucao: 'text-sucesso',
+  saida: 'text-perigo',
+  reserva: 'text-aviso',
+};
+
+function ValorDoLancamento({ tipo, valorCentavos }: Pick<Lancamento, 'tipo' | 'valorCentavos'>) {
+  const { efeito } = efeitoNoSaldo(tipo);
+  return (
+    <td
+      className={`px-3 py-3 text-right font-bold whitespace-nowrap tabular-nums sm:px-4 ${COR_DO_EFEITO[efeito]}`}
+    >
+      {valorComSinal(tipo, valorCentavos)}
+    </td>
   );
 }
 
@@ -142,28 +164,38 @@ function Extrato() {
   const { lancamentos, meta } = consulta.data;
   const ultimaPagina = Math.max(1, Math.ceil(meta.total / meta.limite));
 
-  if (lancamentos.length === 0) return <p>Nenhum lançamento ainda.</p>;
+  if (lancamentos.length === 0) return <p className="aviso">Nenhum lançamento ainda.</p>;
   return (
     <>
-      <table className="w-full text-left">
-        <caption className="sr-only">Lançamentos da carteira</caption>
-        <thead>
-          <tr>
-            <th scope="col">Data</th>
-            <th scope="col">Lançamento</th>
-            <th scope="col">Valor</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lancamentos.map((l) => (
-            <tr key={l.id} className="border-t border-borda">
-              <td>{formatarDataHora(l.criadoEm)}</td>
-              <td>{rotuloDoLancamento(l.tipo)}</td>
-              <td>{formatarCentavos(l.valorCentavos)}</td>
+      <div className="cartao overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <caption className="sr-only">Lançamentos da carteira</caption>
+          <thead className="bg-poco text-xs tracking-wider text-texto-suave uppercase">
+            <tr>
+              <th scope="col" className="px-3 py-3 sm:px-4 font-semibold">
+                Data
+              </th>
+              <th scope="col" className="px-3 py-3 sm:px-4 font-semibold">
+                Lançamento
+              </th>
+              <th scope="col" className="px-3 py-3 sm:px-4 text-right font-semibold">
+                Valor
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {lancamentos.map((l) => (
+              <tr key={l.id} className="border-t border-borda">
+                <td className="px-3 py-3 sm:px-4 text-texto-suave">
+                  {formatarDataHora(l.criadoEm)}
+                </td>
+                <td className="px-3 py-3 sm:px-4">{rotuloDoLancamento(l.tipo)}</td>
+                <ValorDoLancamento tipo={l.tipo} valorCentavos={l.valorCentavos} />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <nav aria-label="Paginação do extrato" className="mt-4 flex items-center gap-4">
         {pagina > 1 ? <Link to={`?pagina=${pagina - 1}`}>Anterior</Link> : null}
         <span>
@@ -179,7 +211,7 @@ export function PaginaCarteira() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <h1 className="titulo-pagina">{TITULO}</h1>
       <section aria-labelledby="saldo-titulo" className="mt-6">
         <h2 id="saldo-titulo" className="sr-only">
           Saldo
@@ -187,13 +219,13 @@ export function PaginaCarteira() {
         <Saldo />
       </section>
       <section aria-labelledby="deposito-titulo" className="mt-8">
-        <h2 id="deposito-titulo" className="mb-4 text-xl font-bold">
+        <h2 id="deposito-titulo" className="mb-4 text-lg font-bold">
           Depositar
         </h2>
         <Deposito />
       </section>
       <section aria-labelledby="extrato-titulo" className="mt-8">
-        <h2 id="extrato-titulo" className="mb-4 text-xl font-bold">
+        <h2 id="extrato-titulo" className="mb-4 text-lg font-bold">
           Extrato
         </h2>
         <Extrato />

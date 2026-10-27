@@ -28,8 +28,8 @@ function ComprovanteDoCodigo({ codigo }: { codigo: string }) {
     return (
       <>
         <title>{tituloDaPagina(TITULO_NAO_ENCONTRADO)}</title>
-        <h1 className="text-3xl font-bold tracking-tight">{TITULO_NAO_ENCONTRADO}</h1>
-        <p className="mt-4">
+        <h1 className="titulo-pagina">{TITULO_NAO_ENCONTRADO}</h1>
+        <p className="aviso mt-4">
           Confira o link: o código do comprovante não existe ou está incorreto.
         </p>
         <p className="mt-8">
@@ -43,14 +43,14 @@ function ComprovanteDoCodigo({ codigo }: { codigo: string }) {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <h1 className="titulo-pagina">{TITULO}</h1>
       {consulta.error && !comprovante ? (
         <div className="mt-4 flex flex-col items-start gap-4">
           <ErroDoServidor erro={consulta.error} />
           <button
             type="button"
             onClick={() => void consulta.refetch()}
-            className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
+            className="botao-secundario"
           >
             Tentar de novo
           </button>

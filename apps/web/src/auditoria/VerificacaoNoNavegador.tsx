@@ -16,7 +16,10 @@ interface Props {
 
 function Alerta({ children }: { children: string }) {
   return (
-    <p role="alert" className="mt-2 rounded-md border border-borda-controle p-3 font-medium">
+    <p
+      role="alert"
+      className="mt-3 rounded-xl border border-aviso bg-aviso/10 p-3 font-semibold text-aviso"
+    >
       {children}
     </p>
   );
@@ -34,9 +37,13 @@ function ResultadoConcluido({
     resultado.veredito === 'integro'
       ? 'Verificação no seu navegador: íntegro. Hashes, assinaturas e selo conferem.'
       : `Verificação no seu navegador: adulterado (${textoDeContagem(resultado.problemas.length)}).`;
+  const classeDoResultado =
+    resultado.veredito === 'integro'
+      ? 'border-sucesso bg-sucesso/10 text-sucesso'
+      : 'border-perigo bg-perigo/10 text-perigo';
   return (
     <>
-      <p className="mt-2 rounded-md border border-borda-controle p-3 font-medium">
+      <p className={`mt-3 rounded-xl border p-3 font-semibold ${classeDoResultado}`}>
         <span aria-hidden="true">{resultado.veredito === 'integro' ? '✔' : '⚠'} </span>
         {resumo}
       </p>
@@ -45,12 +52,14 @@ function ResultadoConcluido({
         problemas={resultado.problemas}
       />
       {concordam ? (
-        <p className="mt-2">O resultado do seu navegador é igual ao do servidor.</p>
+        <p className="mt-3 text-texto-suave">
+          O resultado do seu navegador é igual ao do servidor.
+        </p>
       ) : (
         <Alerta>Atenção: o resultado do seu navegador é diferente do resultado do servidor.</Alerta>
       )}
       {resultado.keyIdsUsados.length > 0 ? (
-        <p className="mt-2 break-words">
+        <p className="mt-3 text-sm break-words text-texto-suave">
           Chave pública usada na verificação: {resultado.keyIdsUsados.join(', ')}. O servidor
           publica esta chave; para ter certeza de que é a verdadeira, compare este código com o
           publicado fora do servidor (README do projeto e página da versão).
@@ -89,8 +98,8 @@ export function VerificacaoNoNavegador({ loteId, auditoria }: Props) {
   }
 
   return (
-    <section aria-labelledby="titulo-verificacao" className="mt-6">
-      <h2 id="titulo-verificacao" className="text-xl font-bold">
+    <section aria-labelledby="titulo-verificacao" className="cartao mt-6 p-5">
+      <h2 id="titulo-verificacao" className="text-lg font-bold">
         Verificação no navegador
       </h2>
       <p className="mt-2">
@@ -98,7 +107,7 @@ export function VerificacaoNoNavegador({ loteId, auditoria }: Props) {
           type="button"
           disabled={verificando}
           onClick={() => void verificar()}
-          className="min-h-11 rounded-md border border-primario bg-primario px-4 font-medium text-texto-sobre-primario disabled:opacity-70"
+          className="botao-primario"
         >
           {verificando ? 'Verificando…' : 'Verificar no meu navegador'}
         </button>

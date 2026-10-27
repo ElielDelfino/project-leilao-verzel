@@ -47,33 +47,37 @@ export function PaginaEntrar() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
-      {state?.aviso === 'SESSAO_EXPIRADA' || state?.aviso === 'NAO_AUTENTICADO' ? (
-        <p role="status" className="mt-4 font-medium">
-          {mensagemDoErro(state.aviso)}
+      <div className="cartao mx-auto mt-4 max-w-md p-6 sm:p-8">
+        <h1 className="titulo-pagina">{TITULO}</h1>
+        {state?.aviso === 'SESSAO_EXPIRADA' || state?.aviso === 'NAO_AUTENTICADO' ? (
+          <p role="status" className="aviso mt-4">
+            {mensagemDoErro(state.aviso)}
+          </p>
+        ) : null}
+        <form noValidate onSubmit={enviar} className="mt-6 flex flex-col gap-4">
+          {login.error ? <ErroDoServidor erro={login.error} /> : null}
+          <Campo
+            nome="email"
+            rotulo="E-mail"
+            tipo="email"
+            autoComplete="email"
+            erro={erros.email}
+          />
+          <Campo
+            nome="senha"
+            rotulo="Senha"
+            tipo="password"
+            autoComplete="current-password"
+            erro={erros.senha}
+          />
+          <button type="submit" disabled={login.isPending} className="botao-primario w-full">
+            {login.isPending ? 'Entrando…' : 'Entrar'}
+          </button>
+        </form>
+        <p className="mt-6 text-center text-texto-suave">
+          Ainda não tem conta? <Link to="/cadastro">Criar conta</Link>
         </p>
-      ) : null}
-      <form noValidate onSubmit={enviar} className="mt-6 flex max-w-md flex-col gap-4">
-        {login.error ? <ErroDoServidor erro={login.error} /> : null}
-        <Campo nome="email" rotulo="E-mail" tipo="email" autoComplete="email" erro={erros.email} />
-        <Campo
-          nome="senha"
-          rotulo="Senha"
-          tipo="password"
-          autoComplete="current-password"
-          erro={erros.senha}
-        />
-        <button
-          type="submit"
-          disabled={login.isPending}
-          className="min-h-11 rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
-          {login.isPending ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
-      <p className="mt-6">
-        Ainda não tem conta? <Link to="/cadastro">Criar conta</Link>
-      </p>
+      </div>
     </>
   );
 }

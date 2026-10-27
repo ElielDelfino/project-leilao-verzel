@@ -85,6 +85,22 @@ describe('/carteira', () => {
     );
   });
 
+  it('extrato mostra se o dinheiro entra ou sai, pelo sinal + ou − e pela cor, sem selo', async () => {
+    simularPreferenciaDoSistema(false);
+    servirCarteira();
+    abrir();
+
+    const tabela = await screen.findByRole('table', { name: 'Lançamentos da carteira' });
+    const [deposito, estorno] = within(tabela).getAllByRole('row').slice(1) as [
+      HTMLElement,
+      HTMLElement,
+    ];
+    expect(within(deposito).getByText('+ R$ 1.234,56')).toBeVisible();
+    expect(within(deposito).queryByText('Entrada')).toBeNull();
+    expect(within(estorno).getByText('+ R$ 50,00')).toBeVisible();
+    expect(within(estorno).queryByText('Devolvido')).toBeNull();
+  });
+
   it.each(['abc', '0', '-1', '1.5'])('?pagina=%s cai na página 1', async (valor) => {
     simularPreferenciaDoSistema(false);
     const paginas = servirCarteira();

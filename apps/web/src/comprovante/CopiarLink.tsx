@@ -26,19 +26,17 @@ export function CopiarLink({ codigo }: { codigo: string }) {
   }
 
   return (
-    <div className="mt-6 flex flex-col items-start gap-3">
-      <button
-        type="button"
-        onClick={() => void copiar()}
-        className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
-      >
+    <div className="mt-6 flex flex-col items-start gap-3 border-t border-borda pt-6">
+      <button type="button" onClick={() => void copiar()} className="botao-secundario">
         Copiar link
       </button>
-      <div role="status">{situacao === 'copiado' ? 'Link copiado.' : null}</div>
+      <div role="status" className="text-sm font-medium text-sucesso">
+        {situacao === 'copiado' ? 'Link copiado.' : null}
+      </div>
       {situacao === 'manual' ? (
         <div className="w-full">
           <p>Não foi possível copiar automaticamente. Copie o link abaixo.</p>
-          <label htmlFor="link-do-comprovante" className="mt-2 block font-medium">
+          <label htmlFor="link-do-comprovante" className="rotulo mt-2 block">
             Link do comprovante
           </label>
           <input
@@ -46,7 +44,7 @@ export function CopiarLink({ codigo }: { codigo: string }) {
             ref={campo}
             readOnly
             value={url}
-            className="mt-1 min-h-11 w-full rounded-md border border-borda-controle px-3"
+            className="controle mt-1"
           />
         </div>
       ) : null}

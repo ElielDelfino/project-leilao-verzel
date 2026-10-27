@@ -49,9 +49,14 @@ export function PaginaPainel() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="titulo-pagina">{TITULO}</h1>
+        <Link to="/painel/lotes/novo" className="botao-primario">
+          Novo lote
+        </Link>
+      </div>
       {avisoDeLoteCriado ? (
-        <p role="status" className="mt-4 rounded-md border border-borda-controle p-3 font-medium">
+        <p role="status" className="aviso mt-4">
           Lote criado.
         </p>
       ) : null}
@@ -60,19 +65,11 @@ export function PaginaPainel() {
           ref={refAviso}
           tabIndex={-1}
           role={aviso.tipo === 'sucesso' ? 'status' : 'alert'}
-          className="mt-4 rounded-md border border-borda-controle p-3 font-medium"
+          className="aviso mt-4"
         >
           {aviso.texto}
         </p>
       ) : null}
-      <p className="mt-4">
-        <Link
-          to="/painel/lotes/novo"
-          className="inline-flex min-h-11 items-center rounded-md border border-primario bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
-          Novo lote
-        </Link>
-      </p>
       <ResumoDoPainel />
       <section className="mt-8">
         <ListaMeusLotes

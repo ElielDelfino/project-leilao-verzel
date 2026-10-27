@@ -17,8 +17,7 @@ interface Props {
   aoCriar: (lote: Lote) => void;
 }
 
-const CLASSE_ENTRADA =
-  'mt-1 block min-h-11 w-full rounded-md border border-borda-controle bg-superficie px-3 text-texto';
+const CLASSE_ENTRADA = 'controle mt-1 block';
 
 /** Passo 2 de specs/012 §Novo lote: dados do lote. */
 export function PassoDados({ carta, aoTrocarCarta, aoRecusarCarta, aoCriar }: Props) {
@@ -71,24 +70,20 @@ export function PassoDados({ carta, aoTrocarCarta, aoRecusarCarta, aoCriar }: Pr
       : null;
 
   return (
-    <>
-      <h2 tabIndex={-1} data-foco-do-passo className="mt-6 text-xl font-semibold">
+    <div className="cartao mt-6 p-6">
+      <h2 tabIndex={-1} data-foco-do-passo className="text-lg font-bold">
         Dados do lote
       </h2>
-      <div className="mt-4 flex items-center gap-4">
+      <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl bg-poco p-4">
         <Miniatura carta={carta} />
-        <p className="font-medium">{carta.nome}</p>
-        <button
-          type="button"
-          onClick={aoTrocarCarta}
-          className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
-        >
+        <p className="font-bold">{carta.nome}</p>
+        <button type="button" onClick={aoTrocarCarta} className="botao-secundario">
           Trocar carta
         </button>
       </div>
       <form noValidate onSubmit={enviar} className="mt-6 flex max-w-xl flex-col gap-4">
         {erroDoServidor ? (
-          <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+          <p role="alert" className="aviso">
             {erroDoServidor}
           </p>
         ) : null}
@@ -101,7 +96,7 @@ export function PassoDados({ carta, aoTrocarCarta, aoRecusarCarta, aoCriar }: Pr
           aoMudar={setTitulo}
         />
         <div>
-          <label htmlFor="descricao" className="font-medium">
+          <label htmlFor="descricao" className="rotulo">
             Descrição (opcional)
           </label>
           <textarea
@@ -139,7 +134,7 @@ export function PassoDados({ carta, aoTrocarCarta, aoRecusarCarta, aoCriar }: Pr
             onChange={(e) => setComecarAgora(e.target.checked)}
             className="h-5 w-5"
           />
-          <label htmlFor="comecarAgora" className="font-medium">
+          <label htmlFor="comecarAgora" className="rotulo">
             Começar agora
           </label>
         </div>
@@ -160,14 +155,10 @@ export function PassoDados({ carta, aoTrocarCarta, aoRecusarCarta, aoCriar }: Pr
           aoMudar={setFim}
           erro={erros.fim}
         />
-        <button
-          type="submit"
-          disabled={criacao.isPending}
-          className="min-h-11 self-start rounded-md bg-primario px-4 font-medium text-texto-sobre-primario"
-        >
+        <button type="submit" disabled={criacao.isPending} className="botao-primario self-start">
           {criacao.isPending ? 'Criando…' : 'Criar lote'}
         </button>
       </form>
-    </>
+    </div>
   );
 }

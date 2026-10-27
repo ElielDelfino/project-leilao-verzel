@@ -59,6 +59,17 @@ const PARES: Array<[string, string, number]> = [
   // Selo e veredito usam border-current: a borda herda cor-texto e cor-texto-suave.
   ['cor-texto', 'cor-fundo', NAO_TEXTO_AA],
   ['cor-texto-suave', 'cor-superficie', NAO_TEXTO_AA],
+  // Protótipo: o "poço" (área da carta e controles) e as cores de estado e de valor.
+  ['cor-texto', 'cor-poco', TEXTO_AA],
+  ['cor-texto-suave', 'cor-poco', TEXTO_AA],
+  ['cor-borda-controle', 'cor-poco', NAO_TEXTO_AA],
+  ...['cor-destaque', 'cor-sucesso', 'cor-perigo', 'cor-aviso'].flatMap(
+    (cor): Array<[string, string, number]> => [
+      [cor, 'cor-fundo', TEXTO_AA],
+      [cor, 'cor-superficie', TEXTO_AA],
+      [cor, 'cor-poco', TEXTO_AA],
+    ],
+  ),
 ];
 
 const TEMAS: Array<[string, Cores]> = [

@@ -84,7 +84,7 @@ export function CancelarLote({ lote, aoConcluir }: Props) {
         type="button"
         aria-label={`Cancelar lote ${lote.titulo}`}
         onClick={() => setAberto(true)}
-        className="min-h-11 rounded-md border border-borda-controle px-3 font-medium"
+        className="botao-perigo"
       >
         Cancelar lote
       </button>
@@ -96,7 +96,7 @@ export function CancelarLote({ lote, aoConcluir }: Props) {
           ocupado={ocupado}
           focoInicial={manter}
         >
-          <p className="mt-2">
+          <p className="mt-2 text-texto-suave">
             {`O lote "${lote.titulo}" será cancelado e não poderá ser reaberto. Se houver um líder, o valor reservado para o lance dele será estornado.`}
           </p>
           {cancelamento.error ? (
@@ -105,12 +105,7 @@ export function CancelarLote({ lote, aoConcluir }: Props) {
             </div>
           ) : null}
           <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={confirmar}
-              disabled={ocupado}
-              className="min-h-11 rounded-md border border-primario bg-primario px-4 font-medium text-texto-sobre-primario disabled:opacity-60"
-            >
+            <button type="button" onClick={confirmar} disabled={ocupado} className="botao-perigo">
               {ocupado ? 'Cancelando…' : 'Confirmar cancelamento'}
             </button>
             <button
@@ -118,7 +113,7 @@ export function CancelarLote({ lote, aoConcluir }: Props) {
               type="button"
               onClick={fechar}
               disabled={ocupado}
-              className="min-h-11 rounded-md border border-borda-controle px-4 font-medium disabled:opacity-60"
+              className="botao-secundario"
             >
               Manter lote
             </button>

@@ -6,17 +6,19 @@ const URL_SCRYFALL = 'https://scryfall.com';
 
 export function Rodape() {
   return (
-    <footer className="border-t border-borda bg-superficie">
-      <div className="mx-auto max-w-6xl space-y-2 px-4 py-6 text-sm text-texto-suave">
-        <p>
-          Casa de Leilões é um conteúdo de fã não oficial permitido sob a{' '}
-          <a href={URL_FAN_CONTENT_POLICY}>política de conteúdo de fãs</a>. Não aprovado/apoiado
-          pela Wizards. Porções do material usado são propriedade da Wizards of the Coast. ©Wizards
-          of the Coast LLC.
-        </p>
-        <p>
-          Dados e imagens das cartas: <a href={URL_SCRYFALL}>Scryfall</a>.
-        </p>
+    <footer className="mt-16 border-t border-borda bg-poco">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+        <div className="max-w-3xl space-y-2 border-l-2 border-primario pl-4 text-sm text-texto-suave">
+          <p>
+            Casa de Leilões é um conteúdo de fã não oficial permitido sob a{' '}
+            <a href={URL_FAN_CONTENT_POLICY}>política de conteúdo de fãs</a>. Não aprovado/apoiado
+            pela Wizards. Porções do material usado são propriedade da Wizards of the Coast.
+            ©Wizards of the Coast LLC.
+          </p>
+          <p>
+            Dados e imagens das cartas: <a href={URL_SCRYFALL}>Scryfall</a>.
+          </p>
+        </div>
       </div>
     </footer>
   );

@@ -4,19 +4,16 @@ interface PaginacaoProps {
   aoIr: (pagina: number) => void;
 }
 
-const CLASSE_BOTAO =
-  'min-h-11 min-w-11 rounded-md border border-borda-controle px-4 font-medium aria-disabled:opacity-60';
-
 /** Paginação de specs/012 §Vitrine: só aparece com mais de uma página; nas pontas não navega. */
 export function Paginacao({ pagina, totalPaginas, aoIr }: PaginacaoProps) {
   if (totalPaginas <= 1) return null;
   const naPrimeira = pagina <= 1;
   const naUltima = pagina >= totalPaginas;
   return (
-    <nav aria-label="Paginação" className="mt-6 flex items-center gap-4">
+    <nav aria-label="Paginação" className="mt-8 flex items-center justify-center gap-4">
       <button
         type="button"
-        className={CLASSE_BOTAO}
+        className="botao-secundario min-w-11"
         aria-disabled={naPrimeira}
         onClick={() => {
           if (!naPrimeira) aoIr(pagina - 1);
@@ -24,12 +21,12 @@ export function Paginacao({ pagina, totalPaginas, aoIr }: PaginacaoProps) {
       >
         Anterior
       </button>
-      <span>
+      <span className="rounded-full border border-borda bg-poco px-4 py-2 text-sm font-semibold tabular-nums">
         Página {pagina} de {totalPaginas}
       </span>
       <button
         type="button"
-        className={CLASSE_BOTAO}
+        className="botao-secundario min-w-11"
         aria-disabled={naUltima}
         onClick={() => {
           if (!naUltima) aoIr(pagina + 1);

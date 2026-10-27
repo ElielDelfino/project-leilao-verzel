@@ -46,10 +46,17 @@ export function rotuloDaPosicao(posicao: PosicaoDoLicitante): string {
   return VISUAIS[posicao].rotulo;
 }
 
+const CORES: Record<PosicaoDoLicitante, string> = {
+  ganhando: 'bg-sucesso/10 text-sucesso',
+  venceu: 'bg-sucesso text-fundo',
+  superado: 'bg-aviso/10 text-aviso',
+  perdeu: 'bg-perigo/10 text-perigo',
+};
+
 export function RotuloDePosicao({ posicao }: { posicao: PosicaoDoLicitante }) {
   const { rotulo, icone } = VISUAIS[posicao];
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-borda-controle px-2 py-1 text-sm font-semibold">
+    <span className={`selo ${CORES[posicao]}`}>
       <svg
         aria-hidden="true"
         viewBox="0 0 24 24"

@@ -34,11 +34,7 @@ export function ListaMeusLotes({ pagina, aoIrParaPagina, aoConcluirCancelamento 
     return (
       <div className="flex flex-col items-start gap-4">
         <ErroDoServidor erro={consulta.error} />
-        <button
-          type="button"
-          onClick={() => void consulta.refetch()}
-          className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
-        >
+        <button type="button" onClick={() => void consulta.refetch()} className="botao-secundario">
           Tentar de novo
         </button>
       </div>

@@ -12,15 +12,19 @@ export function PaginaDeErro() {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <div role="alert">
-        <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
-        <p className="mt-4 text-texto-suave">
-          Não foi possível mostrar esta página. Tente recarregar ou volte à vitrine.
+      <div className="cartao mx-auto mt-8 max-w-lg p-6 text-center sm:p-10">
+        <div role="alert">
+          <h1 className="titulo-pagina">{TITULO}</h1>
+          <p className="mt-4 text-texto-suave">
+            Não foi possível mostrar esta página. Tente recarregar ou volte à vitrine.
+          </p>
+        </div>
+        <p className="mt-6">
+          <Link to="/" className="botao-secundario">
+            Voltar à vitrine
+          </Link>
         </p>
       </div>
-      <p className="mt-4">
-        <Link to="/">Voltar à vitrine</Link>
-      </p>
     </>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, type ReactNode } from 'react';
 import type { PaginaDe } from '../api/arremates';
 import { ErroDoServidor } from '../formularios/ErroDoServidor';
 
-const CLASSE_BOTAO = 'min-h-11 rounded-md border border-borda-controle px-4 font-medium';
+const CLASSE_BOTAO = 'botao-secundario';
 
 interface Props<T> {
   /** Distingue o cache de cada aba. */
@@ -80,12 +80,12 @@ export function ListaPaginada<T>({
         className="flex flex-col gap-4"
       >
         {itens.map((item) => (
-          <li key={chaveDoItem(item)} className="rounded-md border border-borda p-4">
+          <li key={chaveDoItem(item)} className="cartao p-4">
             {renderizar(item)}
           </li>
         ))}
       </ul>
-      <nav aria-label="Paginação" className="mt-6 flex items-center gap-4">
+      <nav aria-label="Paginação" className="mt-6 flex items-center justify-center gap-4">
         {/* aria-disabled (e não disabled) mantém o botão focável: o foco não se perde na borda. */}
         <button
           type="button"
@@ -95,7 +95,7 @@ export function ListaPaginada<T>({
         >
           Anterior
         </button>
-        <span aria-live="polite">
+        <span aria-live="polite" className="text-sm text-texto-suave">
           Página {pagina} de {ultimaPagina}
         </span>
         <button

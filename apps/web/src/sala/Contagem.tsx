@@ -40,14 +40,14 @@ export function Contagem({ fimEm, deslocamentoMs, fimEstendido }: Props) {
   const agora = useAgoraDoServidor(deslocamentoMs);
   const restanteMs = Date.parse(fimEm) - agora;
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {/* Sem aria-live: não anuncia a cada segundo. */}
-      <p role="timer" className="text-2xl font-bold tabular-nums">
+      <p role="timer" className="text-3xl font-extrabold text-destaque tabular-nums">
         {restanteMs > 0 ? `Termina em ${formatarRestante(restanteMs)}` : 'Encerrando…'}
       </p>
-      <p className="text-texto-suave">Fim: {formatarDataHora(fimEm)}</p>
+      <p className="text-sm text-texto-suave">Fim: {formatarDataHora(fimEm)}</p>
       {fimEstendido ? (
-        <p className="rounded-md border-2 border-current px-2 py-1 font-bold">
+        <p className="selo border border-aviso bg-aviso/10 text-aviso">
           <span aria-hidden="true">⏱</span> Fim estendido
         </p>
       ) : null}

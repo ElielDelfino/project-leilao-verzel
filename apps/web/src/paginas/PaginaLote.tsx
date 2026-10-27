@@ -21,11 +21,7 @@ const TEXTO_SALA_CHEIA = 'Esta sala está cheia agora. Tente de novo em instante
 
 function BotaoTentarDeNovo({ aoClicar }: { aoClicar: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={aoClicar}
-      className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
-    >
+    <button type="button" onClick={aoClicar} className="botao-secundario">
       Tentar de novo
     </button>
   );
@@ -62,8 +58,8 @@ function SalaDoLote({ id }: { id: string }) {
       return (
         <>
           <title>{tituloDaPagina(TITULO_NAO_ENCONTRADO)}</title>
-          <h1 className="text-3xl font-bold tracking-tight">{TITULO_NAO_ENCONTRADO}</h1>
-          <p className="mt-4">{mensagemDoErro('NAO_ENCONTRADO')}</p>
+          <h1 className="titulo-pagina">{TITULO_NAO_ENCONTRADO}</h1>
+          <p className="mt-4 text-texto-suave">{mensagemDoErro('NAO_ENCONTRADO')}</p>
           <VoltarAVitrine />
         </>
       );
@@ -75,16 +71,16 @@ function SalaDoLote({ id }: { id: string }) {
     return (
       <>
         <title>{tituloDaPagina('Lote')}</title>
-        <h1 className="text-3xl font-bold tracking-tight">Lote</h1>
+        <h1 className="titulo-pagina">Lote</h1>
         <div className="mt-4 flex flex-col items-start gap-4">
           {salaAoVivo.erro === 'SALA_CHEIA' && !bloqueiaPorConsulta ? (
-            <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+            <p role="alert" className="aviso">
               {TEXTO_SALA_CHEIA}
             </p>
           ) : consulta.error ? (
             <ErroDoServidor erro={consulta.error} />
           ) : (
-            <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+            <p role="alert" className="aviso">
               {mensagemDoErro(
                 salaAoVivo.erro === 'DADOS_INVALIDOS' ? 'DADOS_INVALIDOS' : 'INDISPONIVEL',
               )}
@@ -138,7 +134,7 @@ function RegiaoSemEstado({ sala }: { sala: SalaAoVivo }) {
   }
   return (
     <>
-      <p role="alert" className="rounded-md border border-borda-controle p-3 font-medium">
+      <p role="alert" className="aviso">
         {textoDoErroDaSala(sala.erro)}
       </p>
       <BotaoTentarDeNovo aoClicar={sala.tentarDeNovo} />

@@ -38,11 +38,15 @@ function AuditoriaDoLote({ loteId }: { loteId: string }) {
     return (
       <>
         <title>{tituloDaPagina(TITULO_NAO_ENCONTRADO)}</title>
-        <h1 className="text-3xl font-bold tracking-tight">{TITULO_NAO_ENCONTRADO}</h1>
-        <p className="mt-4">{mensagemDoErro('NAO_ENCONTRADO')}</p>
-        <p className="mt-8">
-          <Link to="/">Voltar à vitrine</Link>
-        </p>
+        <div className="cartao mx-auto mt-8 max-w-lg p-6 text-center sm:p-10">
+          <h1 className="titulo-pagina">{TITULO_NAO_ENCONTRADO}</h1>
+          <p className="mt-4 text-texto-suave">{mensagemDoErro('NAO_ENCONTRADO')}</p>
+          <p className="mt-6">
+            <Link to="/" className="botao-secundario">
+              Voltar à vitrine
+            </Link>
+          </p>
+        </div>
       </>
     );
   }
@@ -51,20 +55,20 @@ function AuditoriaDoLote({ loteId }: { loteId: string }) {
   return (
     <>
       <title>{tituloDaPagina(TITULO)}</title>
-      <h1 className="text-3xl font-bold tracking-tight">{TITULO}</h1>
+      <h1 className="titulo-pagina">{TITULO}</h1>
       {consulta.error && !auditoria ? (
         <div className="mt-4 flex flex-col items-start gap-4">
           <ErroDoServidor erro={consulta.error} />
           <button
             type="button"
             onClick={() => void consulta.refetch()}
-            className="min-h-11 rounded-md border border-borda-controle px-4 font-medium"
+            className="botao-secundario"
           >
             Tentar de novo
           </button>
         </div>
       ) : !auditoria ? (
-        <p role="status" className="mt-4">
+        <p role="status" className="aviso mt-4">
           Carregando auditoria…
         </p>
       ) : (

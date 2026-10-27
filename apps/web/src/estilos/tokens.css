@@ -3,31 +3,48 @@
  * [data-theme="dark"]; o atributo é aplicado por public/tema-inicial.js e src/tema/.
  * Contraste AA verificado em test/estilos/contraste.test.ts: ao mudar uma cor, rode o teste.
  * Só hex de 6 dígitos nas variáveis --cor-*, para o teste conseguir ler.
+ *
+ * Protótipo: paleta com a pegada da OMG TCG (azul-marinho profundo, azul na ação principal,
+ * dourado nos valores). Primário, link e foco são o mesmo azul em cada tema: #1d4ed8 no claro
+ * e #93c5fd no escuro. O escuro é o tema de referência; o claro segue a mesma linha.
  */
 :root {
   color-scheme: light;
-  --cor-fundo: #ffffff;
-  --cor-superficie: #f4f4f5;
-  --cor-texto: #18181b;
-  --cor-texto-suave: #52525b;
-  --cor-borda: #d4d4d8;
-  --cor-borda-controle: #71717a;
+  --cor-fundo: #eef2f9;
+  --cor-superficie: #ffffff;
+  /* Área da imagem da carta e dos controles, um degrau abaixo da superfície. */
+  --cor-poco: #e4eaf5;
+  --cor-texto: #0e1628;
+  --cor-texto-suave: #46526e;
+  --cor-borda: #d3dbea;
+  --cor-borda-controle: #6a7795;
   --cor-primario: #1d4ed8;
   --cor-texto-sobre-primario: #ffffff;
   --cor-link: #1d4ed8;
   --cor-foco: #1d4ed8;
+  /* Valores em dinheiro e contagem regressiva. */
+  --cor-destaque: #8a5200;
+  /* Estados: ao vivo e ganhando; superado e cancelado; agendado e fim estendido. */
+  --cor-sucesso: #047857;
+  --cor-perigo: #be123c;
+  --cor-aviso: #92400e;
 }
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --cor-fundo: #0f1115;
-  --cor-superficie: #1a1d24;
-  --cor-texto: #f4f4f5;
-  --cor-texto-suave: #a1a1aa;
-  --cor-borda: #3f3f46;
-  --cor-borda-controle: #8b8b94;
+  --cor-fundo: #070b18;
+  --cor-superficie: #0f1729;
+  --cor-poco: #0a0e1a;
+  --cor-texto: #e9edf8;
+  --cor-texto-suave: #a9b3cf;
+  --cor-borda: #1e2a4a;
+  --cor-borda-controle: #5d6f9a;
   --cor-primario: #93c5fd;
-  --cor-texto-sobre-primario: #0f1115;
+  --cor-texto-sobre-primario: #04121c;
   --cor-link: #93c5fd;
   --cor-foco: #93c5fd;
+  --cor-destaque: #ffc414;
+  --cor-sucesso: #34d399;
+  --cor-perigo: #fb7185;
+  --cor-aviso: #fbbf24;
 }

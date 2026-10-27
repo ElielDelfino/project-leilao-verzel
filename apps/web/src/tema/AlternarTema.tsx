@@ -1,6 +1,7 @@
 import { useTema } from './useTema';
 
 // Botão de alternância (aria-pressed) com rótulo fixo: o estado vem do "pressionado", não do texto.
+// Visualmente só o ícone, numa pílula redonda; o rótulo continua no nome acessível.
 export function AlternarTema() {
   const { tema, alternar } = useTema();
   const escuro = tema === 'dark';
@@ -10,7 +11,8 @@ export function AlternarTema() {
       type="button"
       aria-pressed={escuro}
       onClick={alternar}
-      className="inline-flex min-h-11 items-center gap-2 rounded-md border border-borda-controle bg-superficie px-3 text-sm font-medium text-texto hover:border-texto"
+      title="Tema escuro"
+      className="grid size-11 place-items-center rounded-full border border-borda bg-poco text-texto transition-colors hover:border-borda-controle"
     >
       <svg
         aria-hidden="true"
@@ -29,7 +31,7 @@ export function AlternarTema() {
           </>
         )}
       </svg>
-      Tema escuro
+      <span className="sr-only">Tema escuro</span>
     </button>
   );
 }
