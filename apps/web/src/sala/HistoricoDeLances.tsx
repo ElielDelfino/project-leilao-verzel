@@ -1,8 +1,9 @@
 import { formatarCentavos } from '../formatacao/dinheiro';
 import type { LanceDoHistorico } from './estadoDaSala';
 
-const formatoHora = new Intl.DateTimeFormat('pt-BR', {
+const formatoDataHora = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
+  dateStyle: 'short',
   timeStyle: 'medium',
 });
 
@@ -38,7 +39,7 @@ export function HistoricoDeLances({ lances, seuPseudonimo, textoSemLances }: Pro
               {lance.pseudonimo}
               {lance.pseudonimo === seuPseudonimo ? ' (você)' : ''} ·{' '}
               {formatarCentavos(lance.valorCentavos)} ·{' '}
-              {formatoHora.format(new Date(lance.criadoEm))}
+              {formatoDataHora.format(new Date(lance.criadoEm))}
             </li>
           ))}
         </ol>
