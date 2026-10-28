@@ -8,7 +8,7 @@
 openapi: 3.1.0
 info:
   title: Casa de Leilões API
-  version: 0.6.0
+  version: 0.6.1
   license: { name: MIT, identifier: MIT }
   description: |
     Envelope (specs/001 §Contratos): sucesso `{ sucesso: true, dados }`; erro
@@ -22,8 +22,16 @@ info:
     inexistente) e o 500 `INDISPONIVEL` de erro não tratado. Tradução de status em código e nível
     de log em specs/001 §Erros. Nenhuma resposta de erro leva stack, SQL, mensagem interna ou a URL
     da requisição.
+
+    Documentação navegável em `GET /api/docs` (Swagger UI) e o contrato em JSON em
+    `GET /api/docs/json` (ADR 0036). Essas duas rotas não fazem parte deste contrato. O servidor é
+    a própria origem da página (`servers` = `/`; os caminhos já começam com `/api`). O "Try it out"
+    vale garantidamente só para as rotas públicas (`security: []`). As autenticadas exigem o cookie
+    de sessão, e as que alteram estado também o header `X-CSRF-Token`, que o Swagger UI não envia:
+    sem ele, a mutação falha com 403 `CSRF_INVALIDO`. Essas rotas ficam só documentadas.
 servers:
-  - url: http://localhost:13000
+  - url: /
+    description: Mesma origem da página (dev ou produção); os caminhos já trazem o prefixo /api.
 tags:
   - name: health
     description: Health checks (ADR 0018).

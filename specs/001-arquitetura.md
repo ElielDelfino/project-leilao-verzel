@@ -71,6 +71,12 @@ E-mail + senha; JWT de acesso (15 min) + refresh rotativo (7 dias) em cookies ht
 
 ## Contratos
 - REST: `apps/api/openapi.yaml` (OpenAPI 3.1). Fonte da verdade da API; o CI falha se as respostas divergirem (specs/013).
+- Documentação navegável (ADR 0036): a API serve `GET /api/docs` (Swagger UI) e `GET /api/docs/json` (o `openapi.yaml` da imagem, convertido para JSON).
+  - **Acesso:** as duas rotas são públicas, abertas também em produção, e não exigem sessão nem CSRF.
+  - **Fora do contrato:** não são operações do `openapi.yaml`, e o validador de contrato de specs/013 não as cobre.
+  - **Sem geração a partir do código:** nada de `@nestjs/swagger` nem decorators. O `openapi.yaml` escrito à mão continua a fonte da verdade. O `@fastify/swagger` só o lê, em modo `static`.
+  - **Assets:** o Swagger UI é self-hosted, com `@fastify/swagger-ui` e `swagger-ui-dist`. Os dois são dependências de produção aprovadas com versão exata (ADR 0036, item 7), sem `yaml` em produção. A API serve os assets sob `/api/docs/`, sem CDN. A configuração fica num arquivo `.js`, sem script nem estilo inline: `url: '/api/docs/json'`, `validatorUrl: null` e `queryConfigEnabled: false`. Assim a página passa pela CSP de specs/014 sem alterá-la.
+  - **"Try it out":** o `servers` do contrato é `/`, porque os `paths` já começam com `/api` (ADR 0036, item 6). O "Try it out" chama a mesma origem da página: o de `GET /api/lotes` chama `<origem>/api/lotes`. Só é garantido nas rotas públicas. As autenticadas exigem cookie de sessão. As que alteram estado exigem também `X-CSRF-Token`, que o Swagger UI não envia, e falham com 403 `CSRF_INVALIDO`. Essas ficam só documentadas.
 - Tempo real: `eventbus/socketio/asyncapi.yaml` (AsyncAPI 3). O `name` de cada mensagem é o nome do evento Socket.IO.
 - Tipos (gerador e scripts chegam com a tarefa 021): `pnpm contracts:gen` gera `packages/contracts/src/gerado/` com o openapi-typescript. Ele lê só OpenAPI, então os tipos do `openapi.yaml` saem direto; para os eventos, o gerador embrulha os payloads das mensagens do `asyncapi.yaml` como `components.schemas` de um OpenAPI 3.1 mínimo (os `$ref` locais continuam válidos) e acrescenta o mapa evento → payload. `apps/api` e `apps/web` importam os tipos de `@leilao/contracts`, sem cópias escritas à mão. Verificação em specs/013 §Contratos.
 - Ponto de atenção: `Centavos` (e `Pseudonimo`, quando as rotas da F3 entrarem) é declarado nos dois contratos; uma mudança num deles vale para o outro.
@@ -123,4 +129,4 @@ infra/  scripts/  specs/  docs/  tasks/ (fora do Git)
 ```
 
 ## Decisões relacionadas
-- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023; 0013 substituída pela 0033), 0022, 0023, 0025, 0026, 0027, 0033
+- decisions/0003 a 0013, 0015 a 0018 (0015 substituída pela 0023; 0013 substituída pela 0033), 0022, 0023, 0025, 0026, 0027, 0033, 0036
