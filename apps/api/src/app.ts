@@ -7,6 +7,7 @@ import { LogController } from 'fastify';
 import type { Logger } from 'pino';
 
 import { responderErroDoRoteador } from './common/erros/erros-do-roteador.js';
+import { registrarDocumentacao } from './docs/index.js';
 
 /** Prefixo de todas as rotas REST (specs/001: REST em /api). */
 export const PREFIXO_DA_API = 'api';
@@ -35,6 +36,8 @@ export function criarAdaptadorFastify(logger: Logger): FastifyAdapter {
   // Cookies (specs/003 §Cookies, ADR 0027): lê `request.cookies` no onRequest e escreve os
   // Set-Cookie. Registrado antes de qualquer rota; o Fastify o carrega no ready().
   void adaptador.getInstance().register(fastifyCookie);
+  // GET /api/docs e /api/docs/json (specs/001 §Contratos, ADR 0036), fora do Nest e do envelope.
+  registrarDocumentacao(adaptador.getInstance(), PREFIXO_DA_API);
   return adaptador;
 }
 

@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",
+    "@fastify/swagger": "9.9.2",
+    "@fastify/swagger-ui": "6.1.2",
     "@leilao/contracts": "workspace:*",
     "@nestjs/common": "12.2.0",
     "@nestjs/core": "12.2.0",
@@ -30,6 +32,7 @@
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "socket.io": "4.8.4",
+    "swagger-ui-dist": "5.34.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
