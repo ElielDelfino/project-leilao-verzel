@@ -38,6 +38,10 @@ Sem staging: a paridade vem do compose. `<host>` nesta spec é `<subdominio>.duc
 
   A soma é de 2 GB, e sobram cerca de 1,8 GB para o sistema, o Docker, o one-shot, o `pg_dump` e o cache de páginas. Só Postgres e API têm swap, de 2× o limite (ADR 0024, item 2). Os limites de CPU são Postgres 1, API 1, Redis 0,5 e Caddy 0,5: tetos, não reservas.
 - Caddy: serve a SPA (`apps/web/dist`, copiada para a imagem do Caddy), faz o proxy de `/api/*` e `/socket.io/*` para a API e manda os headers de segurança. A CSP tem `img-src 'self' data: https://cards.scryfall.io` (ADR 0029, que complementa a 0024), e há HSTS, nosniff e frame-ancestors none. Só HTTP/1.1 e HTTP/2: o HTTP/3 fica desligado e o 443/udp não é publicado (ADR 0024).
+- Documentação da API (ADR 0036, specs/001 §Contratos):
+  - `/api/docs` e `/api/docs/json` passam pelo mesmo `handle /api/*` do Caddy, sem rota, header nem exceção próprios;
+  - a CSP dessas respostas é a mesma do resto do site (ADR 0024 e 0029 intactas), e o Swagger UI carrega só arquivos da própria origem;
+  - a imagem da API inclui o `apps/api/openapi.yaml`, fonte de `/api/docs/json`, e os assets do Swagger UI na versão exata do lockfile, nunca de CDN.
 - **Nunca rodam na VPS:**
   - build de imagem;
   - o k6 (specs/013), que roda de fora;
@@ -233,8 +237,13 @@ A API, o runner de migrations (`pnpm db:migrate`) e o seed (`pnpm db:seed`) leem
 - [ ] Memória: com os limites de §Produção, depois do k6 (rodado de fora da VPS), nenhum container tem `State.OOMKilled` verdadeiro.
 - [ ] Backup manual (ADR 0034): o runbook traz o comando de §Backup; antes da entrega, ele roda uma vez na VPS, o dump fica com modo 600 e `pg_restore --list` o lê com saída 0.
 - [ ] O README avisa que o k6 roda de fora da VPS e que `pnpm demo:adulterar` nunca roda em produção.
+- [ ] Documentação da API (ADR 0036), sem cookie, em produção:
+  - `GET https://<host>/api/docs` responde 200 `text/html`;
+  - `GET https://<host>/api/docs/json` responde 200 `application/json`, e o corpo é igual ao `openapi.yaml` da imagem lido como YAML;
+  - o header `Content-Security-Policy` de `/api/docs` é idêntico ao de `/`.
+- [ ] Ao carregar `https://<host>/api/docs` no navegador (teste com Playwright), não há nenhum evento `securitypolicyviolation` e nenhuma requisição para fora da origem. O "Try it out" de `GET /api/lotes` chama `https://<host>/api/lotes` e recebe 200 (`servers` = `/`, ADR 0036, item 6).
 
 Fora do escopo da entrega (ADR 0034), sem critério de aceite: backup diário com 7 cópias, cópia externa cifrada com `age`, teste de restauração no CI, restauração real registrada no runbook e alerta do UptimeRobot.
 
 ## Decisões relacionadas
-- decisions/0013-deploy-gcp-e2-micro.md (substituída pela 0033), 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md (parcialmente substituída pela 0033 e pela 0034), 0020-host-publico-e-uptime.md (substituída pela 0033), 0023-segredos-em-arquivo-e-formatos.md, 0024-limites-do-caddy-swap-e-http3.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md, 0033-producao-em-vps-hostinger.md (parcialmente substituída pela 0034), 0034-backup-e-uptime-fora-da-entrega.md
+- decisions/0013-deploy-gcp-e2-micro.md (substituída pela 0033), 0015-segredos-gcp-secret-manager.md (substituída pela 0023), 0017-ci-cd-github-actions.md, 0018-observabilidade-e-backup.md (parcialmente substituída pela 0033 e pela 0034), 0020-host-publico-e-uptime.md (substituída pela 0033), 0023-segredos-em-arquivo-e-formatos.md, 0024-limites-do-caddy-swap-e-http3.md, 0026-papeis-do-postgres.md, 0027-complementos-da-f1.md, 0033-producao-em-vps-hostinger.md (parcialmente substituída pela 0034), 0034-backup-e-uptime-fora-da-entrega.md, 0036-swagger-ui-em-api-docs.md
