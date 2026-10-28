@@ -66,7 +66,7 @@ Postgres fica em `127.0.0.1:15432` e Redis em `127.0.0.1:16379`. Se `db:migrate`
 ```
  navegador (SPA React) ── REST /api ──►  API NestJS (monolito modular) ──► Postgres 18
         ▲                                      │  ▲                        (dados, imagens)
-        └──── Socket.IO /leilao ◄──────────────┘  └──► Redis 8 (adapter Socket.IO, rate limit, cache)
+        └──── Socket.IO /leilao ◄──────────────┘  └──► Redis 8
                                                 └──► Scryfall (só busca e snapshot na criação do lote)
 ```
 
@@ -88,6 +88,48 @@ Postgres fica em `127.0.0.1:15432` e Redis em `127.0.0.1:16379`. Se `db:migrate`
 - **SPA** React 19, Vite, TanStack Query e Tailwind, em pt-BR, dark mode e WCAG 2.2 AA ([specs/012](specs/012-frontend-telas.md)).
 - **Contratos** em [`openapi.yaml`](apps/api/openapi.yaml) e [`asyncapi.yaml`](eventbus/socketio/asyncapi.yaml); os tipos de `@leilao/contracts` são gerados deles.
 - Dinheiro sempre em **centavos inteiros**, nunca float.
+
+## Decisões de stack
+
+Escolhi uma stack de produção porque o produto tem requisitos que a pedem: lance atômico, tempo real em menos de 1 s, histórico que não pode ser adulterado, HTTPS e custo fixo. Entendo que um serviço só está pronto quando pode ser testado, publicado e revertido com segurança, e por isso a infraestrutura faz parte do projeto, não é um acessório dele. Cada item abaixo tem uma razão registrada em ADR e um custo que eu assumo.
+
+| Escolha | Requisito que ela atende | Custo ou limite que eu assumo |
+|---|---|---|
+| **NestJS sobre Fastify** | Módulos com fronteiras impostas pelo ESLint, para que um módulo nunca leia a tabela de outro ([ADR 0003](specs/decisions/0003-monolito-modular.md), [0011](specs/decisions/0011-stack-backend-frontend.md)) | Mais estrutura e cerimônia que um Express enxuto |
+| **Postgres 18** | Aceitar um lance é uma transação com `FOR UPDATE` no lote; tabelas append-only protegidas por trigger | Um banco a operar, migrar e fazer backup |
+| **UUIDv7** (`uuidv7()` nativo) | IDs gerados no banco e ordenados por tempo ([ADR 0001](specs/decisions/0001-decisoes-iniciais.md)) | O ID revela o instante de criação |
+| **Socket.IO** (só websocket) | Lance aceito aparece nos outros clientes em menos de 1 s (RNF-03) | Conexão longa: exige processo sempre ligado |
+| **Redis 8** | Rate limit, token bucket e cache de 24 h da Scryfall ([ADR 0010](specs/decisions/0010-redis.md)) | Sem persistência; dinheiro e lance nunca moram nele |
+| **Docker Compose + Caddy com TLS** | HTTPS obrigatório (cookies `Secure`, `wss`) e mesma imagem em dev e produção ([ADR 0033](specs/decisions/0033-producao-em-vps-hostinger.md)) | Mais peças no servidor; só o Caddy publica portas |
+| **CI/CD no GitHub Actions** | Imagem por SHA no GHCR, deploy por SSH restrito, health check e **rollback automático** se o `/ready` falhar | Pipeline a manter; o rollback só vale porque foi testado |
+| **Vitest e Playwright** | Toda mudança vem com o teste que a cobre, e os fluxos críticos têm e2e ([specs/013](specs/013-verificacao-e-testes.md)) | Testes lentos pesam, por isso há `verify:quick` e `verify:full` |
+| **Swagger UI** em `/api/docs` | Contrato navegável, lido do mesmo `openapi.yaml` que o CI valida ([ADR 0036](specs/decisions/0036-swagger-ui-em-api-docs.md)) | Dependência de terceiros na mesma origem dos cookies; mitigada com versão exata e CSP intacta |
+
+### Por que Redis, tecnicamente
+O Redis aqui guarda só **estado compartilhado e efêmero**; todo estado durável (dinheiro, lances, histórico) mora no Postgres. Ele entra em quatro pontos, e em cada um a técnica foi escolhida pelo que ela garante ([ADR 0010](specs/decisions/0010-redis.md), [cache/redis](cache/redis/README.md)):
+
+| Uso | Técnica | O que ela garante | Se o Redis cair |
+|---|---|---|---|
+| **Rate limit** (login, cadastro, lance, auditoria, comprovante) | Janela fixa: `INCR` + `EXPIRE NX` num `MULTI` | A contagem e a expiração são atômicas; o TTL restante vira o `Retry-After` | Login, cadastro e lance **falham fechados** (500). Auditoria e comprovante **falham abertos**, porque a prova pública não pode sumir por uma queda de infraestrutura |
+| **Limite de chamadas à Scryfall** (2/s na busca, 10/s nas demais) | Reserva de horário (GCRA, um token bucket de capacidade 1) num **script Lua** que usa o relógio do próprio Redis | Duas chamadas nunca começam a menos de um intervalo uma da outra, mesmo com vários processos, sem depender de relógios diferentes | 503 `CATALOGO_INDISPONIVEL` **sem chamar a Scryfall**: sem o bucket, o limite não é garantido |
+| **Circuito aberto** da Scryfall | Chave com TTL de 30 s | O circuito fecha sozinho quando a chave expira, sem relógio nem job próprio | O catálogo já responde 503 antes, pelo bucket; o resto do site não depende da Scryfall (RNF-04) |
+| **Cache** de busca e de carta | Chave com TTL de 24 h | Menos chamadas ao upstream, expiração nativa | Cache perdido; a vitrine e as salas usam o snapshot do banco |
+
+Três decisões de configuração mostram a intenção: `maxmemory` fixo com `volatile-lru` (o Redis descarta só chaves com TTL e nunca cresce sem limite), **sem persistência** (`--save ''` e `appendonly no`, porque tudo ali é recriável) e a rede interna do Compose, sem porta publicada.
+
+**Por que não o Postgres para isso?** Seria possível, mas cada requisição passaria a gerar uma escrita no mesmo banco onde o lance trava o lote com `FOR UPDATE`. Prefiro que o controle de abuso não dispute o mesmo recurso do caminho crítico. Esse é um raciocínio de projeto, não uma medição que eu tenha feito.
+
+**Por que não memória do processo?** Com uma instância isso funcionaria, e eu reconheço. O que o Redis acrescenta é o estado fora do processo da API (sobrevive a um reinício dela), a atomicidade de `MULTI` e Lua, o TTL nativo e o caminho para mais de um processo sem reescrever o limite.
+
+### Pensando em escala horizontal (e o que o adapter do Socket.IO tem a ver)
+Eu sei que o **adapter Redis do Socket.IO não é necessário** na entrega: hoje há uma única instância da API, e a [ADR 0010](specs/decisions/0010-redis.md) diz isso. Quem conecta o navegador à sala ao vivo é o próprio Socket.IO, por WebSocket direto na API; o Redis só repassa mensagens **entre instâncias**. Eu o deixei porque pensei como DevOps: se a API passasse a rodar em várias réplicas atrás de um balanceador (por exemplo, um serviço do ECS com auto scaling atrás de um Application Load Balancer, que aceita WebSocket nativamente), um evento de lance emitido numa instância precisa chegar também aos clientes conectados nas outras. Sem o adapter, ele alcançaria só os clientes daquela instância.
+
+O adapter não está sozinho nessa intenção; o desenho tem outras peças que já pensam em mais de uma instância:
+- **Encerramento seguro com N instâncias** (RNF-02 da [spec 010](specs/010-encerramento-e-liquidacao.md)): cada instância tem seu agendador, mas o lote é travado com `FOR UPDATE SKIP LOCKED`, então ele não é liquidado duas vezes.
+- **Rate limit e limite da Scryfall no Redis**, não na memória do processo: o contador e o bucket valem para todas as instâncias juntas.
+- **Só transporte websocket** ([spec 009](specs/009-tempo-real.md)), que dispensa sticky session no balanceador.
+
+O que eu **não** fiz: testar a aplicação com mais de uma instância, nem tratar os limites de conexão por sala (50 por lote e 200 no total), que hoje são contados na memória de cada instância. Por isso trato a escala horizontal como uma preparação barata, não como uma capacidade comprovada. Também não é um requisito desta entrega; se o prazo apertasse, o adapter seria o primeiro a sair, e a API já cai sozinha para o adapter em memória quando o Redis não está de pé. O lance atômico e a hash chain não são negociáveis.
 
 ## Técnica antiadulteração
 
@@ -175,6 +217,7 @@ Cobertura mínima de 80% nos módulos de domínio. O CI (GitHub Actions) roda `v
 
 VPS Hostinger (1 vCPU, 4 GB, Ubuntu 24.04) em `https://teste-verzel.duckdns.org`, TLS do Let's Encrypt pelo Caddy, SSH só por chave e firewall com 22, 80 e 443 ([specs/014](specs/014-deploy-e-operacao.md)).
 
+- Documentação da API (Swagger UI) em [`/api/docs`](https://teste-verzel.duckdns.org/api/docs); o contrato em JSON vem de `/api/docs/json` ([ADR 0036](specs/decisions/0036-swagger-ui-em-api-docs.md)).
 - Push na `main` com CI verde: imagens construídas no GitHub Actions, publicadas no GHCR e implantadas por SSH com comando forçado; health check falho volta à versão anterior ([docs/deploy.md](docs/deploy.md)).
 - Os seis segredos existem só na VPS, em arquivo, e o deploy confere que nenhum aparece nas saídas do Docker. Runbook: [docs/operacao.md](docs/operacao.md).
 - Fora da entrega ([ADR 0034](specs/decisions/0034-backup-e-uptime-fora-da-entrega.md)): backup agendado e monitor de uptime; há um `pg_dump` manual. Custo: só o preço fixo da VPS.
