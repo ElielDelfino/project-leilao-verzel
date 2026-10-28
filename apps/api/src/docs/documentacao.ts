@@ -29,6 +29,10 @@ const PREFIXO_DA_DOCUMENTACAO = '/docs';
  * nunca inline. O `url` é fixado pelo plugin como ./json relativo à página, isto é, /api/docs/json.
  * `queryConfigEnabled` é opção do Swagger UI (padrão false no bundle) que os tipos do plugin não
  * declaram; fica explícito para a página ignorar `?url=` e `?configUrl=`.
+ * `layout: 'BaseLayout'` (o padrão do Swagger UI) substitui o `StandaloneLayout` que o plugin põe por
+ * padrão: o topbar deste último desenha um logo SVG com `<style>` inline, que a CSP do Caddy
+ * (`style-src 'self'`) bloqueia (tarefa 147). Sem topbar, some também a caixa "Explore", que
+ * carregaria outra URL.
  */
 const CONFIG_DO_SWAGGER_UI: FastifySwaggerUiConfigOptions & { readonly queryConfigEnabled: false } =
   {
@@ -36,6 +40,7 @@ const CONFIG_DO_SWAGGER_UI: FastifySwaggerUiConfigOptions & { readonly queryConf
     queryConfigEnabled: false,
     persistAuthorization: false,
     deepLinking: false,
+    layout: 'BaseLayout',
   };
 
 /**

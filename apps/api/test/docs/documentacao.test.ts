@@ -102,8 +102,20 @@ describe('GET /api/docs (Swagger UI, ADR 0036)', () => {
       queryConfigEnabled: false,
       persistAuthorization: false,
       deepLinking: false,
+      layout: 'BaseLayout',
     });
     expect(resposta.body).not.toContain('petstore');
+  });
+
+  // Tarefa 147: o StandaloneLayout (padrão do plugin) desenha o topbar, cujo logo SVG traz um
+  // <style> inline que a CSP do Caddy (style-src 'self') bloqueia. O BaseLayout não tem topbar.
+  it('usa o BaseLayout, sem o topbar cujo logo injeta <style> inline bloqueado pela CSP', async () => {
+    const resposta = await app.inject({
+      method: 'GET',
+      url: '/api/docs/static/swagger-initializer.js',
+    });
+
+    expect(configDoInicializador(resposta.body)['layout']).toBe('BaseLayout');
   });
 });
 
