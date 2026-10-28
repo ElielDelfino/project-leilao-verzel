@@ -61,7 +61,7 @@ describe('GET /api/docs (Swagger UI, ADR 0036)', () => {
       expect(src).toMatch(/^\/api\/docs\/static\/[\w.-]+\.js$/);
     }
     // Todo <script> tem src e corpo vazio (só espaço): nada inline.
-    for (const [, corpo] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    for (const [, corpo] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
       expect(corpo?.trim()).toBe('');
     }
     expect(html).not.toMatch(/<style\b/i);
