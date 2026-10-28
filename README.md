@@ -9,7 +9,6 @@ Casa de Leilões online de cartas **Magic: The Gathering** (dados e imagens da [
 
 ## Avisos
 
-- **O k6 roda de fora da VPS**, da minha máquina ou de um runner do CI contra o endereço público; nunca no servidor de produção ([specs/014](specs/014-deploy-e-operacao.md) §Produção, [ADR 0033](specs/decisions/0033-producao-em-vps-hostinger.md)).
 - **`pnpm demo:adulterar` nunca roda em produção.** Ele altera um lance direto no banco para mostrar a auditoria acusando "adulterado". Recusa `NODE_ENV=production`, aceita só banco em loopback e exige `DEMO_ADULTERAR=1`; a VPS nem tem Node ou o repositório ([specs/008](specs/008-integridade-do-historico.md) §Interfaces).
 - A senha das contas de demonstração é pública de propósito. Os seis segredos reais vivem só na VPS ([docs/deploy.md](docs/deploy.md) §Segredos em produção).
 
@@ -199,7 +198,7 @@ Soma 1 centavo ao lance `<n>` direto no banco, sem refazer hash nem assinatura, 
 - Cadastro com e-mail repetido responde 409 (risco aceito, dados de demonstração).
 - Websocket com até 50 conexões por lote e 200 no total; a sala se ressincroniza sozinha se perder um evento ([specs/009](specs/009-tempo-real.md)).
 
-## Testes e carga
+## Testes
 
 | Nível | Ferramenta | Escopo |
 |---|---|---|
@@ -207,11 +206,8 @@ Soma 1 centavo ao lance `<n>` direto no banco, sem refazer hash nem assinatura, 
 | Integração | Vitest + Postgres e Redis reais | rotas, 50 lances concorrentes, job de encerramento, triggers, reconciliação |
 | Contrato | Vitest + OpenAPI/AsyncAPI | toda resposta de integração validada contra os contratos |
 | E2E | Playwright + axe-core | cadastro, depósito, lance → superado, comprovante, adulteração, cancelamento, acessibilidade |
-| Carga | k6 | 50 VUs num lote + 200 sockets |
 
-Cobertura mínima de 80% nos módulos de domínio. O CI (GitHub Actions) roda `verify:full --e2e`, `pnpm audit`, gitleaks e CodeQL ([specs/013](specs/013-verificacao-e-testes.md)). Metas de carga ([ADR 0014](specs/decisions/0014-rnfs-de-demo.md)): p95 do lance abaixo de 300 ms e entrega aos outros clientes em menos de 1 s.
-
-> **PENDENTE (tarefa 142 preenche):** resultados do k6 (comando, p95 do lance, tempo de entrega, erros e 429, data e alvo). Fonte: `load/RESULTADOS.md`.
+Cobertura mínima de 80% nos módulos de domínio. O CI (GitHub Actions) roda `verify:full --e2e`, `pnpm audit`, gitleaks e CodeQL ([specs/013](specs/013-verificacao-e-testes.md)).
 
 ## Deploy e operação
 
