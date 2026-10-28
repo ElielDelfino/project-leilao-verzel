@@ -55,6 +55,12 @@ WORKDIR     /app/apps/api
 COPY        --from=build  /out/package.json  ./package.json
 COPY        --from=build  /out/node_modules  ./node_modules
 COPY        --from=build  /out/dist          ./dist
+# Contrato servido em /api/docs/json (ADR 0036 item 5, specs/014 §Produção). O @fastify/swagger o
+# lê de dist/docs/ dois níveis acima (CAMINHO_DO_CONTRATO em apps/api/src/docs/documentacao.ts),
+# isto é, /app/apps/api/openapi.yaml; sem ele a API não sobe. Vem do código copiado no build, não
+# do /out do pnpm deploy (que só leva o que passa pelo packlist). Origem sem curinga: se o arquivo
+# sumir, o COPY falha e nenhuma imagem sai sem o contrato.
+COPY        --from=build  /repo/apps/api/openapi.yaml  ./openapi.yaml
 # SQL e meta/_journal.json lidos pelo migrator do Drizzle (forward-only, ADR 0001).
 COPY        --from=migrations  /  /app/database/postgres/migrations/
 ENV         NODE_ENV=production \
