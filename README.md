@@ -4,6 +4,7 @@ Casa de Leilões online de cartas **Magic: The Gathering** (dados e imagens da [
 
 - **Deploy público:** <https://teste-verzel.duckdns.org>
 - **Repositório:** <https://github.com/ElielDelfino/project-leilao-verzel>
+- **Documentação da API (Swagger UI):** <https://teste-verzel.duckdns.org/api/docs>
 - **Especificações (fonte da verdade):** [`specs/`](specs/INDEX.md) · decisões em [`specs/decisions/`](specs/decisions/HISTORY.md)
 - **Licença:** MIT ([LICENSE](LICENSE)) · [CHANGELOG.md](CHANGELOG.md)
 
